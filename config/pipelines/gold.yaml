@@ -1,0 +1,28 @@
+pipeline:
+  class: gold
+
+reader:
+  type: parquet
+  path: SILVER_PATH
+  schema: silver_schema
+
+writer:
+  type: postgres
+  url: jdbc:postgresql://localhost:5432/mydb
+  table: vehicle_gold
+  properties:
+    user: postgres
+    password: postgres
+    driver: org.postgresql.Driver
+
+transformer:
+  type: gold
+
+validator:
+  type: noop
+
+metrics:
+  type: default
+
+dlq:
+  type: noop

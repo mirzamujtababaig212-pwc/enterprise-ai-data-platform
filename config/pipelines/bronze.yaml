@@ -1,0 +1,50 @@
+pipeline:
+  class: bronze
+
+reader:
+  type: kafka
+  options: kafka
+
+writer:
+  type: delta
+  table: BRONZE_TABLE
+  checkpoint: BRONZE_CHECKPOINT
+  mode: append
+  output_mode: append
+
+transformer:
+  type: bronze
+
+validator:
+  type: composite
+  schema:
+    - vehicle_id
+    - event_time
+    - latitude
+    - longitude
+    - speed
+    - rpm
+    - fuel_level
+    - battery
+    - engine_temperature
+    - gear
+    - topic
+    - partition
+    - offset
+    - timestamp
+    - ingestion_timestamp
+    - ingestion_time
+
+  required:
+    - vehicle_id
+
+  duplicate_keys:
+    - vehicle_id
+    - event_time
+
+metrics:
+  type: default
+
+dlq:
+  type: delta
+  table: BRONZE_DLQ_TABLE

@@ -1,0 +1,27 @@
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: vehicle-telemetry
+  starting_offsets: earliest
+
+storage:
+  bronze:
+    target: delta
+    table: bronze.vehicle_events
+  silver:
+    target: delta
+    table: silver.vehicle_events
+  gold:
+    target: postgres
+    table: vehicle_metrics
+
+checkpoints:
+  bronze: spark/checkpoints/bronze
+  silver: spark/checkpoints/silver
+  gold: spark/checkpoints/gold
+
+postgres:
+  host: localhost
+  port: 5432
+  database: vehicle_platform
+  table: vehicle_gold
+  username: postgres

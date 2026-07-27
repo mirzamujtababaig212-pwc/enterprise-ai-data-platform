@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  enterprise-ai-platform:
+    build: .
+    container_name: enterprise-ai-platform
+    volumes:
+      - .:/app
+    environment:
+      PYTHONPATH: /app
+    command: pytest

@@ -1,0 +1,41 @@
+import pytest
+
+from common.factories.transformer_factory import TransformerFactory
+from common.transformers.bronze_transformer import BronzeTransformer
+from common.transformers.gold_transformer import GoldTransformer
+from common.transformers.silver_transformer import SilverTransformer
+
+
+def test_create_bronze():
+
+    config = {"transformer": {"type": "bronze"}}
+
+    transformer = TransformerFactory.create(config)
+
+    assert isinstance(transformer, BronzeTransformer)
+
+
+def test_create_silver():
+
+    config = {"transformer": {"type": "silver"}}
+
+    transformer = TransformerFactory.create(config)
+
+    assert isinstance(transformer, SilverTransformer)
+
+
+def test_create_gold():
+
+    config = {"transformer": {"type": "gold"}}
+
+    transformer = TransformerFactory.create(config)
+
+    assert isinstance(transformer, GoldTransformer)
+
+
+def test_invalid_transformer():
+
+    config = {"transformer": {"type": "dummy"}}
+
+    with pytest.raises(ValueError):
+        TransformerFactory.create(config)

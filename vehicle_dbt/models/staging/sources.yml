@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: vehicle_platform
+    database: vehicle_platform
+    schema: public
+
+    tables:
+      - name: vehicle_gold

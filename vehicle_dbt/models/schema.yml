@@ -1,0 +1,39 @@
+version: 2
+
+models:
+
+  - name: stg_vehicle_gold
+    columns:
+      - name: vehicle_id
+        tests:
+          - not_null
+
+  - name: dim_vehicle
+    description: "Vehicle dimension"
+    columns:
+      - name: vehicle_id
+        description: "Unique Vehicle"
+        tests:
+          - not_null
+      - name: battery_health
+        description: "Battery Health Category"
+      - name: fuel_health
+        description: "Fuel Status"
+        tests:
+          - not_null
+
+  - name: fct_vehicle_metrics
+    description: "Vehicle metrics fact table"
+    columns:
+      - name: avg_speed
+        description: "Average speed"
+      - name: vehicle_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_vehicle')
+              field: vehicle_id
+      - name: total_events
+        description: "Number of telemetry events"
+        tests:
+          - not_null

@@ -1,0 +1,27 @@
+pipeline:
+  class: silver
+
+reader:
+  type: parquet
+  path: BRONZE_PATH
+  schema: bronze_schema
+
+writer:
+  type: delta
+  table: SILVER_TABLE
+  checkpoint: SILVER_CHECKPOINT
+  mode: append
+  output_mode: append
+
+transformer:
+  type: silver
+
+validator:
+  type: composite
+
+metrics:
+  type: default
+
+dlq:
+  type: delta
+  table: SILVER_DLQ_TABLE
