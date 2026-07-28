@@ -1,0 +1,12 @@
+environment: qa
+
+spark:
+  master: spark://spark-master:7077
+
+postgres:
+  host: postgres
+  port: 5432
+  database: vehicle_db
+
+kafka:
+  bootstrap_servers: kafka:9092

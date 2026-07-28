@@ -1,0 +1,10 @@
+environment: prod
+
+spark:
+  master: yarn
+
+postgres:
+  host: production-db
+
+kafka:
+  bootstrap_servers: kafka-prod:9092
