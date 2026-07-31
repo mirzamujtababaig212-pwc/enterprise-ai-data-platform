@@ -2,9 +2,6 @@ import time
 
 from common.logging.logger import get_logger
 from common.validation.base_validator import BaseValidator
-from common.validation.rules.duplicate_rule import DuplicateRule
-from common.validation.rules.not_null_rule import NotNullRule
-from common.validation.rules.regex_rule import RegexRule
 
 logger = get_logger(__name__)
 

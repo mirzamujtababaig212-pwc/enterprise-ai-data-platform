@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col, lit
+from pyspark.sql.functions import col
 
 from common.validation.base_validator import BaseValidator
 

@@ -1,5 +1,4 @@
 from pyspark.sql import Row
-from pyspark.sql.types import *
 from pyspark.sql.types import StringType, StructField, StructType
 
 from common.transformers.bronze_transformer import BronzeTransformer

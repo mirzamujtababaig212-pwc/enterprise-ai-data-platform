@@ -1,4 +1,3 @@
-from pyspark.sql.types import *
 from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 from common.readers.parquet_reader import ParquetReader

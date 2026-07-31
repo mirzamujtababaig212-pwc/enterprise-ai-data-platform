@@ -1,5 +1,11 @@
-from pyspark.sql.types import (DoubleType, IntegerType, LongType, StringType,
-                               StructField, StructType, TimestampType)
+from pyspark.sql.types import (
+    DoubleType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 vehicle_schema = StructType(
     [

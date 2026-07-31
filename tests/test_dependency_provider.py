@@ -2,18 +2,6 @@ from unittest.mock import patch
 
 from common.config.settings import Settings
 from common.dependency_provider import DependencyProvider
-from common.dlq.delta_dlq import DeltaDLQ
-from common.dlq.noop_dlq import NoOpDLQ
-from common.metrics.metrics_collector import MetricsCollector
-from common.readers.kafka_reader import KafkaReader
-from common.readers.parquet_reader import ParquetReader
-from common.transformers.bronze_transformer import BronzeTransformer
-from common.transformers.gold_transformer import GoldTransformer
-from common.transformers.silver_transformer import SilverTransformer
-from common.validation.composite_validator import CompositeValidator
-from common.validation.noop_validator import NoOpValidator
-from common.writers.delta_writer import DeltaWriter
-from common.writers.postgres_writer import PostgresWriter
 
 
 class TestDependencyProvider:

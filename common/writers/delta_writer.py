@@ -35,6 +35,6 @@ class DeltaWriter(BaseWriter):
         (df.write.format("delta").mode(self.mode).saveAsTable(self.table))
         duration = time.time() - start
         rows = df.count()
-        logger.info("Rows Written=%s", df.count())
+        logger.info("Rows Written=%s", rows)
 
         logger.info("Write Duration=%.2f", duration)

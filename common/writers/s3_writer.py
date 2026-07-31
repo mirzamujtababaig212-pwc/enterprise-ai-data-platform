@@ -15,7 +15,7 @@ class S3Writer(BaseWriter):
         (df.write.mode("append").parquet(self.path))
         duration = time.time() - start
         rows = df.count()
-        logger.info("Rows Written=%s", df.count())
+        logger.info("Rows Written=%s", rows)
 
         logger.info("Write Duration=%.2f sec", duration)
 

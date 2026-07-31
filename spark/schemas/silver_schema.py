@@ -1,5 +1,12 @@
-from pyspark.sql.types import (DoubleType, IntegerType, LongType, StringType,
-                               StructField, StructType, TimestampType)
+from pyspark.sql.types import (
+    DoubleType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 silver_schema = StructType(
     [

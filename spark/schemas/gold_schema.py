@@ -1,5 +1,4 @@
-from pyspark.sql.types import (DoubleType, IntegerType, LongType, StringType,
-                               StructField, StructType, TimestampType)
+from pyspark.sql.types import DoubleType, LongType, StringType, StructField, StructType
 
 gold_schema = StructType(
     [

@@ -1,6 +1,5 @@
 from unittest.mock import Mock
 
-from common.pipelines.base_pipeline import BasePipeline
 from tests.pipelines.dummy_pipeline import DummyPipeline
 
 
@@ -11,10 +10,6 @@ class DummyConfig:
     enable_dlq = True
     retries = 1
     retry_delay = 0
-
-
-class DummyPipeline(BasePipeline):
-    CONFIG = DummyConfig()
 
 
 reader = Mock()

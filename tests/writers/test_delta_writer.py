@@ -16,11 +16,8 @@ def test_write_batch():
     writer.write_batch(df)
     df.write.format.assert_called_once_with("delta")
     df.write.format.return_value.mode.assert_called_once_with("append")
-    (
-        df.write.format.return_value.mode.return_value.saveAsTable.assert_called_once_with(
-            Settings.storage.BRONZE_TABLE
-        )
-    )
+    save_as_table = df.write.format.return_value.mode.return_value.saveAsTable
+    save_as_table.assert_called_once_with(Settings.storage.BRONZE_TABLE)
 
 
 def test_write_stream():

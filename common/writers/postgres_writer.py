@@ -22,7 +22,7 @@ class PostgresWriter(BaseWriter):
         )
         duration = time.time() - start
         rows = df.count()
-        logger.info("Rows Written=%s", df.count())
+        logger.info("Rows Written=%s", rows)
 
         logger.info("Write Duration=%.2f", duration)
 
