@@ -10,91 +10,52 @@ from common.writers.s3_writer import S3Writer
 
 def test_build_delta():
 
-    config = {
-        "writer": {
-            "type": "delta"
-        }
-    }
+    config = {"writer": {"type": "delta"}}
 
-    writer = WriterBuilder.build(
-        DeltaWriter,
-        config
-    )
+    writer = WriterBuilder.build(DeltaWriter, config)
 
     assert isinstance(writer, DeltaWriter)
 
 
 def test_build_postgres():
 
-    config = {
-        "writer": {
-            "type": "postgres"
-        }
-    }
+    config = {"writer": {"type": "postgres"}}
 
-    writer = WriterBuilder.build(
-        PostgresWriter,
-        config
-    )
+    writer = WriterBuilder.build(PostgresWriter, config)
 
     assert isinstance(writer, PostgresWriter)
 
 
 def test_build_console():
 
-    config = {
-        "writer": {
-            "type": "console"
-        }
-    }
+    config = {"writer": {"type": "console"}}
 
-    writer = WriterBuilder.build(
-        ConsoleWriter,
-        config
-    )
+    writer = WriterBuilder.build(ConsoleWriter, config)
 
     assert isinstance(writer, ConsoleWriter)
 
 
 def test_build_s3():
 
-    config = {
-        "writer": {
-            "type": "s3"
-        }
-    }
+    config = {"writer": {"type": "s3"}}
 
-    writer = WriterBuilder.build(
-        S3Writer,
-        config
-    )
+    writer = WriterBuilder.build(S3Writer, config)
 
     assert isinstance(writer, S3Writer)
 
 
 def test_build_iceberg():
 
-    config = {
-        "writer": {
-            "type": "iceberg"
-        }
-    }
+    config = {"writer": {"type": "iceberg"}}
 
-    writer = WriterBuilder.build(
-        IcebergWriter,
-        config
-    )
+    writer = WriterBuilder.build(IcebergWriter, config)
 
     assert isinstance(writer, IcebergWriter)
 
 
 def test_invalid_writer():
 
-    config = {
-        "writer": {
-            "type": "dummy"
-        }
-    }
+    config = {"writer": {"type": "dummy"}}
 
     with pytest.raises(ValueError):
         WriterBuilder.build(None, config)

@@ -1,20 +1,26 @@
 environment: dev
 
-spark:
-  master: local[*]
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: vehicle-events
+  starting_offsets: earliest
 
 postgres:
   host: localhost
   port: 5432
-  database: vehicle_db
-  user: postgres
+  database: enterprise
+  username: postgres
   password: postgres
-  url: jdbc:postgresql://localhost:5432/mydb
-
-kafka:
-  bootstrap_servers: localhost:9092
 
 storage:
-  bronze: bronze/
-  silver: silver/
-  gold: gold/
+  bronze_table: bronze_vehicle
+  silver_table: silver_vehicle
+  gold_table: gold_vehicle
+
+checkpoint:
+  bronze: checkpoints/bronze
+  silver: checkpoints/silver
+  gold: checkpoints/gold
+
+s3:
+  bucket: enterprise-dev

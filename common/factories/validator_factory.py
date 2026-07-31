@@ -14,51 +14,54 @@ class ValidatorFactory:
         validator_type = config["validator"]["type"]
 
         if validator_type not in VALIDATOR_REGISTRY:
-            raise ValueError(
-                f"Unknown validator type: {validator_type}"
-            )
+            raise ValueError(f"Unknown validator type: {validator_type}")
 
-        pipeline = (
-            config.get("pipeline", {})
-                  .get("class")
-        )
+        pipeline = config.get("pipeline", {}).get("class")
 
         if validator_type == "noop":
             return NoOpValidator()
 
         if pipeline == "bronze":
-            return CompositeValidator([
-                SchemaValidator([
-                    "vehicle_id",
-                    "event_time",
-                    "latitude",
-                    "longitude",
-                    "speed",
-                    "rpm",
-                    "fuel_level",
-                    "battery",
-                    "engine_temperature",
-                    "gear",
-                    "topic",
-                    "partition",
-                    "offset",
-                    "timestamp",
-                    "ingestion_timestamp",
-                    "ingestion_time",
-                ]),
-                NullValidator(["vehicle_id"]),
-                DuplicateValidator(["vehicle_id"]),
-            ])
+            return CompositeValidator(
+                [
+                    SchemaValidator(
+                        [
+                            "vehicle_id",
+                            "event_time",
+                            "latitude",
+                            "longitude",
+                            "speed",
+                            "rpm",
+                            "fuel_level",
+                            "battery",
+                            "engine_temperature",
+                            "gear",
+                            "topic",
+                            "partition",
+                            "offset",
+                            "timestamp",
+                            "ingestion_timestamp",
+                            "ingestion_time",
+                        ]
+                    ),
+                    NullValidator(["vehicle_id"]),
+                    DuplicateValidator(["vehicle_id"]),
+                ]
+            )
 
         elif pipeline == "silver":
-            return CompositeValidator([
-                SchemaValidator([
-                    "vehicle_id",
-                    "status",
-                    "event_timestamp",
-                ]),
-                NullValidator(["vehicle_id"]),
-                DuplicateValidator(["vehicle_id"]),
-            ])
+            return CompositeValidator(
+                [
+                    SchemaValidator(
+                        [
+                            "vehicle_id",
+                            "status",
+                            "event_timestamp",
+                        ]
+                    ),
+                    NullValidator(["vehicle_id"]),
+                    DuplicateValidator(["vehicle_id"]),
+                ]
+            )
         else:
             return CompositeValidator()

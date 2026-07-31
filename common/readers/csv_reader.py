@@ -11,18 +11,9 @@ class CSVReader(BaseReader):
         self.path = path
         self.header = header
         self.schema = schema
+
     def read(self, spark):
-        reader = (
-            spark.read
-                 .option(
-                     "header",
-                     self.header
-                 )
-        )
+        reader = spark.read.option("header", self.header)
         if self.schema:
-            reader = reader.schema(
-                self.schema
-            )
-        return reader.csv(
-            self.path
-        )
+            reader = reader.schema(self.schema)
+        return reader.csv(self.path)

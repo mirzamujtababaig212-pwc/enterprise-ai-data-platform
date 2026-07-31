@@ -17,9 +17,11 @@ def test_write():
     writer.mode.assert_called_once_with("append")
     writer.saveAsTable.assert_called_once_with("dlq_table")
 
+
 def test_create():
     dlq = DeltaDLQ("test_table")
-    assert dlq.table=="test_table"
+    assert dlq.table == "test_table"
+
 
 def test_format():
     df = MagicMock()
@@ -31,6 +33,7 @@ def test_format():
     dlq.write(df)
     writer.format.assert_called_with("delta")
 
+
 def test_mode():
     df = MagicMock()
     writer = MagicMock()
@@ -41,6 +44,7 @@ def test_mode():
     dlq.write(df)
     writer.mode.assert_called_with("append")
 
+
 def test_save():
     df = MagicMock()
     writer = MagicMock()
@@ -49,9 +53,8 @@ def test_save():
     writer.mode.return_value = writer
     dlq = DeltaDLQ("table")
     dlq.write(df)
-    writer.saveAsTable.assert_called_once_with(
-        "table"
-    )
+    writer.saveAsTable.assert_called_once_with("table")
+
 
 def test_empty_dataframe(spark):
     dlq = DeltaDLQ("dlq_table")
@@ -65,6 +68,7 @@ def test_empty_dataframe(spark):
         # Expected if the table doesn't exist in the test environment.
         pass
 
+
 def test_invalid_table():
     dlq = DeltaDLQ("does_not_exist")
     df = MagicMock()
@@ -72,8 +76,6 @@ def test_invalid_table():
     df.write = writer
     writer.format.return_value = writer
     writer.mode.return_value = writer
-    writer.saveAsTable.side_effect = Exception(
-        "table not found"
-    )
+    writer.saveAsTable.side_effect = Exception("table not found")
     with pytest.raises(Exception):
         dlq.write(df)

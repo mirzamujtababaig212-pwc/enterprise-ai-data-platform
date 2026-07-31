@@ -1,10 +1,6 @@
 from common.runner.pipeline_runner import PipelineRunner
 from common.spark.spark_builder import SparkSessionBuilder
 
-spark = SparkSessionBuilder.build()
+spark = SparkSessionBuilder.build("SilverToGold")
 
-PipelineRunner.run(
-        "gold",
-        spark
-)
-
+PipelineRunner.run("gold", spark)

@@ -1,13 +1,11 @@
 from pyspark.sql.functions import col
 
+from common.validation.base_validator import BaseValidator
 
-class RegexRule:
 
-    def __init__(
-        self,
-        column,
-        pattern
-    ):
+class RegexRule(BaseValidator):
+
+    def __init__(self, column, pattern):
         self.column = column
         self.pattern = pattern
 

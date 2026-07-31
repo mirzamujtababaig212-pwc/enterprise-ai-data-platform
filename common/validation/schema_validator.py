@@ -2,7 +2,6 @@ from common.validation.base_validator import BaseValidator
 
 
 class SchemaValidator(BaseValidator):
-
     def __init__(self, expected_columns):
         self.expected_columns = expected_columns
 

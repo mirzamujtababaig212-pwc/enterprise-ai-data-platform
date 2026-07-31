@@ -7,26 +7,17 @@ SCHEMAS = {
     "silver_schema": silver_schema,
 }
 
+
 class ReaderBuilder:
     @staticmethod
-    def build(
-        reader_cls,
-        config
-    ):
+    def build(reader_cls, config):
         cfg = config["reader"]
         reader_type = cfg["type"]
-        kwargs={}
+        kwargs = {}
         if reader_type == "parquet" or reader_type == "csv" or reader_type == "delta":
-            kwargs["path"] = getattr(
-                Settings.storage,
-                cfg.get("path", "BRONZE_PATH")
-            )
+            kwargs["path"] = getattr(Settings.storage, cfg.get("path", "BRONZE_PATH"))
         elif reader_type == "kafka":
-            return reader_cls(
-                Settings.kafka.options
-            )
+            return reader_cls(Settings.kafka.options)
         if "schema" in cfg:
-            kwargs["schema"] = SCHEMAS[
-                cfg["schema"]
-            ]
+            kwargs["schema"] = SCHEMAS[cfg["schema"]]
         return reader_cls(**kwargs)

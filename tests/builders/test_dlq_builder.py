@@ -7,28 +7,16 @@ from common.dlq.noop_dlq import NoOpDLQ
 
 def test_build_delta_dlq():
 
-    dlq = DLQBuilder.build(
-        DeltaDLQ,
-        {}
-    )
+    dlq = DLQBuilder.build(DeltaDLQ, {})
 
-    assert isinstance(
-        dlq,
-        DeltaDLQ
-    )
+    assert isinstance(dlq, DeltaDLQ)
 
 
 def test_build_noop_dlq():
 
-    dlq = DLQBuilder.build(
-        NoOpDLQ,
-        {}
-    )
+    dlq = DLQBuilder.build(NoOpDLQ, {})
 
-    assert isinstance(
-        dlq,
-        NoOpDLQ
-    )
+    assert isinstance(dlq, NoOpDLQ)
 
 
 def test_invalid_dlq():

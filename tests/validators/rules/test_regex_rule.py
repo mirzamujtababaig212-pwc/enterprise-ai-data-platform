@@ -2,10 +2,7 @@ from common.validation.rules.regex_rule import RegexRule
 
 
 def test_regex(spark):
-    rule = RegexRule(
-        column="email",
-        pattern=r".+@.+"
-    )
+    rule = RegexRule(column="email", pattern=r".+@.+")
     df = spark.createDataFrame(
         [
             ("alice@example.com",),

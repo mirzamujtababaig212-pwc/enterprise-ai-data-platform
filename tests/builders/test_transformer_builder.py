@@ -10,10 +10,7 @@ def test_build_bronze():
 
     config = {"transformer": {"type": "bronze"}}
 
-    transformer = TransformerBuilder.build(
-        BronzeTransformer,
-        config
-    )
+    transformer = TransformerBuilder.build(BronzeTransformer, config)
 
     assert isinstance(transformer, BronzeTransformer)
 
@@ -22,10 +19,7 @@ def test_build_silver():
 
     config = {"transformer": {"type": "silver"}}
 
-    transformer = TransformerBuilder.build(
-        SilverTransformer,
-        config
-    )
+    transformer = TransformerBuilder.build(SilverTransformer, config)
 
     assert isinstance(transformer, SilverTransformer)
 
@@ -34,10 +28,7 @@ def test_build_gold():
 
     config = {"transformer": {"type": "gold"}}
 
-    transformer = TransformerBuilder.build(
-        GoldTransformer,
-        config
-    )
+    transformer = TransformerBuilder.build(GoldTransformer, config)
 
     assert isinstance(transformer, GoldTransformer)
 

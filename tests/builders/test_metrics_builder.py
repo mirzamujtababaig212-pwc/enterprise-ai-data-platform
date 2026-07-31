@@ -6,15 +6,9 @@ from common.metrics.metrics_collector import MetricsCollector
 
 def test_build_metrics():
 
-    metrics = MetricsBuilder.build(
-        MetricsCollector,
-        {}
-    )
+    metrics = MetricsBuilder.build(MetricsCollector, {})
 
-    assert isinstance(
-        metrics,
-        MetricsCollector
-    )
+    assert isinstance(metrics, MetricsCollector)
 
 
 def test_invalid_metrics():

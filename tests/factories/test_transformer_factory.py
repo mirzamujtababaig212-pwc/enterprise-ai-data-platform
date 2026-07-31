@@ -12,7 +12,7 @@ def test_create_bronze():
 
     transformer = TransformerFactory.create(config)
 
-    assert isinstance(transformer, BronzeTransformer)
+    assert transformer.__class__.__name__ == "BronzeTransformer"
 
 
 def test_create_silver():
@@ -21,7 +21,7 @@ def test_create_silver():
 
     transformer = TransformerFactory.create(config)
 
-    assert isinstance(transformer, SilverTransformer)
+    assert transformer.__class__.__name__ == "SilverTransformer"
 
 
 def test_create_gold():
@@ -30,7 +30,7 @@ def test_create_gold():
 
     transformer = TransformerFactory.create(config)
 
-    assert isinstance(transformer, GoldTransformer)
+    assert transformer.__class__.__name__ == "GoldTransformer"
 
 
 def test_invalid_transformer():

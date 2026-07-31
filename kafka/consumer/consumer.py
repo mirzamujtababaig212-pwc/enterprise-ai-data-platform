@@ -9,7 +9,7 @@ consumer = KafkaConsumer(
     bootstrap_servers="localhost:9092",
     auto_offset_reset="earliest",
     enable_auto_commit=True,
-    value_deserializer=lambda x: json.loads(x.decode("utf-8"))
+    value_deserializer=lambda x: json.loads(x.decode("utf-8")),
 )
 
 conn = psycopg2.connect(
@@ -17,7 +17,7 @@ conn = psycopg2.connect(
     port=5432,
     database="vehicle_platform",
     user="postgres",
-    password="password"
+    password="password",
 )
 
 cursor = conn.cursor()
@@ -56,8 +56,8 @@ for msg in consumer:
             data["fuel_level"],
             data["battery"],
             data["engine_temperature"],
-            data["gear"]
-        )
+            data["gear"],
+        ),
     )
 
     conn.commit()

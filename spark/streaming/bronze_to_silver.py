@@ -3,7 +3,4 @@ from common.spark.spark_builder import SparkSessionBuilder
 
 spark = SparkSessionBuilder.build("BronzeToSilver")
 
-PipelineRunner.run(
-	"silver",
-	spark
-)
+PipelineRunner.run("silver", spark)

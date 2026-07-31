@@ -1,14 +1,19 @@
 from pyspark.sql.functions import col
 
+from common.validation.base_validator import BaseValidator
 
-class NotNullRule:
+
+class NotNullRule(BaseValidator):
     def __init__(self, columns):
         self.columns = columns
+
     def validate(self, df):
         condition = None
         for c in self.columns:
             expr = col(c).isNotNull()
-            condition = expr if condition is None else condition & expr
+            condition = expr if condition is None else (condition & expr)
+        if condition is None:
+            return df, df.limit(0)
         valid_df = df.filter(condition)
         invalid_df = df.filter(~condition)
         return valid_df, invalid_df

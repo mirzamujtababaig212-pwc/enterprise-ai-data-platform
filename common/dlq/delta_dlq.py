@@ -6,9 +6,4 @@ class DeltaDLQ(BaseDLQ):
         self.table = table
 
     def write(self, df):
-        (
-            df.write
-              .format("delta")
-              .mode("append")
-              .saveAsTable(self.table)
-        )
+        (df.write.format("delta").mode("append").saveAsTable(self.table))

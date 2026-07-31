@@ -7,13 +7,13 @@ from common.pipelines.base_pipeline import BasePipeline
 
 
 def test_failure_after_retries(
-        spark,
-        mock_reader,
-        mock_writer,
-        mock_validator,
-        mock_transformer,
-        mock_metrics,
-        mock_dlq
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
 ):
     pipeline = DummyPipeline(
         spark,
@@ -22,24 +22,19 @@ def test_failure_after_retries(
         mock_writer,
         mock_transformer,
         mock_metrics,
-        mock_dlq
+        mock_dlq,
     )
     batch = Mock()
     valid = Mock()
     invalid = Mock()
     transformed = Mock()
-    mock_validator.validate.return_value = (
-        valid,
-        invalid
-    )
+    mock_validator.validate.return_value = (valid, invalid)
     mock_transformer.transform.return_value = transformed
     mock_writer.write.side_effect = Exception("failure")
     with pytest.raises(Exception):
-        pipeline.process_batch(
-            batch,
-            5
-        )
+        pipeline.process_batch(batch, 5)
     assert mock_writer.write.call_count == 3
+
 
 class DummyPipeline(BasePipeline):
 

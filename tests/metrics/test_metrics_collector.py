@@ -7,50 +7,26 @@ def test_create():
     collector = MetricsCollector()
     assert collector is not None
 
+
 def test_record_batch(spark):
     collector = MetricsCollector()
-    batch = spark.createDataFrame(
-        [
-            (1,"A"),
-            (2,"B")
-        ],
-        ["id","name"]
-    )
-    rejected = spark.createDataFrame(
-        [],
-        batch.schema
-    )
+    batch = spark.createDataFrame([(1, "A"), (2, "B")], ["id", "name"])
+    rejected = spark.createDataFrame([], batch.schema)
     collector.record_batch(
-        pipeline="bronze",
-        batch_id=1,
-        batch_df=batch,
-        rejected_df=rejected
+        pipeline="bronze", batch_id=1, batch_df=batch, rejected_df=rejected
     )
 
-@patch(
-    "common.metrics.metrics_collector.logger"
-)
 
-def test_logger_called(
-    mock_logger,
-    spark
-):
+@patch("common.metrics.metrics_collector.logger")
+def test_logger_called(mock_logger, spark):
     collector = MetricsCollector()
-    batch = spark.createDataFrame(
-        [(1,"A")],
-        ["id","name"]
-    )
-    rejected = spark.createDataFrame(
-        [],
-        batch.schema
-    )
+    batch = spark.createDataFrame([(1, "A")], ["id", "name"])
+    rejected = spark.createDataFrame([], batch.schema)
     collector.record_batch(
-        pipeline="bronze",
-        batch_id=1,
-        batch_df=batch,
-        rejected_df=rejected
+        pipeline="bronze", batch_id=1, batch_df=batch, rejected_df=rejected
     )
     assert mock_logger.info.called
+
 
 @patch("common.metrics.metrics_collector.logger")
 def test_row_count(mock_logger, spark):
@@ -74,8 +50,9 @@ def test_row_count(mock_logger, spark):
         batch_df=batch,
         rejected_df=rejected,
     )
-    assert metrics["processed"]==2
-    assert metrics["rejected"]==1
+    assert metrics["processed"] == 2
+    assert metrics["rejected"] == 1
+
 
 @patch("common.metrics.metrics_collector.logger")
 def test_batch_id(mock_logger, spark):
@@ -92,6 +69,7 @@ def test_batch_id(mock_logger, spark):
     log_text = str(mock_logger.info.call_args_list)
     assert "10" in log_text
 
+
 @patch("common.metrics.metrics_collector.logger")
 def test_pipeline_name(mock_logger, spark):
     collector = MetricsCollector()
@@ -105,6 +83,7 @@ def test_pipeline_name(mock_logger, spark):
         batch_df=batch,
     )
     assert "silver" in str(mock_logger.info.call_args_list)
+
 
 @patch("common.metrics.metrics_collector.logger")
 def test_rejected_rows(mock_logger, spark):
@@ -129,6 +108,7 @@ def test_rejected_rows(mock_logger, spark):
     )
     assert mock_logger.info.called
 
+
 def test_empty_batch(spark):
     collector = MetricsCollector()
     batch = spark.createDataFrame(
@@ -147,12 +127,10 @@ def test_empty_batch(spark):
     )
     assert batch.count() == 0
 
+
 def test_large_batch(spark):
     collector = MetricsCollector()
-    rows = [
-        (i, f"name{i}")
-        for i in range(10000)
-    ]
+    rows = [(i, f"name{i}") for i in range(10000)]
     batch = spark.createDataFrame(
         rows,
         ["id", "name"],
@@ -168,6 +146,7 @@ def test_large_batch(spark):
         rejected_df=rejected,
     )
     assert batch.count() == 10000
+
 
 @patch("common.metrics.metrics_collector.time")
 def test_duration(mock_time, spark):
@@ -187,4 +166,3 @@ def test_duration(mock_time, spark):
         batch_df=batch,
         rejected_df=rejected,
     )
-

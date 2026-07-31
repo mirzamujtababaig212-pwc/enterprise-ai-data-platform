@@ -9,8 +9,7 @@ from pyspark.sql import SparkSession
 @pytest.fixture(scope="session")
 def spark():
     builder = (
-        SparkSession.builder
-        .master("local[2]")
+        SparkSession.builder.master("local[2]")
         .appName("Reader Tests")
         .config(
             "spark.sql.extensions",
@@ -22,13 +21,11 @@ def spark():
         )
     )
 
-    spark = (
-        configure_spark_with_delta_pip(builder)
-        .getOrCreate()
-    )
+    spark = configure_spark_with_delta_pip(builder).getOrCreate()
 
     yield spark
     spark.stop()
+
 
 @pytest.fixture
 def temp_dir():

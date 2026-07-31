@@ -15,6 +15,5 @@ class BronzePipeline(BasePipeline):
         enable_metrics=True,
         enable_dlq=True,
         retries=3,
-        retry_delay=2
+        retry_delay=2,
     )
-

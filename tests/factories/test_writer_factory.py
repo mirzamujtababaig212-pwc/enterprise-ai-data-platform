@@ -14,7 +14,7 @@ def test_create_delta():
         "writer": {
             "type": "delta",
             "table": "bronze.vehicle",
-            "checkpoint": "/tmp/checkpoint"
+            "checkpoint": "/tmp/checkpoint",
         }
     }
 
@@ -30,7 +30,7 @@ def test_create_postgres():
             "type": "postgres",
             "url": "jdbc:postgresql://localhost/test",
             "table": "vehicle",
-            "properties": {}
+            "properties": {},
         }
     }
 
@@ -41,11 +41,7 @@ def test_create_postgres():
 
 def test_create_console():
 
-    config = {
-        "writer": {
-            "type": "console"
-        }
-    }
+    config = {"writer": {"type": "console"}}
 
     writer = WriterFactory.create(config)
 
@@ -54,12 +50,7 @@ def test_create_console():
 
 def test_create_s3():
 
-    config = {
-        "writer": {
-            "type": "s3",
-            "path": "/tmp/output"
-        }
-    }
+    config = {"writer": {"type": "s3", "path": "/tmp/output"}}
 
     writer = WriterFactory.create(config)
 
@@ -68,12 +59,7 @@ def test_create_s3():
 
 def test_create_iceberg():
 
-    config = {
-        "writer": {
-            "type": "iceberg",
-            "table": "catalog.db.vehicle"
-        }
-    }
+    config = {"writer": {"type": "iceberg", "table": "catalog.db.vehicle"}}
 
     writer = WriterFactory.create(config)
 
@@ -82,11 +68,7 @@ def test_create_iceberg():
 
 def test_invalid_writer():
 
-    config = {
-        "writer": {
-            "type": "unknown"
-        }
-    }
+    config = {"writer": {"type": "unknown"}}
 
     with pytest.raises(ValueError):
         WriterFactory.create(config)

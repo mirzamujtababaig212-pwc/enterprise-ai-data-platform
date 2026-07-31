@@ -9,5 +9,6 @@ class DummyConfig:
     retries = 2
     retry_delay = 0
 
+
 class DummyPipeline(BasePipeline):
     CONFIG = DummyConfig()

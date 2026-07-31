@@ -8,60 +8,27 @@ from common.readers.snowflake_reader import SnowflakeReader
 
 class SparkReader:
     @staticmethod
-    def read_kafka(
-        spark,
-        topic=None,
-        bootstrap_servers=None
-    ):
-        return KafkaReader.read_stream(
-            spark,
-            topic,
-            bootstrap_servers
-        )
+    def read_kafka(spark, topic=None, bootstrap_servers=None):
+        return KafkaReader.read_stream(spark, topic, bootstrap_servers)
+
     @staticmethod
-    def read_parquet(
-        spark,
-        path,
-        schema
-    ):
-        return ParquetReader.read_stream(
-            spark,
-            path,
-            schema
-        )
+    def read_parquet(spark, path, schema=None):
+        reader = ParquetReader(path, schema)
+        return reader.read(spark)
+
     @staticmethod
-    def read_delta(
-        spark,
-        path
-    ):
-        return DeltaReader.read_stream(
-            spark,
-            path
-        )
+    def read_delta(spark, path):
+        reader = DeltaReader(path)
+        return reader.read(spark)
+
     @staticmethod
-    def read_postgres(
-        spark,
-        table
-    ):
-        return PostgresReader.read_table(
-            spark,
-            table
-        )
+    def read_postgres(spark, table):
+        return PostgresReader.read_table(spark, table)
+
     @staticmethod
-    def read_snowflake(
-        spark,
-        table
-    ):
-        return SnowflakeReader.read_table(
-            spark,
-            table
-        )
+    def read_snowflake(spark, table):
+        return SnowflakeReader.read_table(spark, table)
+
     @staticmethod
-    def read_fabric(
-        spark,
-        table
-    ):
-        return FabricReader.read_table(
-            spark,
-            table
-        )
+    def read_fabric(spark, table):
+        return FabricReader.read_table(spark, table)

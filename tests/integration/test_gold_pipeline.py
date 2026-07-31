@@ -9,12 +9,6 @@ def test_gold_writer_called(spark):
         spark,
     )
     pipeline.writer.write_batch = MagicMock()
-    df = spark.createDataFrame(
-        [
-            ("A", 100),
-            ("B", 200)
-        ],
-        ["customer", "sales"]
-    )
+    df = spark.createDataFrame([("A", 100), ("B", 200)], ["customer", "sales"])
     pipeline.writer.write_batch(df)
     pipeline.writer.write_batch.assert_called_once()

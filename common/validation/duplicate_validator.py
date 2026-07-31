@@ -11,29 +11,12 @@ class DuplicateValidator(BaseValidator):
 
     def validate(self, df):
 
-        window = (
-            Window
-            .partitionBy(*self.keys)
-            .orderBy(lit(1))
-        )
+        window = Window.partitionBy(*self.keys).orderBy(lit(1))
 
-        numbered = (
-            df.withColumn(
-                "_rn",
-                row_number().over(window)
-            )
-        )
+        numbered = df.withColumn("_rn", row_number().over(window))
 
-        valid = (
-            numbered
-            .filter("_rn = 1")
-            .drop("_rn")
-        )
+        valid = numbered.filter("_rn = 1").drop("_rn")
 
-        invalid = (
-            numbered
-            .filter("_rn > 1")
-            .drop("_rn")
-        )
+        invalid = numbered.filter("_rn > 1").drop("_rn")
 
         return valid, invalid

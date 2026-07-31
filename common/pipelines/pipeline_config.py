@@ -15,7 +15,7 @@ class PipelineConfig:
     target: str = "delta"
     table: str = ""
     checkpoint: str = ""
-    schema: StructType | None= None
+    schema: StructType | None = None
     output_mode: str = "append"
     retries: int = 3
     retry_delay: int = 2

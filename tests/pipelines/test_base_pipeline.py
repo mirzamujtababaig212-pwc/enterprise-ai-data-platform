@@ -12,8 +12,10 @@ class DummyConfig:
     retries = 1
     retry_delay = 0
 
+
 class DummyPipeline(BasePipeline):
     CONFIG = DummyConfig()
+
 
 reader = Mock()
 validator = Mock()
@@ -21,6 +23,8 @@ writer = Mock()
 metrics = Mock()
 dlq = Mock()
 transformer = Mock()
+
+
 def test_pipeline_creation(
     spark,
     mock_reader,
@@ -30,17 +34,16 @@ def test_pipeline_creation(
     mock_metrics,
     mock_dlq,
 ):
-        pipeline = DummyPipeline(
-                spark=spark,
-                reader=mock_reader,
-                validator=mock_validator,
-                writer=mock_writer,
-                transformer=mock_transformer,
-                metrics=mock_metrics,
-                dlq=mock_dlq
-        )
+    pipeline = DummyPipeline(
+        spark=spark,
+        reader=mock_reader,
+        validator=mock_validator,
+        writer=mock_writer,
+        transformer=mock_transformer,
+        metrics=mock_metrics,
+        dlq=mock_dlq,
+    )
 
-        assert pipeline.reader is mock_reader
-        assert pipeline.writer is mock_writer
-        assert pipeline.spark == spark
-
+    assert pipeline.reader is mock_reader
+    assert pipeline.writer is mock_writer
+    assert pipeline.spark == spark

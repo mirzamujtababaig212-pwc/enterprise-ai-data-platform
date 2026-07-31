@@ -1,4 +1,3 @@
-
 # Kafka
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9094"
 KAFKA_TOPIC = "vehicle-telemetry"

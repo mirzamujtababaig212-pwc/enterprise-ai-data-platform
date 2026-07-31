@@ -1,7 +1,10 @@
+import time
+
 from common.logging.logger import get_logger
 from common.readers.base_reader import BaseReader
 
 logger = get_logger(__name__)
+
 
 class KafkaReader(BaseReader):
 
@@ -9,10 +12,8 @@ class KafkaReader(BaseReader):
         self.options = options
 
     def read(self, spark):
-        return (
-            spark.readStream
-                 .format("kafka")
-                 .options(**self.options)
-                 .load()
-        )
-
+        start = time.time()
+        df = spark.readStream.format("kafka").options(**self.options).load()
+        duration = time.time() - start
+        logger.info("Kafka Read Time = %.2f sec", duration)
+        return df

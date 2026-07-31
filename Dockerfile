@@ -8,4 +8,4 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements/docker.txt
 COPY . .
 ENV PYTHONPATH=/app
-CMD ["pytest"]
+ENTRYPOINT ["./entrypoint.sh"]

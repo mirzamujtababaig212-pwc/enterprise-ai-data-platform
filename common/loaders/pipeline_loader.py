@@ -5,11 +5,7 @@ import yaml
 
 class PipelineLoader:
 
-    CONFIG_PATH = (
-        Path(__file__).resolve().parents[2]
-        / "config"
-        / "pipelines"
-    )
+    CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipelines"
 
     @classmethod
     def load(cls, pipeline):

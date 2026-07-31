@@ -14,9 +14,7 @@ class PipelineFactory:
         config = PipelineLoader.load(name)
         pipeline_name = config["pipeline"]["class"]
         if pipeline_name not in PIPELINE_REGISTRY:
-            raise ValueError(
-                f"Unknown pipeline class '{pipeline_name}'"
-            )
+            raise ValueError(f"Unknown pipeline class '{pipeline_name}'")
         pipeline_cls = PIPELINE_REGISTRY[pipeline_name]
         return pipeline_cls(
             spark=spark,

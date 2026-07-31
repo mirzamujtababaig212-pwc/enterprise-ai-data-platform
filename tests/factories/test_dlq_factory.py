@@ -7,43 +7,25 @@ from common.factories.dlq_factory import DLQFactory
 
 def test_create_delta_dlq():
 
-    config = {
-        "dlq": {
-            "type": "delta"
-        }
-    }
+    config = {"dlq": {"type": "delta"}}
 
     dlq = DLQFactory.create(config)
 
-    assert isinstance(
-        dlq,
-        DeltaDLQ
-    )
+    assert isinstance(dlq, DeltaDLQ)
 
 
 def test_create_noop_dlq():
 
-    config = {
-        "dlq": {
-            "type": "noop"
-        }
-    }
+    config = {"dlq": {"type": "noop"}}
 
     dlq = DLQFactory.create(config)
 
-    assert isinstance(
-        dlq,
-        NoOpDLQ
-    )
+    assert isinstance(dlq, NoOpDLQ)
 
 
 def test_invalid_dlq():
 
-    config = {
-        "dlq": {
-            "type": "dummy"
-        }
-    }
+    config = {"dlq": {"type": "dummy"}}
 
     with pytest.raises(ValueError):
         DLQFactory.create(config)

@@ -14,6 +14,7 @@ def test_valid_rows(spark):
     assert valid_df.count() == 2
     assert invalid_df.count() == 0
 
+
 def test_null_rows(spark):
     rule = NotNullRule(columns=["email"])
     df = spark.createDataFrame(

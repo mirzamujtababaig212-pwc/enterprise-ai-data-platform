@@ -9,9 +9,5 @@ class ReaderFactory:
         if reader_type not in READER_REGISTRY:
             raise ValueError(f"Unknown reader type: {reader_type}")
         reader_cls = READER_REGISTRY[reader_type]
-        kwargs = {
-            k: v
-            for k, v in reader_cfg.items()
-            if k != "type"
-        }
+        kwargs = {k: v for k, v in reader_cfg.items() if k != "type"}
         return reader_cls(**kwargs)

@@ -13,6 +13,5 @@ class GoldPipeline(BasePipeline):
         enable_metrics=True,
         enable_dlq=False,
         retries=3,
-        retry_delay=2
+        retry_delay=2,
     )
-

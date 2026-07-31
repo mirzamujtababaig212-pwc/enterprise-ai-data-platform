@@ -1,10 +1,6 @@
 from pyspark.sql import SparkSession
 
-spark = (
-    SparkSession.builder
-    .appName("ReadBronze")
-    .getOrCreate()
-)
+spark = SparkSession.builder.appName("ReadBronze").getOrCreate()
 
 df = spark.read.parquet("data/bronze")
 

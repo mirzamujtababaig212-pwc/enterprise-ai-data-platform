@@ -10,15 +10,12 @@ def test_create():
     dlq = NoOpDLQ()
     assert dlq is not None
 
+
 def test_write(spark):
     dlq = NoOpDLQ()
-    df = spark.createDataFrame(
-        [
-            (1,"Alice")
-        ],
-        ["id","name"]
-    )
+    df = spark.createDataFrame([(1, "Alice")], ["id", "name"])
     dlq.write(df)
+
 
 def test_empty_dataframe(spark):
     dlq = NoOpDLQ()
@@ -28,17 +25,16 @@ def test_empty_dataframe(spark):
     )
     dlq.write(empty)
 
+
 def test_large_dataset(spark):
     dlq = NoOpDLQ()
-    rows = [
-        (i, f"name{i}")
-        for i in range(5000)
-    ]
+    rows = [(i, f"name{i}") for i in range(5000)]
     df = spark.createDataFrame(
         rows,
         ["id", "name"],
     )
     dlq.write(df)
+
 
 def test_delta_write_with_mock():
     df = MagicMock()
@@ -52,6 +48,7 @@ def test_delta_write_with_mock():
     writer.format.assert_called_once_with("delta")
     writer.mode.assert_called_once_with("append")
     writer.saveAsTable.assert_called_once_with("test_dlq")
+
 
 def test_invalid_path():
     df = MagicMock()

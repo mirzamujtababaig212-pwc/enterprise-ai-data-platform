@@ -10,3 +10,4 @@ class BaseValidator(ABC):
             valid_df,
             invalid_df
         """
+        ...

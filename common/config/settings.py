@@ -6,8 +6,8 @@ from common.config.storage import StorageConfig
 
 
 class Settings:
-        postgres=PostgresConfig
-        kafka=KafkaConfig
-        spark=SparkConfig
-        env=Environment
-        storage = StorageConfig
+    postgres = PostgresConfig
+    kafka = KafkaConfig
+    spark = SparkConfig
+    env = Environment
+    storage = StorageConfig
