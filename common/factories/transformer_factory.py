@@ -1,4 +1,4 @@
-from typing import Type, cast
+from typing import cast
 
 from common.registry.transformer_registry import TRANSFORMER_REGISTRY
 from common.transformers.base_transformer import BaseTransformer
@@ -12,7 +12,7 @@ class TransformerFactory:
         if transformer_type not in TRANSFORMER_REGISTRY:
             raise ValueError(f"Unknown transformer type: {transformer_type}")
         transformer_cls = cast(
-            Type[BaseTransformer],
+            type[BaseTransformer],
             TRANSFORMER_REGISTRY[transformer_type],
         )
         kwargs = {k: v for k, v in transformer_cfg.items() if k != "type"}

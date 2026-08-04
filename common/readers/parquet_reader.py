@@ -11,7 +11,11 @@ class ParquetReader(BaseReader):
         self.schema = schema
 
     def read(self, spark):
-        reader = spark.read
-        if self.schema:
-            reader = reader.schema(self.schema)
-        return reader.parquet(self.path)
+        try:
+            reader = spark.read
+            if self.schema:
+                reader = reader.schema(self.schema)
+            return reader.parquet(self.path)
+
+        except Exception as e:
+            raise RuntimeError(str(e)) from e

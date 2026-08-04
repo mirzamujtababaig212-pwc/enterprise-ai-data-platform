@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enterprise-ai-platform"
+version = "0.1.0"
+description = "Production-grade Enterprise AI Platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+authors = [
+  { name = "Mirza Mujtaba Baig" }
+]
+
+keywords = [
+  "ai",
+  "llm",
+  "enterprise",
+  "platform",
+  "rag",
+  "mlops",
+  "llmops",
+  "kubernetes"
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+  "License :: OSI Approved :: Apache Software License"
+]
+
+dependencies = [
+    "fastapi>=0.116",
+    "uvicorn[standard]>=0.35",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.10",
+    "httpx>=0.28",
+    "redis>=6.4",
+    "sqlalchemy>=2.0",
+    "alembic>=1.16",
+    "prometheus-client>=0.23",
+    "opentelemetry-api>=1.37",
+    "opentelemetry-sdk>=1.37",
+    "structlog>=25.4"
+]
+
+[project.optional-dependencies]
+
+dev = [
+    "pytest>=8.4",
+    "pytest-cov>=7.0",
+    "ruff>=0.12",
+    "black>=25.1",
+    "isort>=6.0",
+    "mypy>=1.17",
+    "bandit>=1.8",
+    "pre-commit>=4.3",
+    "pip-audit>=2.9"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "__pycache__"
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP"
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+known_first_party = [
+    "platform",
+    "shared",
+    "agents"
+]
+
+[tool.mypy]
+explicit_package_bases = true
+namespace_packages = true
+disable_error_code = ["attr-defined", "assignment", "method-assign"]

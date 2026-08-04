@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 
@@ -14,8 +12,8 @@ class KafkaReader:
     @staticmethod
     def read_stream(
         spark: SparkSession,
-        topic: Optional[str] = None,
-        bootstrap_servers: Optional[str] = None,
+        topic: str | None = None,
+        bootstrap_servers: str | None = None,
     ) -> DataFrame:
         topic = topic or Settings.kafka.TOPIC
         bootstrap_servers = bootstrap_servers or Settings.kafka.BOOTSTRAP_SERVERS
@@ -32,4 +30,4 @@ class KafkaReader:
             return df
         except Exception as ex:
             logger.error(str(ex))
-            raise KafkaException(str(ex))
+            raise KafkaException(str(ex)) from ex

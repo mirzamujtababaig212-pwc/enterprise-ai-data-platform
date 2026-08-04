@@ -35,13 +35,9 @@ class MetricsCollector(BaseMetrics):
         duplicates = duplicate_df.cache().count() if duplicate_df is not None else 0
         status = calculate_status(processed, rejected)
         pipeline_duration = round(time.time() - start, 2)
-        throughput = (
-            processed / pipeline_duration if pipeline_duration > 0 else processed
-        )
+        throughput = processed / pipeline_duration if pipeline_duration > 0 else processed
         success_rate = (
-            ((processed - rejected) / processed * 100)
-            if (processed + rejected) > 0
-            else 0.0
+            ((processed - rejected) / processed * 100) if (processed + rejected) > 0 else 0.0
         )
         logger.info("%s Batch %s", pipeline, batch_id)
         logger.info("Transform Duration : %.2f", transform_duration)
@@ -88,5 +84,4 @@ class MetricsCollector(BaseMetrics):
             "validation_duration": validation_duration,
             "write_duration": write_duration,
             "dlq_duration": dlq_duration,
-            "pipeline_duration": pipeline_duration,
         }

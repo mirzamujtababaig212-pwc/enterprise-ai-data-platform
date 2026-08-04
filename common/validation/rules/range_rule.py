@@ -10,9 +10,7 @@ class RangeRule:
 
     def validate(self, df):
 
-        condition = (col(self.column) >= self.minimum) & (
-            col(self.column) <= self.maximum
-        )
+        condition = (col(self.column) >= self.minimum) & (col(self.column) <= self.maximum)
 
         valid_df = df.filter(condition)
 

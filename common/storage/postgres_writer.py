@@ -28,4 +28,4 @@ class PostgresWriter:
             logger.info("Write successful.")
         except Exception as ex:
             logger.error(str(ex))
-            raise DatabaseException(str(ex))
+            raise DatabaseException(str(ex)) from ex

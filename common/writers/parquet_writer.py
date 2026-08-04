@@ -20,9 +20,7 @@ class ParquetWriter(BaseWriter):
         logger.info("Write Duration=%.2f sec", duration)
 
     def write_stream(self, df, foreach_batch):
-        return df.writeStream.foreachBatch(
-            lambda batch, _: self.write_batch(batch)
-        ).start()
+        return df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).start()
 
     def write(self, df):
         self.write_batch(df)

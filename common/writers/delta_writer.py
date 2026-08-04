@@ -8,9 +8,7 @@ logger = get_logger(__name__)
 
 class DeltaWriter(BaseWriter):
 
-    def __init__(
-        self, table, checkpoint, mode="append", output_mode="append", trigger=None
-    ):
+    def __init__(self, table, checkpoint, mode="append", output_mode="append", trigger=None):
         self.table = table
         self.mode = mode
         self.checkpoint = checkpoint

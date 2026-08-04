@@ -1,5 +1,5 @@
 import pytest
-from pyspark.sql.types import *
+from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from common.transformers.gold_transformer import GoldTransformer
 
@@ -35,17 +35,13 @@ class TestGoldTransformer:
 
     def test_transform_returns_dataframe(self, spark):
         transformer = GoldTransformer()
-        df = spark.createDataFrame(
-            [("V001", 60.0), ("V002", 80.0)], ["vehicle_id", "speed"]
-        )
+        df = spark.createDataFrame([("V001", 60.0), ("V002", 80.0)], ["vehicle_id", "speed"])
         result = transformer.transform(df)
         assert result is not None
 
     def test_row_count(self, spark):
         transformer = GoldTransformer()
-        df = spark.createDataFrame(
-            [("V001", 60.0), ("V002", 80.0)], ["vehicle_id", "speed"]
-        )
+        df = spark.createDataFrame([("V001", 60.0), ("V002", 80.0)], ["vehicle_id", "speed"])
         result = transformer.transform(df)
         assert result.select("vehicle_id").distinct().count() == result.count()
 
@@ -81,5 +77,5 @@ class TestGoldTransformer:
     def test_invalid_schema(self, spark):
         transformer = GoldTransformer()
         df = spark.createDataFrame([("V001",)], ["vehicle_id"])
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             transformer.transform(df).collect()

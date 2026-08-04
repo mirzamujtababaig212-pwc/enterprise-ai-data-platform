@@ -1,3 +1,5 @@
+from pyspark.errors import AnalysisException
+
 from common.readers.base_reader import BaseReader
 
 
@@ -13,7 +15,13 @@ class CSVReader(BaseReader):
         self.schema = schema
 
     def read(self, spark):
-        reader = spark.read.option("header", self.header)
-        if self.schema:
-            reader = reader.schema(self.schema)
-        return reader.csv(self.path)
+        try:
+            reader = spark.read.option("header", self.header)
+
+            if self.schema:
+                reader = reader.schema(self.schema)
+
+            return reader.csv(self.path)
+
+        except AnalysisException as e:
+            raise RuntimeError(str(e)) from e

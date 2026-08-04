@@ -8,9 +8,7 @@ class BronzeTransformer(BaseTransformer):
 
     def transform(self, df):
         bronze_df = (
-            df.select(
-                from_json(col("value").cast("string"), bronze_schema).alias("json")
-            )
+            df.select(from_json(col("value").cast("string"), bronze_schema).alias("json"))
             .select("json.*")
             .withColumn("ingestion_time", current_timestamp())
         )

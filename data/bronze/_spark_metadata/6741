@@ -1,0 +1,4 @@
+v1
+{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00000-b72c1221-5a42-4d59-9a2b-d466928fa17e-c000.snappy.parquet","size":7101,"isDir":false,"modificationTime":1784625696924,"blockReplication":1,"blockSize":33554432,"action":"add"}
+{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00001-26a757f4-e379-46b0-b18a-2d1b80736fe1-c000.snappy.parquet","size":6847,"isDir":false,"modificationTime":1784625696856,"blockReplication":1,"blockSize":33554432,"action":"add"}
+{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00002-a22716ff-9c63-423b-91a0-2e3826aec92c-c000.snappy.parquet","size":6828,"isDir":false,"modificationTime":1784625697368,"blockReplication":1,"blockSize":33554432,"action":"add"}

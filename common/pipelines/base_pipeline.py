@@ -37,8 +37,9 @@ class BasePipeline(ABC):
         """Optional initialization."""
         logger.info("Starting %s Pipeline", self.config.pipeline_name)
 
-    def cleanup(self):
-        """Optional cleanup."""
+    def cleanup(self):  # noqa: B027
+        """Cleanup resources."""
+        raise NotImplementedError
 
     def validate(self, batch_df):
         if not self.config.enable_validation:
@@ -119,9 +120,7 @@ class BasePipeline(ABC):
                 break
 
             except Exception:
-                logger.exception(
-                    "%s batch %s failed", self.config.pipeline_name, batch_id
-                )
+                logger.exception("%s batch %s failed", self.config.pipeline_name, batch_id)
                 if attempt == self.config.retries - 1:
                     raise
                 time.sleep(self.config.retry_delay ** (attempt + 1))
@@ -129,6 +128,4 @@ class BasePipeline(ABC):
             logger.info("Pipeline Duration = %.2f sec", pipeline_duration)
 
     def write_stream(self, df):
-        return self.writer.write_stream(
-            df=df, foreach_batch=self.process_batch
-        ).awaitTermination()
+        return self.writer.write_stream(df=df, foreach_batch=self.process_batch).awaitTermination()

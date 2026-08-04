@@ -93,5 +93,5 @@ class PipelineFactory:
                 )
             else:
                 raise ValueError(f"Unknown pipeline {name}")
-        except KeyError:
-            raise ValueError(f"Unknown pipeline: {name}")
+        except KeyError as err:
+            raise ValueError(f"Unknown pipeline: {name}") from err

@@ -8,11 +8,7 @@ class DLQBuilder:
 
         # DeltaDLQ requires a table argument
         if dlq_cls.__name__ == "DeltaDLQ":
-            table = (
-                config.get("table")
-                or config.get("writer", {}).get("table")
-                or "test_dlq"
-            )
+            table = config.get("table") or config.get("writer", {}).get("table") or "test_dlq"
             return dlq_cls(table)
 
         # NoOpDLQ has no constructor arguments

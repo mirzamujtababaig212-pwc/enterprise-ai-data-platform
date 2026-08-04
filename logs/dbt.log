@@ -1,0 +1,158 @@
+[0m08:15:08.242227 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fad63e330>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fad5da6c0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fad63e480>]}
+
+
+============================== 08:15:08.248643 | 38261664-69b9-46c3-aeac-eef7bc4dd62b ==============================
+[0m08:15:08.248643 [info ] [MainThread]: Running with dbt=1.12.0
+[0m08:15:08.249717 [debug] [MainThread]: running dbt with arguments {'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'version_check': 'True', 'introspect': 'True', 'write_json': 'True', 'indirect_selection': 'eager', 'printer_width': '80', 'use_colors': 'True', 'quiet': 'False', 'use_experimental_parser': 'False', 'send_anonymous_usage_stats': 'True', 'static_parser': 'True', 'maximum_seed_size_mib': '1', 'warn_error': 'None', 'hints_enabled': 'True', 'log_format': 'default', 'profiles_dir': '/home/annie/.dbt', 'debug': 'False', 'empty': 'None', 'fail_fast': 'False', 'invocation_command': 'dbt init vehicle_dbt', 'no_print': 'None', 'log_cache_events': 'False', 'target_path': 'None', 'cache_selected_only': 'False', 'partial_parse': 'True', 'log_path': 'logs'}
+[0m08:15:08.261184 [debug] [MainThread]: Starter project path: /home/annie/.pyenv/versions/3.12.12/envs/dbt-env/lib/python3.12/site-packages/dbt/include/starter_project
+[0m08:15:08.267410 [info ] [MainThread]: Setting up your profile.
+[0m08:16:00.148502 [info ] [MainThread]: Profile vehicle_dbt written to /home/annie/.dbt/profiles.yml using target's profile_template.yml and your supplied values.
+[0m08:16:00.150347 [info ] [MainThread]: Running dbt debug to validate the project...
+[0m08:16:00.151009 [info ] [MainThread]: dbt version: 1.12.0
+[0m08:16:00.151292 [info ] [MainThread]: python version: 3.12.12
+[0m08:16:00.151494 [info ] [MainThread]: python path: /home/annie/.pyenv/versions/3.12.12/envs/dbt-env/bin/python
+[0m08:16:00.151695 [info ] [MainThread]: os info: Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43
+[0m08:16:00.174994 [info ] [MainThread]: Using profiles dir at /home/annie/.dbt
+[0m08:16:00.175795 [info ] [MainThread]: Using profiles.yml file at /home/annie/.dbt/profiles.yml
+[0m08:16:00.176688 [info ] [MainThread]: Using dbt_project.yml file at /home/annie/enterprise-ai-platform/vehicle_dbt/dbt_project.yml
+[0m08:16:00.177751 [info ] [MainThread]: adapter type: postgres
+[0m08:16:00.178259 [info ] [MainThread]: adapter version: 1.11.0
+[0m08:16:00.308927 [info ] [MainThread]: Configuration:
+[0m08:16:00.309582 [info ] [MainThread]:   profiles.yml file [[32mOK found and valid[0m]
+[0m08:16:00.310141 [info ] [MainThread]:   dbt_project.yml file [[32mOK found and valid[0m]
+[0m08:16:00.311075 [info ] [MainThread]: Required dependencies:
+[0m08:16:00.311663 [debug] [MainThread]: Executing "git --help"
+[0m08:16:00.326149 [debug] [MainThread]: STDOUT: "b"usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\n           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]\n           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\n           [--no-optional-locks] [--no-advice] [--bare] [--git-dir=<path>]\n           [--work-tree=<path>] [--namespace=<name>] [--config-env=<name>=<envvar>]\n           <command> [<args>]\n\nThese are common Git commands used in various situations:\n\nstart a working area (see also: git help tutorial)\n   clone      Clone a repository into a new directory\n   init       Create an empty Git repository or reinitialize an existing one\n\nwork on the current change (see also: git help everyday)\n   add        Add file contents to the index\n   mv         Move or rename a file, a directory, or a symlink\n   restore    Restore working tree files\n   rm         Remove files from the working tree and from the index\n\nexamine the history and state (see also: git help revisions)\n   bisect     Use binary search to find the commit that introduced a bug\n   diff       Show changes between commits, commit and working tree, etc\n   grep       Print lines matching a pattern\n   log        Show commit logs\n   show       Show various types of objects\n   status     Show the working tree status\n\ngrow, mark and tweak your common history\n   backfill   Download missing objects in a partial clone\n   branch     List, create, or delete branches\n   commit     Record changes to the repository\n   merge      Join two or more development histories together\n   rebase     Reapply commits on top of another base tip\n   reset      Set `HEAD` or the index to a known state\n   switch     Switch branches\n   tag        Create, list, delete or verify tags\n\ncollaborate (see also: git help workflows)\n   fetch      Download objects and refs from another repository\n   pull       Fetch from and integrate with another repository or a local branch\n   push       Update remote refs along with associated objects\n\n'git help -a' and 'git help -g' list available subcommands and some\nconcept guides. See 'git help <command>' or 'git help <concept>'\nto read about a specific subcommand or concept.\nSee 'git help git' for an overview of the system.\n""
+[0m08:16:00.326683 [debug] [MainThread]: STDERR: "b''"
+[0m08:16:00.327153 [info ] [MainThread]:  - git [[32mOK found[0m]
+
+[0m08:16:00.327678 [info ] [MainThread]: Connection:
+[0m08:16:00.328152 [info ] [MainThread]:   host: localhost
+[0m08:16:00.328640 [info ] [MainThread]:   port: 5433
+[0m08:16:00.329073 [info ] [MainThread]:   user: postgres
+[0m08:16:00.329475 [info ] [MainThread]:   database: vehicle_platform
+[0m08:16:00.329882 [info ] [MainThread]:   schema: analytics
+[0m08:16:00.330290 [info ] [MainThread]:   connect_timeout: 10
+[0m08:16:00.330802 [info ] [MainThread]:   role: None
+[0m08:16:00.331196 [info ] [MainThread]:   search_path: None
+[0m08:16:00.331584 [info ] [MainThread]:   keepalives_idle: 0
+[0m08:16:00.331969 [info ] [MainThread]:   sslmode: None
+[0m08:16:00.332370 [info ] [MainThread]:   sslcert: None
+[0m08:16:00.332752 [info ] [MainThread]:   sslkey: None
+[0m08:16:00.333129 [info ] [MainThread]:   sslrootcert: None
+[0m08:16:00.333501 [info ] [MainThread]:   application_name: dbt
+[0m08:16:00.333863 [info ] [MainThread]:   autocommit: False
+[0m08:16:00.334265 [info ] [MainThread]:   retries: 1
+[0m08:16:00.335099 [info ] [MainThread]: Registered adapter: postgres=1.11.0
+[0m08:16:00.423527 [debug] [MainThread]: Acquiring new postgres connection 'debug'
+[0m08:16:00.448983 [debug] [MainThread]: Using postgres connection "debug"
+[0m08:16:00.449373 [debug] [MainThread]: On debug: select 1 as id
+[0m08:16:00.449578 [debug] [MainThread]: Opening a new connection, currently in state init
+[0m08:16:00.490885 [debug] [MainThread]: Postgres adapter: Got a retryable error when attempting to open a postgres connection.
+1 attempts remaining. Retrying in 0 seconds.
+Error:
+connection to server at "localhost" (127.0.0.1), port 5433 failed: FATAL:  password authentication failed for user "postgres"
+connection to server at "localhost" (127.0.0.1), port 5433 failed: FATAL:  password authentication failed for user "postgres"
+
+[0m08:16:00.505734 [debug] [MainThread]: Postgres adapter: Error running SQL: select 1 as id
+[0m08:16:00.506418 [debug] [MainThread]: Postgres adapter: Rolling back transaction.
+[0m08:16:00.506996 [debug] [MainThread]: On debug: No close available on handle
+[0m08:16:00.507433 [info ] [MainThread]:   Connection test: [[31mERROR[0m]
+
+[0m08:16:00.507896 [info ] [MainThread]: [31m1 check failed:[0m
+[0m08:16:00.508295 [info ] [MainThread]: dbt was unable to connect to the specified database.
+The database returned the following error:
+
+  >Database Error
+  connection to server at "localhost" (127.0.0.1), port 5433 failed: FATAL:  password authentication failed for user "postgres"
+  connection to server at "localhost" (127.0.0.1), port 5433 failed: FATAL:  password authentication failed for user "postgres"
+  
+
+Check your database credentials and try again. For more information, visit:
+https://docs.getdbt.com/docs/configure-your-profile
+
+
+[0m08:16:00.509035 [info ] [MainThread]: Your new dbt project "vehicle_dbt" was created!
+Initialized new project in /home/annie/enterprise-ai-platform/vehicle_dbt/vehicle_dbt
+
+For more information on how to configure the profiles.yml file,
+please consult the dbt documentation here:
+
+  https://docs.getdbt.com/docs/configure-your-profile
+
+One more thing:
+
+Need help? Don't hesitate to reach out to us via GitHub issues or on Slack:
+
+  https://community.getdbt.com/
+
+Happy modeling!
+
+[0m08:16:00.509713 [info ] [MainThread]: [31mYour profile may need adjustments. You can find the logs of `dbt debug` above[0m
+[0m08:16:00.513740 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 52.37419, "process_in_blocks": "1544", "process_kernel_time": 0.463592, "process_mem_max_rss": "130624", "process_out_blocks": "96", "process_user_time": 2.072057}
+[0m08:16:00.514817 [debug] [MainThread]: Command `dbt init` succeeded at 08:16:00.514570 after 52.38 seconds
+[0m08:16:00.515388 [debug] [MainThread]: Connection 'debug' was properly closed.
+[0m08:16:00.515986 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fab799f10>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fad60af30>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x720fad608980>]}
+[0m08:16:00.516726 [debug] [MainThread]: Flushing usage events
+[0m08:16:01.887550 [debug] [MainThread]: An error was encountered while trying to flush usage events
+[0m08:20:47.306625 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371ca8a6840>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371c934e030>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371c9f59610>]}
+
+
+============================== 08:20:47.311624 | eeb6fc06-6f4f-47a9-9618-3a2229f29f01 ==============================
+[0m08:20:47.311624 [info ] [MainThread]: Running with dbt=1.12.0
+[0m08:20:47.312614 [debug] [MainThread]: running dbt with arguments {'fail_fast': 'False', 'hints_enabled': 'True', 'quiet': 'False', 'invocation_command': 'dbt init vehicle_dbt', 'maximum_seed_size_mib': '1', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'send_anonymous_usage_stats': 'True', 'static_parser': 'True', 'debug': 'False', 'partial_parse': 'True', 'profiles_dir': '/home/annie/.dbt', 'target_path': 'None', 'log_format': 'default', 'empty': 'None', 'write_json': 'True', 'warn_error': 'None', 'no_print': 'None', 'introspect': 'True', 'log_path': 'logs', 'version_check': 'True', 'cache_selected_only': 'False', 'printer_width': '80', 'use_colors': 'True', 'log_cache_events': 'False', 'use_experimental_parser': 'False', 'indirect_selection': 'eager'}
+[0m08:20:47.323821 [info ] [MainThread]: A project called vehicle_dbt already exists here.
+[0m08:20:47.325080 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 0.15940318, "process_in_blocks": "0", "process_kernel_time": 0.217718, "process_mem_max_rss": "112712", "process_out_blocks": "8", "process_user_time": 1.995754}
+[0m08:20:47.325560 [debug] [MainThread]: Command `dbt init` succeeded at 08:20:47.325477 after 0.16 seconds
+[0m08:20:47.326047 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371c9cfa3c0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371ca8a6840>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7371c91fb350>]}
+[0m08:20:47.326356 [debug] [MainThread]: Flushing usage events
+[0m08:20:57.339859 [debug] [MainThread]: An error was encountered while trying to flush usage events
+[0m08:41:20.332787 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043a072f90>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043a073cb0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043b200650>]}
+
+
+============================== 08:41:20.355579 | 633f6c6d-26b1-4953-b986-e79cc9d9ff96 ==============================
+[0m08:41:20.355579 [info ] [MainThread]: Running with dbt=1.12.0
+[0m08:41:20.356497 [debug] [MainThread]: running dbt with arguments {'indirect_selection': 'eager', 'log_path': 'logs', 'no_print': 'None', 'partial_parse': 'True', 'use_experimental_parser': 'False', 'fail_fast': 'False', 'static_parser': 'True', 'log_format': 'default', 'printer_width': '80', 'hints_enabled': 'True', 'invocation_command': 'dbt init vehicle_dbt', 'cache_selected_only': 'False', 'empty': 'None', 'use_colors': 'True', 'version_check': 'True', 'warn_error': 'None', 'introspect': 'True', 'profiles_dir': '/home/annie/.dbt', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'log_cache_events': 'False', 'write_json': 'True', 'debug': 'False', 'quiet': 'False', 'send_anonymous_usage_stats': 'True', 'maximum_seed_size_mib': '1', 'target_path': 'None'}
+[0m08:41:20.408440 [info ] [MainThread]: A project called vehicle_dbt already exists here.
+[0m08:41:20.413922 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 0.2654672, "process_in_blocks": "0", "process_kernel_time": 2.677654, "process_mem_max_rss": "112732", "process_out_blocks": "8", "process_user_time": 2.250029}
+[0m08:41:20.414938 [debug] [MainThread]: Command `dbt init` succeeded at 08:41:20.414723 after 0.27 seconds
+[0m08:41:20.416248 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043b4eb500>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043a963bc0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7a043cf63350>]}
+[0m08:41:20.416993 [debug] [MainThread]: Flushing usage events
+[0m08:41:21.486255 [debug] [MainThread]: An error was encountered while trying to flush usage events
+[0m08:43:01.796545 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3d131e50>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3df5d910>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3efd2870>]}
+
+
+============================== 08:43:01.800939 | 00daa83e-4e09-4b02-a2a5-6211c3b7c3f6 ==============================
+[0m08:43:01.800939 [info ] [MainThread]: Running with dbt=1.12.0
+[0m08:43:01.801552 [debug] [MainThread]: running dbt with arguments {'static_parser': 'True', 'maximum_seed_size_mib': '1', 'no_print': 'None', 'cache_selected_only': 'False', 'log_format': 'default', 'log_path': 'logs', 'fail_fast': 'False', 'introspect': 'True', 'use_experimental_parser': 'False', 'version_check': 'True', 'use_colors': 'True', 'printer_width': '80', 'debug': 'False', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'log_cache_events': 'False', 'quiet': 'False', 'partial_parse': 'True', 'invocation_command': 'dbt debug', 'target_path': 'None', 'hints_enabled': 'True', 'empty': 'None', 'profiles_dir': '/home/annie/.dbt', 'warn_error': 'None', 'send_anonymous_usage_stats': 'True', 'write_json': 'True', 'indirect_selection': 'eager'}
+[0m08:43:01.814877 [info ] [MainThread]: dbt version: 1.12.0
+[0m08:43:01.815366 [info ] [MainThread]: python version: 3.12.12
+[0m08:43:01.815619 [info ] [MainThread]: python path: /home/annie/.pyenv/versions/3.12.12/envs/dbt-env/bin/python
+[0m08:43:01.816215 [info ] [MainThread]: os info: Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43
+[0m08:43:01.980367 [info ] [MainThread]: Using profiles dir at /home/annie/.dbt
+[0m08:43:01.980875 [info ] [MainThread]: Using profiles.yml file at /home/annie/.dbt/profiles.yml
+[0m08:43:01.981133 [info ] [MainThread]: Using dbt_project.yml file at /home/annie/enterprise-ai-platform/dbt_project.yml
+[0m08:43:01.981435 [error] [MainThread]: [[31mERROR[0m]: Encountered an error:
+Internal Error
+  Profile should not be None if loading profile completed
+[0m08:43:01.982516 [debug] [MainThread]: Resource report: {"command_name": "debug", "command_success": false, "command_wall_clock_time": 0.32084405, "process_in_blocks": "0", "process_kernel_time": 0.379484, "process_mem_max_rss": "119432", "process_out_blocks": "16", "process_user_time": 2.001279}
+[0m08:43:01.982985 [debug] [MainThread]: Command `dbt debug` failed at 08:43:01.982901 after 0.32 seconds
+[0m08:43:01.983276 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3e447f20>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3e0c5c70>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7fda3d183440>]}
+[0m08:43:01.983571 [debug] [MainThread]: Flushing usage events
+[0m08:43:02.947965 [debug] [MainThread]: An error was encountered while trying to flush usage events
+[0m09:19:43.470360 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb994534a0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb96315220>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb9954f950>]}
+
+
+============================== 09:19:43.477295 | 44bafb07-bddd-426a-8e14-075f9df649a2 ==============================
+[0m09:19:43.477295 [info ] [MainThread]: Running with dbt=1.12.0
+[0m09:19:43.478003 [debug] [MainThread]: running dbt with arguments {'warn_error': 'None', 'cache_selected_only': 'False', 'log_path': 'logs', 'log_cache_events': 'False', 'use_experimental_parser': 'False', 'hints_enabled': 'True', 'quiet': 'False', 'printer_width': '80', 'no_print': 'None', 'invocation_command': 'dbt test', 'use_colors': 'True', 'maximum_seed_size_mib': '1', 'empty': 'None', 'version_check': 'True', 'target_path': 'None', 'partial_parse': 'True', 'debug': 'False', 'log_format': 'default', 'static_parser': 'True', 'indirect_selection': 'eager', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'introspect': 'True', 'profiles_dir': '/home/annie/.dbt', 'send_anonymous_usage_stats': 'True', 'fail_fast': 'False', 'write_json': 'True'}
+[0m09:19:43.478590 [error] [MainThread]: [[31mERROR[0m]: Encountered an error:
+Runtime Error
+  No dbt_project.yml found at expected path /home/annie/enterprise-ai-platform/dbt_project.yml
+  Verify that each entry within packages.yml (and their transitive dependencies) contains a file named dbt_project.yml
+  
+[0m09:19:43.480071 [debug] [MainThread]: Resource report: {"command_name": "test", "command_success": false, "command_wall_clock_time": 0.118418604, "process_in_blocks": "2360", "process_kernel_time": 0.188107, "process_mem_max_rss": "112888", "process_out_blocks": "8", "process_user_time": 1.981134}
+[0m09:19:43.480605 [debug] [MainThread]: Command `dbt test` failed at 09:19:43.480498 after 0.12 seconds
+[0m09:19:43.480924 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb97b63e60>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb994534a0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x7acb964d3260>]}
+[0m09:19:43.481249 [debug] [MainThread]: Flushing usage events
+[0m09:19:44.488158 [debug] [MainThread]: An error was encountered while trying to flush usage events

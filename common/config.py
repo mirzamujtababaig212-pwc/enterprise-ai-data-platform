@@ -5,5 +5,5 @@ load_dotenv()
 
 
 def load_config():
-    with open("config/config.yaml", "r") as file:
+    with open("config/config.yaml") as file:
         return yaml.safe_load(file)

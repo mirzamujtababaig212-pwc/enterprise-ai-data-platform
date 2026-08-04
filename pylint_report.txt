@@ -1,0 +1,353 @@
+************* Module common.config
+common/config.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config.py:2:0: E0401: Unable to import 'dotenv' (import-error)
+common/config.py:7:0: C0116: Missing function or method docstring (missing-function-docstring)
+common/config.py:8:9: W1514: Using open without explicitly specifying an encoding (unspecified-encoding)
+************* Module common.dependency_provider
+common/dependency_provider.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/dependency_provider.py:1:0: E0611: No name 'settings' in module 'common.config' (no-name-in-module)
+common/dependency_provider.py:22:0: C0115: Missing class docstring (missing-class-docstring)
+common/dependency_provider.py:25:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:29:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:33:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:37:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:44:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:51:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:59:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:88:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:104:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:108:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:112:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:116:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:120:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:124:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:128:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/dependency_provider.py:132:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.constants
+common/constants.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.pipeline_factory_1
+common/pipeline_factory_1.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/pipeline_factory_1.py:1:0: E0611: No name 'settings' in module 'common.config' (no-name-in-module)
+common/pipeline_factory_1.py:17:0: C0115: Missing class docstring (missing-class-docstring)
+common/pipeline_factory_1.py:20:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/pipeline_factory_1.py:26:12: R1705: Unnecessary "elif" after "return", remove the leading "el" from "elif" (no-else-return)
+common/pipeline_factory_1.py:97:12: W0707: Consider explicitly re-raising using 'except KeyError as exc' and 'raise ValueError(f'Unknown pipeline: {name}') from exc' (raise-missing-from)
+common/pipeline_factory_1.py:17:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.spark_session
+common/spark_session.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/spark_session.py:1:0: E0401: Unable to import 'delta' (import-error)
+common/spark_session.py:2:0: E0401: Unable to import 'pyspark.sql' (import-error)
+common/spark_session.py:5:0: C0116: Missing function or method docstring (missing-function-docstring)
+common/spark_session.py:5:22: W0613: Unused argument 'app_name' (unused-argument)
+************* Module common.logger
+common/logger.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.config.pipeline_loader
+common/config/pipeline_loader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/pipeline_loader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/pipeline_loader.py:7:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/config/pipeline_loader.py:9:13: W1514: Using open without explicitly specifying an encoding (unspecified-encoding)
+common/config/pipeline_loader.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.config.storage
+common/config/storage.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/storage.py:1:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/storage.py:1:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.spark
+common/config/spark.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/spark.py:3:0: E0401: Unable to import 'dotenv' (import-error)
+common/config/spark.py:8:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/spark.py:8:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.environment
+common/config/environment.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/environment.py:3:0: E0401: Unable to import 'dotenv' (import-error)
+common/config/environment.py:8:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/environment.py:8:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.settings
+common/config/settings.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/settings.py:1:0: E0611: No name 'database' in module 'common.config' (no-name-in-module)
+common/config/settings.py:2:0: E0611: No name 'environment' in module 'common.config' (no-name-in-module)
+common/config/settings.py:3:0: E0611: No name 'kafka' in module 'common.config' (no-name-in-module)
+common/config/settings.py:4:0: E0611: No name 'spark' in module 'common.config' (no-name-in-module)
+common/config/settings.py:5:0: E0611: No name 'storage' in module 'common.config' (no-name-in-module)
+common/config/settings.py:8:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/settings.py:8:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.database
+common/config/database.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/database.py:3:0: E0401: Unable to import 'dotenv' (import-error)
+common/config/database.py:8:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/database.py:8:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.kafka
+common/config/kafka.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/kafka.py:3:0: E0401: Unable to import 'dotenv' (import-error)
+common/config/kafka.py:8:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/kafka.py:8:0: R0903: Too few public methods (0/2) (too-few-public-methods)
+************* Module common.config.config_loader
+common/config/config_loader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/config/config_loader.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/config/config_loader.py:9:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/config/config_loader.py:13:13: W1514: Using open without explicitly specifying an encoding (unspecified-encoding)
+common/config/config_loader.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.exceptions.database
+common/exceptions/database.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/exceptions/database.py:1:0: C0115: Missing class docstring (missing-class-docstring)
+************* Module common.exceptions.kafka
+common/exceptions/kafka.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.readers.parquet_reader
+common/readers/parquet_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/parquet_reader.py:7:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/parquet_reader.py:7:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.jdbc_reader
+common/readers/jdbc_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/jdbc_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/jdbc_reader.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.delta_reader
+common/readers/delta_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/delta_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/delta_reader.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.spark_reader
+common/readers/spark_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/spark_reader.py:9:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/spark_reader.py:11:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/spark_reader.py:15:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/spark_reader.py:20:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/spark_reader.py:25:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/spark_reader.py:29:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/spark_reader.py:33:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.readers.base_reader
+common/readers/base_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/base_reader.py:3:0: E0401: Unable to import 'pyspark.sql' (import-error)
+common/readers/base_reader.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/base_reader.py:8:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/base_reader.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.fabric_reader
+common/readers/fabric_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/fabric_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/fabric_reader.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.readers.csv_reader
+common/readers/csv_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/csv_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/csv_reader.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.postgres_reader
+common/readers/postgres_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/postgres_reader.py:1:0: E0611: No name 'settings' in module 'common.config' (no-name-in-module)
+common/readers/postgres_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/postgres_reader.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/postgres_reader.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.reader_strategy
+common/readers/reader_strategy.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/reader_strategy.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/reader_strategy.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/readers/reader_strategy.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.readers.snowflake_reader
+common/readers/snowflake_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/snowflake_reader.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/snowflake_reader.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.readers.kafka_reader
+common/readers/kafka_reader.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/readers/kafka_reader.py:9:0: C0115: Missing class docstring (missing-class-docstring)
+common/readers/kafka_reader.py:9:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.logging.logger
+common/logging/logger.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/logging/logger.py:4:0: E0611: No name 'settings' in module 'common.config' (no-name-in-module)
+common/logging/logger.py:7:0: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.validation.business_rule_validator
+common/validation/business_rule_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/business_rule_validator.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/business_rule_validator.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/business_rule_validator.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.duplicate_validator
+common/validation/duplicate_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/duplicate_validator.py:1:0: E0401: Unable to import 'pyspark.sql' (import-error)
+common/validation/duplicate_validator.py:2:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/duplicate_validator.py:7:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/duplicate_validator.py:7:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.validation_rules
+common/validation/validation_rules.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/validation_rules.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/validation_rules.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/validation_rules.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/validation_rules.py:10:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/validation_rules.py:14:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/validation_rules.py:18:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.validation.data_quality
+common/validation/data_quality.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/data_quality.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/data_quality.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/data_quality.py:5:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/data_quality.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.composite_validator
+common/validation/composite_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/composite_validator.py:9:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/composite_validator.py:13:4: C0116: Missing function or method docstring (missing-function-docstring)
+************* Module common.validation.base_validator
+common/validation/base_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/base_validator.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/base_validator.py:13:8: W2301: Unnecessary ellipsis constant (unnecessary-ellipsis)
+common/validation/base_validator.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.validator
+common/validation/validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/validator.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/validator.py:9:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/validator.py:10:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/validator.py:9:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.noop_validator
+common/validation/noop_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/noop_validator.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/noop_validator.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.schema_validator
+common/validation/schema_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/schema_validator.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/schema_validator.py:10:12: W0719: Raising too general exception: Exception (broad-exception-raised)
+common/validation/schema_validator.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.null_validator
+common/validation/null_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/null_validator.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/null_validator.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/null_validator.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.composite_validator
+common/validation/rules/composite_validator.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/composite_validator.py:7:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/composite_validator.py:23:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/rules/composite_validator.py:7:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.schema_rule
+common/validation/rules/schema_rule.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/schema_rule.py:1:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/schema_rule.py:6:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/rules/schema_rule.py:1:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.duplicate_rule
+common/validation/rules/duplicate_rule.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/duplicate_rule.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/rules/duplicate_rule.py:2:0: E0401: Unable to import 'pyspark.sql.window' (import-error)
+common/validation/rules/duplicate_rule.py:7:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/duplicate_rule.py:7:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.not_null_rule
+common/validation/rules/not_null_rule.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/not_null_rule.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/rules/not_null_rule.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/not_null_rule.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.regex_rule
+common/validation/rules/regex_rule.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/regex_rule.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/rules/regex_rule.py:6:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/regex_rule.py:6:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.validation.rules.range_rule
+common/validation/rules/range_rule.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+common/validation/rules/range_rule.py:1:0: E0401: Unable to import 'pyspark.sql.functions' (import-error)
+common/validation/rules/range_rule.py:4:0: C0115: Missing class docstring (missing-class-docstring)
+common/validation/rules/range_rule.py:11:4: C0116: Missing function or method docstring (missing-function-docstring)
+common/validation/rules/range_rule.py:4:0: R0903: Too few public methods (1/2) (too-few-public-methods)
+************* Module common.registry.writer_registry
+common/registry/writer_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.validator_registry
+common/registry/validator_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.dlq_registry
+common/registry/dlq_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.transformer_registry
+common/registry/transformer_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.pipeline_registry
+common/registry/pipeline_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.reader_registry
+common/registry/reader_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module common.registry.metrics_registry
+common/registry/metrics_registry.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module spark.schemas.vehicle_schema
+spark/schemas/vehicle_schema.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+spark/schemas/vehicle_schema.py:1:0: E0401: Unable to import 'pyspark.sql.types' (import-error)
+************* Module spark.schemas.gold_schema
+spark/schemas/gold_schema.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+spark/schemas/gold_schema.py:1:0: E0401: Unable to import 'pyspark.sql.types' (import-error)
+************* Module spark.schemas.silver_schema
+spark/schemas/silver_schema.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+spark/schemas/silver_schema.py:1:0: E0401: Unable to import 'pyspark.sql.types' (import-error)
+************* Module spark.schemas.bronze_schema
+spark/schemas/bronze_schema.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+spark/schemas/bronze_schema.py:1:0: E0401: Unable to import 'pyspark.sql.types' (import-error)
+************* Module spark.streaming.kafka_to_bronze
+spark/streaming/kafka_to_bronze.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module spark.streaming.silver_to_gold
+spark/streaming/silver_to_gold.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module spark.streaming.bronze_to_silver
+spark/streaming/bronze_to_silver.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+************* Module spark.streaming.schemas
+spark/streaming/schemas.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+spark/streaming/schemas.py:1:0: E0401: Unable to import 'pyspark.sql.types' (import-error)
+spark/streaming/schemas.py:1:0: R0801: Similar lines in 2 files
+==common.dependency_provider:[60:84]
+==common.pipeline_factory_1:[30:54]
+                        [
+                            SchemaValidator(
+                                [
+                                    "vehicle_id",
+                                    "event_time",
+                                    "latitude",
+                                    "longitude",
+                                    "speed",
+                                    "rpm",
+                                    "fuel_level",
+                                    "battery",
+                                    "engine_temperature",
+                                    "gear",
+                                    "topic",
+                                    "partition",
+                                    "offset",
+                                    "timestamp",
+                                    "ingestion_timestamp",
+                                    "ingestion_time",
+                                ]
+                            ),
+                            NullValidator(["vehicle_id", "timestamp"]),
+                            DuplicateValidator(["vehicle_id", "timestamp"]),
+                        ] (duplicate-code)
+spark/streaming/schemas.py:1:0: R0801: Similar lines in 2 files
+==spark.schemas.bronze_schema:[11:27]
+==spark.schemas.silver_schema:[11:27]
+    [
+        StructField("vehicle_id", StringType(), True),
+        StructField("event_time", TimestampType(), True),
+        StructField("latitude", DoubleType(), True),
+        StructField("longitude", DoubleType(), True),
+        StructField("speed", DoubleType(), True),
+        StructField("rpm", IntegerType(), True),
+        StructField("fuel_level", DoubleType(), True),
+        StructField("battery", DoubleType(), True),
+        StructField("engine_temperature", DoubleType(), True),
+        StructField("gear", IntegerType(), True),
+        StructField("topic", StringType(), True),
+        StructField("partition", IntegerType(), True),
+        StructField("offset", LongType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("ingestion_timestamp", TimestampType(), True), (duplicate-code)
+spark/streaming/schemas.py:1:0: R0801: Similar lines in 2 files
+==spark.schemas.vehicle_schema:[9:23]
+==spark.streaming.schemas:[9:23]
+vehicle_schema = StructType(
+    [
+        StructField("vehicle_id", StringType()),
+        StructField("event_time", TimestampType()),
+        StructField("latitude", DoubleType()),
+        StructField("longitude", DoubleType()),
+        StructField("speed", DoubleType()),
+        StructField("rpm", IntegerType()),
+        StructField("fuel_level", DoubleType()),
+        StructField("battery", DoubleType()),
+        StructField("engine_temperature", DoubleType()),
+        StructField("gear", IntegerType()),
+    ]
+) (duplicate-code)
+spark/streaming/schemas.py:1:0: R0801: Similar lines in 2 files
+==common.dependency_provider:[89:100]
+==common.pipeline_factory_1:[65:76]
+                        [
+                            SchemaValidator(
+                                [
+                                    "vehicle_id",
+                                    "status",
+                                    "event_timestamp",
+                                ]
+                            ),
+                            BusinessRuleValidator(),
+                            DuplicateValidator(["vehicle_id", "timestamp"]),
+                        ] (duplicate-code)
+
+------------------------------------------------------------------
+Your code has been rated at 3.11/10 (previous run: 3.11/10, +0.00)
+

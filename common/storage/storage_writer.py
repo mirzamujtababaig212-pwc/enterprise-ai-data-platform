@@ -18,9 +18,7 @@ class StorageWriter:
         trigger=None,
         foreach_batch=None,
     ):
-        writer = df.writeStream.outputMode(output_mode).option(
-            "checkpointLocation", checkpoint
-        )
+        writer = df.writeStream.outputMode(output_mode).option("checkpointLocation", checkpoint)
         if trigger:
             writer = writer.trigger(**trigger)
         if foreach_batch:

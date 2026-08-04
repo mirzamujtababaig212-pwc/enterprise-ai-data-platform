@@ -15,5 +15,5 @@ class PipelineLoader:
         if not file.exists():
             raise FileNotFoundError(file)
 
-        with open(file, "r") as f:
+        with open(file) as f:
             return yaml.safe_load(f)

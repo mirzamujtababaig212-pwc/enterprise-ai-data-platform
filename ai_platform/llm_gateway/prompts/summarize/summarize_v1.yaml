@@ -1,0 +1,7 @@
+name: summarize
+version: 1
+status: approved
+tags:
+  - summarization
+prompt: |
+  Summarize the following text:

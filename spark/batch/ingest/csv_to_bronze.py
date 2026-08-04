@@ -5,9 +5,7 @@ spark = SparkSession.builder.appName("Vehicle Batch Ingestion").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
 vehicle_df = (
-    spark.read.option("header", True)
-    .option("inferSchema", True)
-    .csv("data/raw/vehicle_data.csv")
+    spark.read.option("header", True).option("inferSchema", True).csv("data/raw/vehicle_data.csv")
 )
 
 print("=" * 60)

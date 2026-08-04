@@ -27,9 +27,7 @@ class FabricWriter(BaseWriter):
         logger.info("Write Duration=%.2f sec", duration)
 
     def write_stream(self, df, foreach_batch):
-        writer = df.writeStream.foreachBatch(
-            lambda batch, _: self.write_batch(batch)
-        ).start()
+        writer = df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).start()
         if self.checkpoint:
             writer = writer.option(
                 "checkpointLocation",

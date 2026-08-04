@@ -7,7 +7,5 @@ class SchemaValidator(BaseValidator):
 
     def validate(self, df):
         if list(df.columns) != list(self.expected_columns):
-            raise Exception(
-                f"Expected schema {self.expected_columns}, got {df.columns}"
-            )
+            raise RuntimeError(f"Expected schema {self.expected_columns}, got {df.columns}")
         return df, None

@@ -1,7 +1,8 @@
+from common.writers.kafka_writer import KafkaWriter
+
 from common.writers.console_writer import ConsoleWriter
 from common.writers.delta_writer import DeltaWriter
 from common.writers.fabric_writer import FabricWriter
-from common.writers.kafka_writer import KafkaWriter
 from common.writers.parquet_writer import ParquetWriter
 from common.writers.postgres_writer import PostgresWriter
 from common.writers.snowflake_writer import SnowflakeWriter
@@ -11,9 +12,7 @@ class StorageWriter:
     @staticmethod
     def write(df, target, table, mode="append"):
         if target == "postgres":
-            PostgresWriter(url=..., table=table, properties=..., mode=mode).write_batch(
-                df
-            )
+            PostgresWriter(url=..., table=table, properties=..., mode=mode).write_batch(df)
         elif target == "snowflake":
             SnowflakeWriter(options=..., table=table, mode=mode).write_batch(df)
         elif target == "delta":

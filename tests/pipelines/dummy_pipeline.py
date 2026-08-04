@@ -1,4 +1,5 @@
 from common.pipelines.base_pipeline import BasePipeline
+from common.pipelines.pipeline_config import PipelineConfig
 
 
 class DummyConfig:
@@ -11,4 +12,15 @@ class DummyConfig:
 
 
 class DummyPipeline(BasePipeline):
-    CONFIG = DummyConfig()
+    CONFIG = PipelineConfig(
+        pipeline_name="Dummy",
+        source="dummy",
+        retries=3,
+        retry_delay=0,
+        enable_validation=True,
+        enable_metrics=True,
+        enable_dlq=True,
+    )
+
+    def cleanup(self):
+        pass

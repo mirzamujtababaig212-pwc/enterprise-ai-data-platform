@@ -16,4 +16,4 @@ class KafkaWriter:
             )
         except Exception as ex:
             logger.error(str(ex))
-            raise KafkaException(str(ex))
+            raise KafkaException(str(ex)) from ex

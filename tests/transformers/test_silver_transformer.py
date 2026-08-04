@@ -1,7 +1,12 @@
 from datetime import datetime
 
 import pytest
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 from common.transformers.silver_transformer import SilverTransformer
 
@@ -80,9 +85,7 @@ class TestSilverTransformer:
 
     def test_large_dataset(self, spark):
         transformer = SilverTransformer()
-        rows = [
-            (f"V{i}", "running", datetime(2026, 1, 1, 10, 0, 0)) for i in range(5000)
-        ]
+        rows = [(f"V{i}", "running", datetime(2026, 1, 1, 10, 0, 0)) for i in range(5000)]
         df = spark.createDataFrame(rows, schema)
         result = transformer.transform(df)
         assert result.count() == 5000
@@ -90,7 +93,7 @@ class TestSilverTransformer:
     def test_invalid_schema(self, spark):
         transformer = SilverTransformer()
         df = spark.createDataFrame([(250,)], ["status"])
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             transformer.transform(df).collect()
 
     def test_trim_and_upper(self, spark):

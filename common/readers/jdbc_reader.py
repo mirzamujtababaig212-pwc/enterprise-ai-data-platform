@@ -8,6 +8,4 @@ class JDBCReader(BaseReader):
         self.properties = properties
 
     def read(self, spark):
-        return spark.read.jdbc(
-            url=self.url, table=self.table, properties=self.properties
-        )
+        return spark.read.jdbc(url=self.url, table=self.table, properties=self.properties)

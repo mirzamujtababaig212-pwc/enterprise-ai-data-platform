@@ -28,9 +28,7 @@ class WriterBuilder:
             kwargs["table"] = Settings.postgres.TABLE
             kwargs["properties"] = Settings.postgres.PROPERTIES
         elif writer_type == "delta":
-            kwargs["table"] = getattr(
-                Settings.storage, cfg.get("table", "BRONZE_TABLE")
-            )
+            kwargs["table"] = getattr(Settings.storage, cfg.get("table", "BRONZE_TABLE"))
             kwargs["checkpoint"] = getattr(
                 Settings.storage, cfg.get("checkpoint", "BRONZE_CHECKPOINT")
             )
