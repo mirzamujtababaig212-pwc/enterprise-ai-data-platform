@@ -1,8 +1,0 @@
-v1
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00000-e6b961f1-396a-43a8-87dc-eb8de49b9139-c000.snappy.parquet","size":76663,"isDir":false,"modificationTime":1784630158841,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00001-fbaabb43-4748-4e8e-8d42-073d50e157e9-c000.snappy.parquet","size":71850,"isDir":false,"modificationTime":1784630158829,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00002-c6c8f9e3-d831-479b-bed0-2150893f4a78-c000.snappy.parquet","size":70612,"isDir":false,"modificationTime":1784630158845,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00003-ab9a6d06-d3c2-4ad6-a66e-023c6dfeed25-c000.snappy.parquet","size":6598,"isDir":false,"modificationTime":1784630158673,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00004-3d94e6a4-0798-4a2f-b4bd-172c8911180f-c000.snappy.parquet","size":6385,"isDir":false,"modificationTime":1784630158677,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00005-4253d1e0-542a-4a52-a8e4-bd26a6199d52-c000.snappy.parquet","size":6383,"isDir":false,"modificationTime":1784630158673,"blockReplication":1,"blockSize":33554432,"action":"add"}
-{"path":"file:///home/annie/enterprise-ai-platform/data/silver/part-00006-d7f2abaa-a1d8-4665-85e0-c37f2c4f3855-c000.snappy.parquet","size":5336,"isDir":false,"modificationTime":1784630158673,"blockReplication":1,"blockSize":33554432,"action":"add"}

@@ -1,8 +1,0 @@
-v1
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00000-352124f5-3f0b-4288-a9be-52163ba2285d-c000.snappy.parquet","timestamp":1784625695980,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00001-26a757f4-e379-46b0-b18a-2d1b80736fe1-c000.snappy.parquet","timestamp":1784625696856,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00000-b72c1221-5a42-4d59-9a2b-d466928fa17e-c000.snappy.parquet","timestamp":1784625696924,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00002-a22716ff-9c63-423b-91a0-2e3826aec92c-c000.snappy.parquet","timestamp":1784625697368,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00000-a69bde0c-c6e0-4f2a-ad44-9a68a1161f61-c000.snappy.parquet","timestamp":1784630083782,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00001-529ac9ef-55a0-4fb3-b2c5-1b91fabf2048-c000.snappy.parquet","timestamp":1784630083782,"batchId":1726}
-{"path":"file:///home/annie/enterprise-ai-platform/data/bronze/part-00002-a97155d7-5858-484f-9224-de994c264119-c000.snappy.parquet","timestamp":1784630083782,"batchId":1726}

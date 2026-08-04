@@ -5,3 +5,21 @@ htmlcov/
 .mutmut-cache/
 __pycache__/
 *.pyc
+# Spark / Delta Lake checkpoints and logs
+spark/checkpoints/
+spark/streaming/logs/
+*.crc
+*.compact
+*.delta
+.delta/
+_delta_log/
+
+# Parquet artifacts
+*.parquet
+*.snappy.parquet
+*.parquet.crc
+
+# Warehouse outputs
+mutants/spark-warehouse/
+data/silver/
+data/gold/
