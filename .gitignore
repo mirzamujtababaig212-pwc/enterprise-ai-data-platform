@@ -39,3 +39,115 @@ data/gold/
 *.delta
 _SUCCESS
 _delta_log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+.env
+venv/
+dbt-env/
+
+# Spark / Delta Lake checkpoints and logs
+spark/checkpoints/
+spark/streaming/logs/
+mutants/spark-warehouse/
+
+# Data outputs
+data/silver/
+data/gold/
+
+# Parquet / Delta artifacts
+*.parquet
+*.snappy.parquet
+*.crc
+*.compact
+*.delta
+_delta_log/
+_SUCCESS
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+venv/
+dbt-env/
+
+# Spark / Delta Lake checkpoints and logs
+spark/checkpoints/
+spark/streaming/logs/
+mutants/spark-warehouse/
+
+# Data outputs
+data/silver/
+data/gold/
+
+# Parquet / Delta artifacts
+*.parquet
+*.snappy.parquet
+*.crc
+*.compact
+*.delta
+_delta_log/
+_SUCCESS
+
+
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+.env
+venv/
+dbt-env/
+
+# -------------------------
+# Jupyter / Data Science
+# -------------------------
+.ipynb_checkpoints/
+*.ipynb
+*.ipynb.json
+*.ipynb.tmp
+
+# -------------------------
+# Spark / Delta Lake
+# -------------------------
+spark/checkpoints/
+spark/streaming/logs/
+mutants/spark-warehouse/
+
+# -------------------------
+# Data outputs
+# -------------------------
+data/silver/
+data/gold/
+data/bronze/
+
+# -------------------------
+# Parquet / Delta artifacts
+# -------------------------
+*.parquet
+*.snappy.parquet
+*.crc
+*.compact
+*.delta
+_delta_log/
+_SUCCESS
+
+# -------------------------
+# OS / Editor files
+# -------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
