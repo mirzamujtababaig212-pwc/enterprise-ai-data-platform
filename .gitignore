@@ -23,3 +23,19 @@ _delta_log/
 mutants/spark-warehouse/
 data/silver/
 data/gold/
+
+# Spark / Delta Lake artifacts
+spark/checkpoints/
+spark/streaming/logs/
+mutants/spark-warehouse/
+data/silver/
+data/gold/
+
+# Parquet / Delta files
+*.parquet
+*.snappy.parquet
+*.crc
+*.compact
+*.delta
+_SUCCESS
+_delta_log/
