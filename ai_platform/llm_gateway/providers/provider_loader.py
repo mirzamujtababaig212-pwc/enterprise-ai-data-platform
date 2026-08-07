@@ -1,5 +1,5 @@
 from ai_platform.llm_gateway.config.provider_settings import (
-    ENABLED_PROVIDERS,
+    get_enabled_providers,
 )
 from ai_platform.llm_gateway.providers.anthropic_provider import (
     AnthropicProvider,
@@ -32,13 +32,15 @@ PROVIDER_CLASSES = {
 
 def load_providers(registry) -> None:
     """
-    Load and register all configured providers.
+    Load and register configured providers.
     """
 
-    if not ENABLED_PROVIDERS:
-        raise ValueError("No providers have been configured.")
+    enabled_providers = get_enabled_providers()
 
-    for provider_name in ENABLED_PROVIDERS:
+    if not enabled_providers:
+        raise ValueError("No providers configured.")
+
+    for provider_name in enabled_providers:
 
         if provider_name not in PROVIDER_CLASSES:
             raise ValueError(f"Unknown configured provider: {provider_name}")
