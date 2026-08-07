@@ -2,3 +2,6 @@
 -r dbt.txt
 
 pytest
+uvicorn
+fastapi
+pyspark==3.5.6

@@ -1,18 +1,48 @@
+from typing import Any
+
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+
+SUPPORTED_CHAT_MODELS = {
+    "anthropic-chat",
+}
+
+SUPPORTED_EMBEDDING_MODELS = {
+    "anthropic-embedding",
+}
 
 
 class AnthropicProvider(BaseProvider):
-    def chat(self, request: dict) -> dict:
-        return {"reply": f"Anthropic echo: {request.get('message', '')}"}
+    async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        model = request["model"]
 
-    def stream(self, request: dict) -> dict:
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported Anthropic model: {model}")
+
+        return {"reply": f"Anthropic echo: {request['prompt']}"}
+
+    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"stream": ["anthropic-chunk1", "anthropic-chunk2"]}
 
-    def embeddings(self, request: dict) -> list[float]:
-        return [0.7, 0.8, 0.9]
+    async def embeddings(self, request: dict[str, Any]) -> list[float]:
+        model = request["model"]
 
-    def health_check(self) -> dict:
+        if model not in SUPPORTED_EMBEDDING_MODELS:
+            raise ValueError(f"Unsupported Anthropic embedding model: {model}")
+
+        return [
+            0.7,
+            0.8,
+            0.9,
+        ]
+
+    async def health_check(self) -> dict[str, Any]:
         return {"status": "ok"}
 
-    def list_models(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         return ["anthropic-chat", "anthropic-embedding"]
+
+    def supported_chat_models(self):
+        return list(SUPPORTED_CHAT_MODELS)
+
+    def supported_embedding_models(self):
+        return list(SUPPORTED_EMBEDDING_MODELS)

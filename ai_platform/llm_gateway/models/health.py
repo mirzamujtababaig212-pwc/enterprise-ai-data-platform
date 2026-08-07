@@ -1,6 +1,7 @@
 from pydantic import BaseModel
+from typing import Any
 
 
 class HealthResponse(BaseModel):
     status: str
-    providers: list[str]
+    providers: dict[str, dict[str, Any]]

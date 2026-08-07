@@ -108,6 +108,7 @@ __pycache__/
 *.log
 *.sqlite3
 .env
+.env.*
 venv/
 dbt-env/
 

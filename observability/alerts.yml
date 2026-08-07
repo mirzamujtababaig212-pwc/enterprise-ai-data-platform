@@ -1,0 +1,51 @@
+groups:
+
+- name: gateway-alerts
+
+  rules:
+
+  - alert: HighErrorRate
+
+    expr: rate(llm_gateway_errors_total[5m]) > 1
+
+    for: 2m
+
+    labels:
+
+      severity: warning
+
+    annotations:
+
+      summary: High gateway error rate
+
+  - alert: HighLatency
+
+    expr: histogram_quantile(
+            0.95,
+            sum(rate(llm_gateway_http_request_duration_seconds_bucket[5m]))
+            by (le)
+          ) > 2
+
+    for: 5m
+
+    labels:
+
+      severity: warning
+
+    annotations:
+
+      summary: Gateway latency is above two seconds
+
+  - alert: ProviderUnavailable
+
+    expr: increase(llm_gateway_errors_total[5m]) > 10
+
+    for: 2m
+
+    labels:
+
+      severity: critical
+
+    annotations:
+
+      summary: Provider failures detected

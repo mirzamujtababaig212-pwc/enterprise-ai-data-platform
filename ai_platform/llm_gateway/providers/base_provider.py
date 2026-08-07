@@ -1,19 +1,33 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class BaseProvider(ABC):
 
     @abstractmethod
-    def chat(self, request: dict) -> dict: ...
+    async def chat(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
     @abstractmethod
-    def stream(self, request: dict) -> dict: ...
+    async def stream(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
     @abstractmethod
-    def embeddings(self, request: dict) -> list[float]: ...
+    async def embeddings(
+        self,
+        request: dict[str, Any],
+    ) -> list[float]: ...
 
     @abstractmethod
-    def health_check(self) -> dict: ...
+    async def health_check(self) -> dict[str, Any]: ...
 
     @abstractmethod
-    def list_models(self) -> list[str]: ...
+    async def list_models(self) -> list[str]:
+        return [
+            "openai-gpt",
+            "openai-embedding",
+        ]
+
+    @abstractmethod
+    def supported_chat_models(self) -> list[str]: ...
+
+    @abstractmethod
+    def supported_embedding_models(self) -> list[str]: ...

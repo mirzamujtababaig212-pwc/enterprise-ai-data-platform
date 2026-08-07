@@ -1,18 +1,46 @@
+from typing import Any
+
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+
+SUPPORTED_CHAT_MODELS = {
+    "openai-gpt",
+}
+
+SUPPORTED_EMBEDDING_MODELS = {
+    "openai-embedding",
+}
 
 
 class OpenAIProvider(BaseProvider):
-    def chat(self, request: dict) -> dict:
-        return {"reply": f"OpenAI echo: {request.get('message', '')}"}
+    async def chat(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        model = request["model"]
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported OpenAI model: {model}")
 
-    def stream(self, request: dict) -> dict:
+            return {"reply": f"OpenAI echo: {request['prompt']}"}
+
+    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"stream": ["openai-chunk1", "openai-chunk2"]}
 
-    def embeddings(self, request: dict) -> list[float]:
+    async def embeddings(self, request: dict[str, Any]) -> list[float]:
+        model = request["model"]
+
+        if model not in SUPPORTED_EMBEDDING_MODELS:
+            raise ValueError(f"Unsupported OpenAI embedding model: {model}")
+
         return [0.1, 0.2, 0.3]
 
-    def health_check(self) -> dict:
+    async def health_check(self) -> dict[str, Any]:
         return {"status": "ok"}
 
-    def list_models(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         return ["openai-gpt", "openai-embedding"]
+
+    def supported_chat_models(self) -> list[str]:
+        return list(SUPPORTED_CHAT_MODELS)
+
+    def supported_embedding_models(self) -> list[str]:
+        return list(SUPPORTED_EMBEDDING_MODELS)

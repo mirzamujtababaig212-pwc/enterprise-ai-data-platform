@@ -1,82 +1,232 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import Body, FastAPI, HTTPException, Request
 from datetime import datetime
-import uuid
 import time
-import logging
+from ai_platform.llm_gateway.models.chat import (
+    ChatRequest,
+    ChatResponse,
+)
+
+from ai_platform.llm_gateway.models.embedding import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+)
+
+from ai_platform.llm_gateway.models.health import (
+    HealthResponse,
+)
 from ai_platform.llm_gateway.auth.auth import APIKeyMiddleware
 from ai_platform.llm_gateway.metrics.metrics import Metrics
-from ai_platform.llm_gateway.routing.router import Router
-from ai_platform.llm_gateway.registry.provider_registry import registry
+from ai_platform.llm_gateway.routing.router import router
+from ai_platform.llm_gateway.middleware.request_id import (
+    RequestIDMiddleware,
+)
+from ai_platform.llm_gateway.middleware.logging import (
+    LoggingMiddleware,
+)
+from ai_platform.llm_gateway.middleware.timing import (
+    TimingMiddleware,
+)
+from ai_platform.llm_gateway.config.settings import settings
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-app = FastAPI()
+from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
+    ProviderNotFound,
+)
+
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderAuthenticationError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderConnectionError,
+)
+
+from ai_platform.llm_gateway.exceptions.handlers import (
+    provider_not_found_handler,
+    http_exception_handler,
+    validation_exception_handler,
+    provider_auth_handler,
+    provider_rate_limit_handler,
+    provider_timeout_handler,
+    provider_connection_handler,
+)
+
+from ai_platform.llm_gateway.logging.logger import get_logger
+
+from ai_platform.llm_gateway.middleware.request_logging import (
+    RequestLoggingMiddleware,
+)
+
+from ai_platform.llm_gateway.middleware.exception_logging import (
+    ExceptionLoggingMiddleware,
+)
+
+from fastapi.responses import Response
+
+from prometheus_client import (
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
+
+from ai_platform.llm_gateway.tracing.tracing import (
+    configure_tracing,
+)
+
+logger = get_logger()
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="""
+Enterprise AI Platform
+
+A production-ready LLM Gateway providing:
+
+- Multi-provider routing
+- Authentication
+- Metrics
+- Observability
+- Embeddings
+- Chat Completion
+- Health Monitoring
+""",
+    contact={
+        "name": "Enterprise AI Team",
+        "email": "support@enterprise-ai.local",
+    },
+    license_info={
+        "name": "Apache 2.0",
+    },
+)
+logger.info(
+    "LLM Gateway starting",
+    extra={
+        "component": "gateway",
+        "version": settings.APP_VERSION,
+    },
+)
+configure_tracing(app)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(TimingMiddleware)
+app.add_middleware(LoggingMiddleware)
 app.add_middleware(APIKeyMiddleware)
-router = Router()
+app.add_middleware(ExceptionLoggingMiddleware)
 
+app.add_exception_handler(
+    ProviderNotFound,
+    provider_not_found_handler,
+)
 
-# Define request/response models
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str | None = None
-    model: str | None = "openai"
+app.add_exception_handler(
+    StarletteHTTPException,
+    http_exception_handler,
+)
 
+app.add_exception_handler(
+    RequestValidationError,
+    validation_exception_handler,
+)
 
-class ChatResponse(BaseModel):
-    reply: str
-    metrics: Metrics
+app.add_exception_handler(
+    ProviderAuthenticationError,
+    provider_auth_handler,
+)
 
+app.add_exception_handler(
+    ProviderRateLimitError,
+    provider_rate_limit_handler,
+)
 
-class EmbeddingRequest(BaseModel):
-    text: str
-    model: str | None = "openai"
+app.add_exception_handler(
+    ProviderTimeoutError,
+    provider_timeout_handler,
+)
 
-
-class EmbeddingResponse(BaseModel):
-    vector: list[float]
-    metrics: Metrics
-
-
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    providers: dict
-
+app.add_exception_handler(
+    ProviderConnectionError,
+    provider_connection_handler,
+)
 
 # Configure logging
-logging.basicConfig(
-    filename="gateway.log", level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+chat_tag = ["Chat"]
+embedding_tag = ["Embeddings"]
+health_tag = ["Health"]
+models_tag = ["Models"]
 
 
 # Endpoints
-@app.post("/v1/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+@app.post(
+    "/v1/chat",
+    response_model=ChatResponse,
+    tags=chat_tag,
+    summary="Generate chat completion",
+    description="Routes a prompt to the selected LLM provider and returns the generated response.",
+)
+async def chat_endpoint(
+    http_request: Request,
+    request: ChatRequest,
+):
     start = time.time()
-    reply = router.route_chat(request.dict())
+    logger.info(
+        "Received chat request",
+        extra={
+            "provider": request.provider,
+            "model": request.model,
+            "endpoint": str(http_request.url.path),
+            "method": http_request.method,
+        },
+    )
+    try:
+        reply = await router.route_chat(request.model_dump())
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
 
     metrics = Metrics(
-        request_id=str(uuid.uuid4()),
+        request_id=http_request.state.request_id,
         timestamp=datetime.utcnow(),
         latency_ms=int((time.time() - start) * 1000),
-        tokens_in=len(request.message.split()),
-        tokens_out=len(str(reply).split()),
+        tokens_in=len(request.prompt.split()),
+        tokens_out=len(reply["reply"].split()),
         estimated_cost=0.001,  # placeholder
         status="success",
     )
-
-    # Log metrics
-    logging.info(f"Chat metrics: {metrics.json()}")
+    http_request.state.metrics = metrics.model_dump()
+    print(http_request.state.metrics)
 
     # You could log or return metrics alongside the response
-    return ChatResponse(reply=reply, metrics=metrics)
+    return ChatResponse(
+        reply=reply["reply"],
+        metrics=metrics,
+    )
 
 
-@app.post("/v1/embeddings", response_model=EmbeddingResponse)
-async def embeddings_endpoint(request: EmbeddingRequest):
+@app.post(
+    "/v1/embeddings",
+    response_model=EmbeddingResponse,
+    tags=embedding_tag,
+    summary="Generate embeddings",
+    description="Creates vector embeddings for the supplied text.",
+)
+async def embeddings_endpoint(
+    http_request: Request,
+    request: EmbeddingRequest,
+):
     start = time.time()
-    vector = router.route_embeddings(request.dict())
+    try:
+        vector = await router.route_embeddings(request.model_dump())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        )
 
     metrics = Metrics(
-        request_id=str(uuid.uuid4()),
+        request_id=http_request.state.request_id,
         timestamp=datetime.utcnow(),
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=len(request.text.split()),
@@ -84,15 +234,55 @@ async def embeddings_endpoint(request: EmbeddingRequest):
         estimated_cost=0.002,  # placeholder
         status="success",
     )
+    http_request.state.metrics = metrics.model_dump()
+    print(http_request.state.metrics)
 
     return EmbeddingResponse(vector=vector, metrics=metrics)
 
 
-@app.get("/v1/models")
+@app.get(
+    "/v1/models",
+    tags=models_tag,
+    summary="List available models",
+    description="Returns all configured providers and their supported models.",
+)
 async def list_models():
-    return {"models": registry.list_providers()}
+    return await router.route_models()
 
 
-@app.get("/v1/health", response_model=HealthResponse)
+@app.get(
+    "/v1/health",
+    response_model=HealthResponse,
+    tags=health_tag,
+    summary="Health Check",
+    description="Returns gateway and provider health status.",
+)
 async def health_check():
-    return HealthResponse(status="ok", providers=router.route_health())
+    return HealthResponse(status="ok", providers=await router.route_health())
+
+
+@app.get("/v1/test-error")
+async def test_error():
+    raise RuntimeError("This is a test exception")
+
+
+@app.post("/v1/test-body")
+async def test_body(payload: dict = Body(...)):
+    """
+    Temporary endpoint used to verify middleware body sanitization.
+    """
+    return {
+        "received": payload,
+    }
+
+
+@app.get(
+    "/metrics",
+    include_in_schema=False,
+)
+async def metrics():
+
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )

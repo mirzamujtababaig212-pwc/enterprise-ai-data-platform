@@ -1,46 +1,142 @@
-from typing import Dict, Any
-from ai_platform.llm_gateway.providers.openai_provider import OpenAIProvider
-from ai_platform.llm_gateway.providers.gemini_provider import GeminiProvider
-from ai_platform.llm_gateway.providers.anthropic_provider import AnthropicProvider
+from typing import Any
+
+from opentelemetry import trace
+
+from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
+    ProviderNotFound,
+)
 from ai_platform.llm_gateway.registry.provider_registry import registry
+
+tracer = trace.get_tracer(__name__)
 
 
 class Router:
-    def __init__(self):
-        # Registry of available providers
-        self.providers: Dict[str, Any] = {
-            "openai": OpenAIProvider(),
-            "gemini": GeminiProvider(),
-            "anthropic": AnthropicProvider(),
-        }
-
-    def route_chat(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def route_chat(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Decide which provider to use for a chat request.
-        Example strategy: choose based on 'model' field in request.
         """
-        model = request.get("model", "openai")  # default to OpenAI
-        provider = registry.get(model)
+        provider_name = request.get("provider", "openai")
+
+        with tracer.start_as_current_span("provider_selection") as span:
+            span.set_attribute(
+                "provider.name",
+                provider_name,
+            )
+
+            provider = registry.get_provider(provider_name)
 
         if not provider:
-            raise ValueError(f"Unknown provider: {model}")
+            raise ProviderNotFound(f"Unknown provider: {provider_name}")
 
-        return provider.chat(request)
+        with tracer.start_as_current_span("provider_call"):
+            response = await provider.chat(request)
 
-    def route_embeddings(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        with tracer.start_as_current_span("response_parsing"):
+            return response
+
+    async def route_embeddings(
+        self,
+        request: dict[str, Any],
+    ) -> list[float]:
         """
         Route embedding requests to the correct provider.
         """
-        model = request.get("model", "openai")
-        provider = self.providers.get(model)
+        provider_name = request.get("provider", "openai")
+
+        with tracer.start_as_current_span("provider_selection") as span:
+            span.set_attribute(
+                "provider.name",
+                provider_name,
+            )
+
+            provider = registry.get_provider(provider_name)
 
         if not provider:
-            raise ValueError(f"Unknown provider: {model}")
+            raise ProviderNotFound(f"Unknown provider: {provider_name}")
 
-        return provider.embeddings(request)
+        with tracer.start_as_current_span("provider_call"):
+            response = await provider.embeddings(request)
 
-    def route_health(self) -> Dict[str, Any]:
+        with tracer.start_as_current_span("response_parsing"):
+            return response
+
+    async def route_health(self) -> dict[str, Any]:
         """
         Aggregate health checks from all providers.
         """
-        return {name: provider.health_check() for name, provider in self.providers.items()}
+        health: dict[str, Any] = {}
+
+        for provider_name in registry.list_providers():
+            provider = registry.get_provider(provider_name)
+
+            if not provider:
+                raise ProviderNotFound(f"Unknown provider: {provider_name}")
+
+            with tracer.start_as_current_span("provider_health_check") as span:
+                span.set_attribute(
+                    "provider.name",
+                    provider_name,
+                )
+
+                health[provider_name] = await provider.health_check()
+
+        return health
+
+    async def route_stream(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Route streaming chat requests to the correct provider.
+        """
+        provider_name = request.get("provider", "openai")
+
+        with tracer.start_as_current_span("provider_selection") as span:
+            span.set_attribute(
+                "provider.name",
+                provider_name,
+            )
+
+            provider = registry.get_provider(provider_name)
+
+        if not provider:
+            raise ProviderNotFound(f"Unknown provider: {provider_name}")
+
+        with tracer.start_as_current_span("provider_call"):
+            response = await provider.stream(request)
+
+        with tracer.start_as_current_span("response_parsing"):
+            return response
+
+    async def route_models(
+        self,
+    ) -> dict[str, list[str]]:
+        """
+        Return all available models from every registered provider.
+        """
+        models: dict[str, list[str]] = {}
+
+        for provider_name in registry.list_providers():
+
+            with tracer.start_as_current_span("provider_selection") as span:
+                span.set_attribute(
+                    "provider.name",
+                    provider_name,
+                )
+
+                provider = registry.get_provider(provider_name)
+
+            if not provider:
+                raise ProviderNotFound(f"Unknown provider: {provider_name}")
+
+            with tracer.start_as_current_span("provider_call"):
+                models[provider_name] = await provider.list_models()
+
+        with tracer.start_as_current_span("response_parsing"):
+            return models
+
+
+router = Router()

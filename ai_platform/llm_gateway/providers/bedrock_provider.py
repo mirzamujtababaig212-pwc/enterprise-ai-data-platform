@@ -1,18 +1,48 @@
+from typing import Any
+
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+
+SUPPORTED_CHAT_MODELS = {
+    "bedrock-chat",
+}
+
+SUPPORTED_EMBEDDING_MODELS = {
+    "bedrock-embedding",
+}
 
 
 class BedrockProvider(BaseProvider):
-    def chat(self, request: dict) -> dict:
-        return {"reply": f"Bedrock echo: {request.get('message', '')}"}
+    async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        model = request["model"]
 
-    def stream(self, request: dict) -> dict:
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported Bedrock model: {model}")
+
+        return {"reply": f"Bedrock echo: {request['prompt']}"}
+
+    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"stream": ["bedrock-chunk1", "bedrock-chunk2"]}
 
-    def embeddings(self, request: dict) -> list[float]:
-        return [1.0, 1.1, 1.2]
+    async def embeddings(self, request: dict[str, Any]) -> list[float]:
+        model = request["model"]
 
-    def health_check(self) -> dict:
+        if model not in SUPPORTED_EMBEDDING_MODELS:
+            raise ValueError(f"Unsupported Bedrock embedding model: {model}")
+
+        return [
+            1.0,
+            1.1,
+            1.2,
+        ]
+
+    async def health_check(self) -> dict[str, Any]:
         return {"status": "ok"}
 
-    def list_models(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         return ["bedrock-chat", "bedrock-embedding"]
+
+    def supported_chat_models(self):
+        return list(SUPPORTED_CHAT_MODELS)
+
+    def supported_embedding_models(self):
+        return list(SUPPORTED_EMBEDDING_MODELS)

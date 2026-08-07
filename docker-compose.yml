@@ -11,11 +11,14 @@ services:
     environment:
       PYTHONPATH: /app
       KAFKA_BROKER: ${KAFKA_BROKER}
-    command: pytest
+    command: >
+      uvicorn ai_platform.llm_gateway.api.main:app
+      --host 0.0.0.0
+      --port 8000
     stdin_open: true
     tty: true
-  volumes:
-    postgres_data:
+    ports:
+      - "8000:8000"
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
     container_name: zookeeper
@@ -49,8 +52,41 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
   spark-master:
+    image: apache/spark:3.5.6
+    container_name: spark-master
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.master.Master
+    ports:
+      - "7077:7077"
+      - "8081:8080"
   spark-worker:
+    image: apache/spark:3.5.6
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
   minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
   prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
   grafana:
-
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+volumes:
+  postgres_data:

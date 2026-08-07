@@ -1,18 +1,48 @@
+from typing import Any
+
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+
+SUPPORTED_CHAT_MODELS = {
+    "gemini-chat",
+}
+
+SUPPORTED_EMBEDDING_MODELS = {
+    "gemini-embedding",
+}
 
 
 class GeminiProvider(BaseProvider):
-    def chat(self, request: dict) -> dict:
-        return {"reply": f"Gemini echo: {request.get('message', '')}"}
+    async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        model = request["model"]
 
-    def stream(self, request: dict) -> dict:
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported Gemini model: {model}")
+
+        return {"reply": f"Gemini echo: {request['prompt']}"}
+
+    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"stream": ["gemini-chunk1", "gemini-chunk2"]}
 
-    def embeddings(self, request: dict) -> list[float]:
-        return [0.4, 0.5, 0.6]
+    async def embeddings(self, request: dict[str, Any]) -> list[float]:
+        model = request["model"]
 
-    def health_check(self) -> dict:
+        if model not in SUPPORTED_EMBEDDING_MODELS:
+            raise ValueError(f"Unsupported Gemini embedding model: {model}")
+
+        return [
+            0.4,
+            0.5,
+            0.6,
+        ]
+
+    async def health_check(self) -> dict[str, Any]:
         return {"status": "ok"}
 
-    def list_models(self) -> list[str]:
+    async def list_models(self) -> list[str]:
         return ["gemini-chat", "gemini-embedding"]
+
+    def supported_chat_models(self):
+        return list(SUPPORTED_CHAT_MODELS)
+
+    def supported_embedding_models(self):
+        return list(SUPPORTED_EMBEDDING_MODELS)
