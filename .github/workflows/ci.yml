@@ -32,25 +32,33 @@ jobs:
           python -m ruff check .
       - name: Run Tests
         run: |
-          pytest -v
-
-name: Cache Pip
-uses: actions/cache@v4
-with:
-  path: ~/.cache/pip
-  key: ${{ runner.os }}-pip-${{ hashFiles('requirements/**/*.txt') }}
-
-name: Build Docker Image
-run: |
-  docker build -t enterprise-ai-platform .
-
-name: Docker Compose
-run: |
-  docker compose up -d
-
-name: Upload Coverage
-uses: actions/upload-artifact@v4
-with:
-  name: coverage-report
-  path: coverage.xml
+          pytest --cov=ai_platform --cov-report=xml
+      - name: Install Test Tools
+        run: |
+          pip install pytest pytest-cov black ruff mypy
+      - name: Run Black
+        run: |
+          black --check .
+      - name: Run Ruff
+        run: |
+          ruff check .
+      - name: Run MyPy
+        run: |
+          mypy ai_platform
+      - name: Cache Pip
+        uses: actions/cache@v4
+        with:
+           path: ~/.cache/pip
+           key: ${{ runner.os }}-pip-${{ hashFiles('requirements/**/*.txt') }}
+      - name: Build Docker Image
+        run: |
+          docker build -t enterprise-ai-platform .
+      - name: Docker Compose
+        run: |
+          docker compose up -d
+      - name: Upload Coverage
+        uses: actions/upload-artifact@v4
+        with:
+           name: coverage-report
+           path: coverage.xml
 
