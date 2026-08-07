@@ -1,0 +1,21 @@
+[run]
+source = ai_platform
+branch = True
+
+omit =
+    */tests/*
+    */__pycache__/*
+    */venv/*
+    */.venv/*
+    */site-packages/*
+
+[report]
+show_missing = True
+skip_empty = True
+precision = 2
+
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    pass
