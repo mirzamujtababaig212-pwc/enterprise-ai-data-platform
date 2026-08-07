@@ -13,11 +13,6 @@ SUPPORTED_EMBEDDING_MODELS = {
 
 class BedrockProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
-        model = request["model"]
-
-        if model not in SUPPORTED_CHAT_MODELS:
-            raise ValueError(f"Unsupported Bedrock model: {model}")
-
         return {"reply": f"Bedrock echo: {request['prompt']}"}
 
     async def stream(self, request: dict[str, Any]) -> dict[str, Any]:

@@ -16,11 +16,7 @@ class OpenAIProvider(BaseProvider):
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-        model = request["model"]
-        if model not in SUPPORTED_CHAT_MODELS:
-            raise ValueError(f"Unsupported OpenAI model: {model}")
-
-            return {"reply": f"OpenAI echo: {request['prompt']}"}
+        return {"reply": f"OpenAI echo: {request['prompt']}"}
 
     async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"stream": ["openai-chunk1", "openai-chunk2"]}

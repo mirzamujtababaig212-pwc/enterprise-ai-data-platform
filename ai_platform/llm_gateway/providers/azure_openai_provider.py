@@ -13,11 +13,6 @@ SUPPORTED_EMBEDDING_MODELS = {
 
 class AzureOpenAIProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
-        model = request["model"]
-
-        if model not in SUPPORTED_CHAT_MODELS:
-            raise ValueError(f"Unsupported Azure OpenAI model: {model}")
-
         return {"reply": f"Azure OpenAI echo: {request['prompt']}"}
 
     async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
