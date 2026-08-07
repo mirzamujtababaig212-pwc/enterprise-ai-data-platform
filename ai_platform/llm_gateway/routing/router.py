@@ -30,16 +30,7 @@ class Router:
             model,
         )
 
-        with tracer.start_as_current_span("provider_selection") as span:
-            span.set_attribute(
-                "provider.name",
-                provider_name,
-            )
-
-            provider = ProviderFactory.get_provider(provider_name)
-
-        if not provider:
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
+        provider = await self._get_provider(provider_name)
 
         with tracer.start_as_current_span("provider_call"):
             response = await provider.chat(request)
@@ -60,16 +51,7 @@ class Router:
             provider_name,
             model,
         )
-        with tracer.start_as_current_span("provider_selection") as span:
-            span.set_attribute(
-                "provider.name",
-                provider_name,
-            )
-
-            provider = ProviderFactory.get_provider(provider_name)
-
-        if not provider:
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
+        provider = await self._get_provider(provider_name)
 
         with tracer.start_as_current_span("provider_call"):
             response = await provider.embeddings(request)
@@ -84,10 +66,8 @@ class Router:
         health: dict[str, Any] = {}
 
         for provider_name in ProviderFactory.list_providers():
-            provider = ProviderFactory.get_provider(provider_name)
 
-            if not provider:
-                raise ProviderNotFound(f"Unknown provider: {provider_name}")
+            provider = await self._get_provider(provider_name)
 
             with tracer.start_as_current_span("provider_health_check") as span:
                 span.set_attribute(
@@ -112,16 +92,7 @@ class Router:
             provider_name,
             model,
         )
-        with tracer.start_as_current_span("provider_selection") as span:
-            span.set_attribute(
-                "provider.name",
-                provider_name,
-            )
-
-            provider = ProviderFactory.get_provider(provider_name)
-
-        if not provider:
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
+        provider = await self._get_provider(provider_name)
 
         with tracer.start_as_current_span("provider_call"):
             response = await provider.stream(request)
@@ -139,22 +110,33 @@ class Router:
 
         for provider_name in ProviderFactory.list_providers():
 
-            with tracer.start_as_current_span("provider_selection") as span:
-                span.set_attribute(
-                    "provider.name",
-                    provider_name,
-                )
-
-                provider = ProviderFactory.get_provider(provider_name)
-
-            if not provider:
-                raise ProviderNotFound(f"Unknown provider: {provider_name}")
+            provider = await self._get_provider(provider_name)
 
             with tracer.start_as_current_span("provider_call"):
                 models[provider_name] = await provider.list_models()
 
         with tracer.start_as_current_span("response_parsing"):
             return models
+
+    async def _get_provider(
+        self,
+        provider_name: str,
+    ):
+        """
+        Retrieve a provider instance while recording tracing information.
+        """
+        with tracer.start_as_current_span("provider_selection") as span:
+            span.set_attribute(
+                "provider.name",
+                provider_name,
+            )
+
+            provider = ProviderFactory.get_provider(provider_name)
+
+        if not provider:
+            raise ProviderNotFound(f"Unknown provider: {provider_name}")
+
+        return provider
 
 
 router = Router()
