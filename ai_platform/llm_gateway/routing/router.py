@@ -5,13 +5,14 @@ from opentelemetry import trace
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
-from ai_platform.llm_gateway.registry.provider_registry import registry
+from ai_platform.llm_gateway.providers.provider_factory import (
+    ProviderFactory,
+)
 
 from ai_platform.llm_gateway.registry.provider_capabilities import (
     provider_exists,
     model_supported,
 )
-
 
 tracer = trace.get_tracer(__name__)
 
@@ -41,7 +42,7 @@ class Router:
                 provider_name,
             )
 
-            provider = registry.get_provider(provider_name)
+            provider = ProviderFactory.get_provider(provider_name)
 
         if not provider:
             raise ProviderNotFound(f"Unknown provider: {provider_name}")
@@ -75,7 +76,7 @@ class Router:
                 provider_name,
             )
 
-            provider = registry.get_provider(provider_name)
+            provider = ProviderFactory.get_provider(provider_name)
 
         if not provider:
             raise ProviderNotFound(f"Unknown provider: {provider_name}")
@@ -92,8 +93,8 @@ class Router:
         """
         health: dict[str, Any] = {}
 
-        for provider_name in registry.list_providers():
-            provider = registry.get_provider(provider_name)
+        for provider_name in ProviderFactory.list_providers():
+            provider = ProviderFactory.get_provider(provider_name)
 
             if not provider:
                 raise ProviderNotFound(f"Unknown provider: {provider_name}")
@@ -131,7 +132,7 @@ class Router:
                 provider_name,
             )
 
-            provider = registry.get_provider(provider_name)
+            provider = ProviderFactory.get_provider(provider_name)
 
         if not provider:
             raise ProviderNotFound(f"Unknown provider: {provider_name}")
@@ -150,7 +151,7 @@ class Router:
         """
         models: dict[str, list[str]] = {}
 
-        for provider_name in registry.list_providers():
+        for provider_name in ProviderFactory.list_providers():
 
             with tracer.start_as_current_span("provider_selection") as span:
                 span.set_attribute(
@@ -158,7 +159,7 @@ class Router:
                     provider_name,
                 )
 
-                provider = registry.get_provider(provider_name)
+                provider = ProviderFactory.get_provider(provider_name)
 
             if not provider:
                 raise ProviderNotFound(f"Unknown provider: {provider_name}")
