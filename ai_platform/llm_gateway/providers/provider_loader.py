@@ -33,11 +33,10 @@ PROVIDER_CLASSES = {
 def load_providers(registry) -> None:
     """
     Load and register all configured providers.
-
-    Raises:
-        ValueError:
-            If an unknown provider is configured.
     """
+
+    if not ENABLED_PROVIDERS:
+        raise ValueError("No providers have been configured.")
 
     for provider_name in ENABLED_PROVIDERS:
 
