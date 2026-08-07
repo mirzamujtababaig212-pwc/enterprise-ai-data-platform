@@ -16,9 +16,18 @@ PROVIDER_CLASSES = {
 }
 
 
-def load_providers(registry):
+def load_providers(registry) -> None:
+    """
+    Load and register all configured providers.
+    """
+
     for provider_name in ENABLED_PROVIDERS:
+
+        if provider_name not in PROVIDER_CLASSES:
+            raise ValueError(f"Unknown configured provider: {provider_name}")
+
         provider_class = PROVIDER_CLASSES[provider_name]
+
         registry.register(
             provider_name,
             provider_class(),
