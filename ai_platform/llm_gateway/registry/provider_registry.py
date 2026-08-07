@@ -1,10 +1,7 @@
 from typing import Any
-from ai_platform.llm_gateway.providers.azure_openai_provider import AzureOpenAIProvider
-from ai_platform.llm_gateway.providers.bedrock_provider import BedrockProvider
-from ai_platform.llm_gateway.providers.ollama_provider import OllamaProvider
-from ai_platform.llm_gateway.providers.openai_provider import OpenAIProvider
-from ai_platform.llm_gateway.providers.gemini_provider import GeminiProvider
-from ai_platform.llm_gateway.providers.anthropic_provider import AnthropicProvider
+from ai_platform.llm_gateway.providers.provider_loader import (
+    load_providers,
+)
 
 
 class ProviderRegistry:
@@ -43,9 +40,4 @@ class ProviderRegistry:
 
 # Initialize registry and register providers
 registry = ProviderRegistry()
-registry.register("openai", OpenAIProvider())
-registry.register("gemini", GeminiProvider())
-registry.register("anthropic", AnthropicProvider())
-registry.register("bedrock", BedrockProvider())
-registry.register("azure_openai", AzureOpenAIProvider())
-registry.register("ollama", OllamaProvider())
+load_providers(registry)
