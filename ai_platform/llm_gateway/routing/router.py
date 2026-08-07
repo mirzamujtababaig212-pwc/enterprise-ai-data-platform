@@ -8,10 +8,8 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
 from ai_platform.llm_gateway.providers.provider_factory import (
     ProviderFactory,
 )
-
-from ai_platform.llm_gateway.registry.provider_capabilities import (
-    provider_exists,
-    model_supported,
+from ai_platform.llm_gateway.services.capability_service import (
+    capability_service,
 )
 
 tracer = trace.get_tracer(__name__)
@@ -27,14 +25,10 @@ class Router:
         """
         provider_name = request.get("provider", "openai")
         model = request["model"]
-        if not provider_exists(provider_name):
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
-        if not model_supported(
+        capability_service.validate_chat(
             provider_name,
-            "chat",
             model,
-        ):
-            raise ValueError(f"Unsupported {provider_name} chat model: {model}")
+        )
 
         with tracer.start_as_current_span("provider_selection") as span:
             span.set_attribute(
@@ -62,14 +56,10 @@ class Router:
         """
         provider_name = request.get("provider", "openai")
         model = request["model"]
-        if not provider_exists(provider_name):
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
-        if not model_supported(
+        capability_service.validate_embeddings(
             provider_name,
-            "embeddings",
             model,
-        ):
-            raise ValueError(f"Unsupported {provider_name} chat model: {model}")
+        )
         with tracer.start_as_current_span("provider_selection") as span:
             span.set_attribute(
                 "provider.name",
@@ -118,14 +108,10 @@ class Router:
         """
         provider_name = request.get("provider", "openai")
         model = request["model"]
-        if not provider_exists(provider_name):
-            raise ProviderNotFound(f"Unknown provider: {provider_name}")
-        if not model_supported(
+        capability_service.validate_stream(
             provider_name,
-            "stream",
             model,
-        ):
-            raise ValueError(f"Unsupported {provider_name} chat model: {model}")
+        )
         with tracer.start_as_current_span("provider_selection") as span:
             span.set_attribute(
                 "provider.name",
