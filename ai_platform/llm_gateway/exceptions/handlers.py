@@ -7,6 +7,12 @@ from ai_platform.llm_gateway.exceptions.error_models import (
     ErrorResponse,
     ErrorDetail,
 )
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderAuthenticationError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderConnectionError,
+)
 
 
 async def provider_not_found_handler(
@@ -51,7 +57,10 @@ async def validation_exception_handler(
     )
 
 
-async def provider_auth_handler(request, exc):
+async def provider_auth_handler(
+    request: Request,
+    exc: ProviderAuthenticationError,
+):
     return JSONResponse(
         status_code=401,
         content={
@@ -62,18 +71,27 @@ async def provider_auth_handler(request, exc):
     )
 
 
-async def provider_rate_limit_handler(request, exc):
+async def provider_rate_limit_handler(
+    request: Request,
+    exc: ProviderRateLimitError,
+):
     return JSONResponse(
         status_code=429,
         content={
             "status": "error",
-            "error": {"code": 429, "message": str(exc)},
-            "request_id": getattr(request.state, "request_id", None),
+            "error": {
+                "code": 429,
+                "message": str(exc),
+            },
+            "request_id": request.state.request_id,
         },
     )
 
 
-async def provider_timeout_handler(request, exc):
+async def provider_timeout_handler(
+    request: Request,
+    exc: ProviderTimeoutError,
+):
     return JSONResponse(
         status_code=504,
         content={
@@ -84,7 +102,10 @@ async def provider_timeout_handler(request, exc):
     )
 
 
-async def provider_connection_handler(request, exc):
+async def provider_connection_handler(
+    request: Request,
+    exc: ProviderConnectionError,
+):
     return JSONResponse(
         status_code=503,
         content={

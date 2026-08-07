@@ -179,6 +179,17 @@ async def chat_endpoint(
     )
     try:
         reply = await router.route_chat(request.model_dump())
+        usage = reply.get("usage", {})
+
+        tokens_in = usage.get(
+            "tokens_in",
+            len(request.prompt.split()),
+        )
+
+        tokens_out = usage.get(
+            "tokens_out",
+            len(reply["reply"].split()),
+        )
 
     except ValueError as e:
         raise HTTPException(
@@ -190,9 +201,9 @@ async def chat_endpoint(
         request_id=http_request.state.request_id,
         timestamp=datetime.utcnow(),
         latency_ms=int((time.time() - start) * 1000),
-        tokens_in=len(request.prompt.split()),
-        tokens_out=len(reply["reply"].split()),
-        estimated_cost=0.001,  # placeholder
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        estimated_cost=0.0,  # placeholder
         status="success",
     )
     http_request.state.metrics = metrics.model_dump()
@@ -258,7 +269,10 @@ async def list_models():
     description="Returns gateway and provider health status.",
 )
 async def health_check():
-    return HealthResponse(status="ok", providers=await router.route_health())
+    return HealthResponse(
+        status="ok",
+        providers=await router.route_health(),
+    )
 
 
 @app.get("/v1/test-error")

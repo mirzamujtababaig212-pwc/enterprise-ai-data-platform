@@ -1,8 +1,24 @@
 PROVIDER_CAPABILITIES = {
     "openai": {
-        "chat": ["openai-gpt"],
-        "embeddings": ["openai-embedding"],
-        "stream": ["openai-gpt"],
+        "chat": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o4-mini",
+        ],
+        "embeddings": [
+            "text-embedding-3-small",
+            "text-embedding-3-large",
+            "openai-embedding",
+        ],
+        "stream": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o4-mini",
+        ],
     },
     "gemini": {"chat": ["gemini-chat"], "embeddings": ["gemini-embedding"]},
     "anthropic": {"chat": ["anthropic-chat"]},
