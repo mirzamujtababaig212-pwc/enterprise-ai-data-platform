@@ -152,3 +152,11 @@ _SUCCESS
 Thumbs.db
 *.swp
 *.swo
+
+# Temporary/editor backup files
+*.bak
+*.before_real_stream
+*.orig
+*.tmp
+*~
+
