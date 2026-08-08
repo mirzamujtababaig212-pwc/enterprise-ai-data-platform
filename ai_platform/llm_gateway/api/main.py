@@ -61,7 +61,10 @@ from ai_platform.llm_gateway.middleware.exception_logging import (
     ExceptionLoggingMiddleware,
 )
 
-from fastapi.responses import Response
+from fastapi.responses import (
+    Response,
+    StreamingResponse,
+)
 
 from prometheus_client import (
     generate_latest,
@@ -175,10 +178,37 @@ async def chat_endpoint(
             "model": request.model,
             "endpoint": str(http_request.url.path),
             "method": http_request.method,
+            "stream": request.stream,
         },
     )
+
+    request_data = request.model_dump()
+
+    if request.stream:
+
+        async def generate():
+            try:
+                async for chunk in router.route_stream(request_data):
+                    yield f"data: {chunk}\n\n"
+
+                yield "data: [DONE]\n\n"
+
+            except Exception:
+                logger.exception("Streaming request failed.")
+                raise
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+            },
+        )
+
     try:
-        reply = await router.route_chat(request.model_dump())
+        reply = await router.route_chat(request_data)
+
         usage = reply.get("usage", {})
 
         tokens_in = usage.get(
@@ -188,7 +218,7 @@ async def chat_endpoint(
 
         tokens_out = usage.get(
             "tokens_out",
-            len(reply["reply"].split()),
+            len(reply.get("reply", "").split()),
         )
 
     except ValueError as e:
@@ -207,9 +237,6 @@ async def chat_endpoint(
         status="success",
     )
     http_request.state.metrics = metrics.model_dump()
-    print(http_request.state.metrics)
-
-    # You could log or return metrics alongside the response
     return ChatResponse(
         reply=reply["reply"],
         metrics=metrics,

@@ -32,27 +32,21 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
 
         body = await request.body()
+
         payload = {}
         if body:
             try:
                 payload = json.loads(body)
             except json.JSONDecodeError:
                 payload = {}
+
         sanitized_payload = sanitize_body(payload)
 
         provider = payload.get("provider")
         model = payload.get("model")
 
-        async def receive():
-            return {
-                "type": "http.request",
-                "body": body,
-                "more_body": False,
-            }
-
-        request._receive = receive
-
         response = await call_next(request)
+
         status_code = str(response.status_code)
         metrics = getattr(
             request.state,

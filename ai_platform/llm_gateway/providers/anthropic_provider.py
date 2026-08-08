@@ -15,8 +15,13 @@ class AnthropicProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"reply": f"Anthropic echo: {request['prompt']}"}
 
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"stream": ["anthropic-chunk1", "anthropic-chunk2"]}
+    async def stream(
+        self,
+        request: dict[str, Any],
+    ):
+
+        yield "anthropic-chunk1"
+        yield "anthropic-chunk2"
 
     async def embeddings(self, request: dict[str, Any]) -> list[float]:
         model = request["model"]

@@ -15,8 +15,13 @@ class BedrockProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"reply": f"Bedrock echo: {request['prompt']}"}
 
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"stream": ["bedrock-chunk1", "bedrock-chunk2"]}
+    async def stream(
+        self,
+        request: dict[str, Any],
+    ):
+
+        yield "bedrock-chunk1"
+        yield "bedrock-chunk2"
 
     async def embeddings(self, request: dict[str, Any]) -> list[float]:
         model = request["model"]

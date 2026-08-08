@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncIterator
 
 
 class BaseProvider(ABC):
 
     @abstractmethod
-    async def chat(self, request: dict[str, Any]) -> dict[str, Any]: ...
+    async def chat(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]: ...
+    def stream(
+        self,
+        request: dict[str, Any],
+    ) -> AsyncIterator[str]: ...
 
     @abstractmethod
     async def embeddings(
@@ -17,17 +23,21 @@ class BaseProvider(ABC):
     ) -> list[float]: ...
 
     @abstractmethod
-    async def health_check(self) -> dict[str, Any]: ...
+    async def health_check(
+        self,
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def list_models(self) -> list[str]:
-        return [
-            "openai-gpt",
-            "openai-embedding",
-        ]
+    async def list_models(
+        self,
+    ) -> list[str]: ...
 
     @abstractmethod
-    def supported_chat_models(self) -> list[str]: ...
+    def supported_chat_models(
+        self,
+    ) -> list[str]: ...
 
     @abstractmethod
-    def supported_embedding_models(self) -> list[str]: ...
+    def supported_embedding_models(
+        self,
+    ) -> list[str]: ...

@@ -15,8 +15,13 @@ class AzureOpenAIProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"reply": f"Azure OpenAI echo: {request['prompt']}"}
 
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"stream": ["azure-chunk1", "azure-chunk2"]}
+    async def stream(
+        self,
+        request: dict[str, Any],
+    ):
+
+        yield "azure-openai-chunk1"
+        yield "azure-openai-chunk2"
 
     async def embeddings(self, request: dict[str, Any]) -> list[float]:
         model = request["model"]

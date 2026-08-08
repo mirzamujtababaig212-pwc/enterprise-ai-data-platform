@@ -15,8 +15,13 @@ class GeminiProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"reply": f"Gemini echo: {request['prompt']}"}
 
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"stream": ["gemini-chunk1", "gemini-chunk2"]}
+    async def stream(
+        self,
+        request: dict[str, Any],
+    ):
+
+        yield "gemini-chunk1"
+        yield "gemini-chunk2"
 
     async def embeddings(self, request: dict[str, Any]) -> list[float]:
         model = request["model"]

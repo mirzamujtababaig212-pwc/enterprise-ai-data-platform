@@ -15,8 +15,13 @@ class OllamaProvider(BaseProvider):
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"reply": f"Ollama echo: {request['prompt']}"}
 
-    async def stream(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"stream": ["ollama-chunk1", "ollama-chunk2"]}
+    async def stream(
+        self,
+        request: dict[str, Any],
+    ):
+
+        yield "ollama-chunk1"
+        yield "ollama-chunk2"
 
     async def embeddings(self, request: dict[str, Any]) -> list[float]:
         model = request["model"]
