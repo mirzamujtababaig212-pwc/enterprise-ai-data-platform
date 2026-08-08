@@ -229,7 +229,7 @@ async def chat_endpoint(
 
     metrics = Metrics(
         request_id=http_request.state.request_id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(datetime.UTC),
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
@@ -265,7 +265,7 @@ async def embeddings_endpoint(
 
     metrics = Metrics(
         request_id=http_request.state.request_id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(datetime.UTC),
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=len(request.text.split()),
         tokens_out=len(vector),

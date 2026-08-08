@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field
 from typing import Optional
+
+from pydantic import BaseModel, Field
+
 from ai_platform.llm_gateway.metrics.metrics import Metrics
 
 
@@ -9,31 +11,53 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    prompt: str = Field(example="Explain Retrieval-Augmented Generation.")
+    prompt: str = Field(
+        json_schema_extra={
+            "example": "Explain Retrieval-Augmented Generation.",
+        }
+    )
+
     provider: str = Field(
         default="openai",
-        example="openai",
+        json_schema_extra={
+            "example": "openai",
+        },
     )
+
     model: str = Field(
-        example="openai-gpt",
+        json_schema_extra={
+            "example": "openai-gpt",
+        }
     )
+
     temperature: float = Field(
         default=0.7,
         ge=0,
         le=2,
-        example=0.7,
+        json_schema_extra={
+            "example": 0.7,
+        },
     )
+
     max_tokens: int = Field(
         default=1024,
-        example=1024,
+        json_schema_extra={
+            "example": 1024,
+        },
     )
+
     stream: bool = Field(
         default=False,
-        example=False,
+        json_schema_extra={
+            "example": False,
+        },
     )
+
     user_id: Optional[str] = Field(
         default=None,
-        example="user123",
+        json_schema_extra={
+            "example": "user123",
+        },
     )
 
 
