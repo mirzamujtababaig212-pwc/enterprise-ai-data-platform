@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.health import router
 
-
 app = FastAPI()
 app.include_router(router)
 

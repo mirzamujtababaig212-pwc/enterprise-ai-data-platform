@@ -25,7 +25,6 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderConnectionError,
 )
 
-
 logger = logging.getLogger(__name__)
 
 

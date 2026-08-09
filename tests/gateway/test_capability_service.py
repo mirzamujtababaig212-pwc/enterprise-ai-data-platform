@@ -8,7 +8,6 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
 
-
 ###############################################################################
 # provider_exists()
 ###############################################################################

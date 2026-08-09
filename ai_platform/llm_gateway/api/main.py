@@ -108,13 +108,67 @@ logger.info(
         "version": settings.APP_VERSION,
     },
 )
+
+# ============================================================================
+# MIDDLEWARE
+# ============================================================================
+#
+# Starlette/FastAPI middleware is wrapped in reverse registration order.
+# Therefore the LAST middleware added becomes the OUTERMOST middleware.
+#
+# RequestLoggingMiddleware must be outermost so that it observes:
+#
+#     successful requests
+#     validation errors
+#     404 responses
+#     authentication 401 responses
+#     other 4xx responses
+#     5xx responses
+#
+# Request flow:
+#
+#     Request
+#       |
+#       v
+# RequestLoggingMiddleware
+#       |
+#       v
+# ExceptionLoggingMiddleware
+#       |
+#       v
+# APIKeyMiddleware
+#       |
+#       v
+# LoggingMiddleware
+#       |
+#       v
+# TimingMiddleware
+#       |
+#       v
+# RequestIDMiddleware
+#       |
+#       v
+# FastAPI route
+#       |
+#       v
+# Response
+#       |
+#       +----> RequestLoggingMiddleware records Prometheus metrics
+#
+# ============================================================================
+
 configure_tracing(app)
-app.add_middleware(RequestLoggingMiddleware)
+
+# IMPORTANT:
+# Register RequestLoggingMiddleware FIRST so it is the outer application
+# middleware layer in the current Starlette/FastAPI middleware stack.
+
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(TimingMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(ExceptionLoggingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 app.add_exception_handler(
     ProviderNotFound,

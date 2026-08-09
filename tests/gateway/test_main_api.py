@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.main import app
 
-
 client = TestClient(app)
 
 HEADERS = {

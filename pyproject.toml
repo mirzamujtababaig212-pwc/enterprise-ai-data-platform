@@ -99,3 +99,6 @@ known_first_party = [
 explicit_package_bases = true
 namespace_packages = true
 disable_error_code = ["attr-defined", "assignment", "method-assign"]
+
+[tool.flake8]
+extend-ignore = ["E203"]
