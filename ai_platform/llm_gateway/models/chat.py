@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from ai_platform.llm_gateway.metrics.metrics import Metrics
+from ai_platform.llm_gateway.models.usage import UsageMetrics
 
 
 class ChatMessage(BaseModel):
@@ -63,4 +63,4 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    metrics: Metrics
+    metrics: UsageMetrics

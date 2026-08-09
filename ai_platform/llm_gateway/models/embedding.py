@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from ai_platform.llm_gateway.metrics.metrics import Metrics
+from ai_platform.llm_gateway.models.usage import UsageMetrics
 
 
 class EmbeddingRequest(BaseModel):
@@ -10,4 +10,4 @@ class EmbeddingRequest(BaseModel):
 
 class EmbeddingResponse(BaseModel):
     vector: list[float]
-    metrics: Metrics
+    metrics: UsageMetrics

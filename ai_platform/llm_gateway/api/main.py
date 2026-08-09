@@ -15,7 +15,7 @@ from ai_platform.llm_gateway.models.health import (
     HealthResponse,
 )
 from ai_platform.llm_gateway.auth.auth import APIKeyMiddleware
-from ai_platform.llm_gateway.metrics.metrics import Metrics
+from ai_platform.llm_gateway.models.usage import UsageMetrics
 from ai_platform.llm_gateway.routing.router import router
 from ai_platform.llm_gateway.middleware.request_id import (
     RequestIDMiddleware,
@@ -227,7 +227,7 @@ async def chat_endpoint(
             detail=str(e),
         )
 
-    metrics = Metrics(
+    metrics = UsageMetrics(
         request_id=http_request.state.request_id,
         timestamp=datetime.now(timezone.utc),
         latency_ms=int((time.time() - start) * 1000),
@@ -263,7 +263,7 @@ async def embeddings_endpoint(
             detail=str(e),
         )
 
-    metrics = Metrics(
+    metrics = UsageMetrics(
         request_id=http_request.state.request_id,
         timestamp=datetime.now(timezone.utc),
         latency_ms=int((time.time() - start) * 1000),
