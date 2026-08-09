@@ -19,7 +19,7 @@ def test_gateway_prometheus_metrics_are_registered():
 
     missing = EXPECTED_METRICS - found
 
-    assert not missing, "Expected gateway Prometheus metrics are missing: " f"{sorted(missing)}"
+    assert not missing, f"Expected gateway Prometheus metrics are missing: {sorted(missing)}"
 
 
 def test_canonical_prometheus_module_exports_metrics():

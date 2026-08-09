@@ -1,5 +1,6 @@
-from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.main import app
 
@@ -22,7 +23,6 @@ def test_chat_endpoint_success():
         "ai_platform.llm_gateway.api.main.router.route_chat",
         new=AsyncMock(return_value=fake_response),
     ):
-
         response = client.post(
             "/v1/chat",
             headers=HEADERS,
@@ -90,7 +90,6 @@ def test_health():
         "ai_platform.llm_gateway.api.main.router.route_health",
         new=AsyncMock(return_value=fake_health),
     ):
-
         response = client.get(
             "/v1/health",
             headers=HEADERS,
@@ -120,7 +119,6 @@ def test_models():
             }
         ),
     ):
-
         response = client.get(
             "/v1/models",
             headers=HEADERS,

@@ -20,7 +20,6 @@ from spark.schemas.silver_schema import silver_schema
 
 
 class DependencyProvider:
-
     @staticmethod
     def bronze_reader():
         return KafkaReader(Settings.kafka.options)

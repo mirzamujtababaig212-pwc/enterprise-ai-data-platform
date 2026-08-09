@@ -1,14 +1,13 @@
+from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
+    ProviderNotFound,
+)
 from ai_platform.llm_gateway.registry.provider_capabilities import (
     model_supported,
     provider_exists,
 )
-from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
-    ProviderNotFound,
-)
 
 
 class CapabilityService:
-
     def provider_exists(
         self,
         provider: str,
@@ -49,7 +48,7 @@ class CapabilityService:
             capability,
             model,
         ):
-            raise ValueError(f"Unsupported {provider} " f"{capability} model: {model}")
+            raise ValueError(f"Unsupported {provider} {capability} model: {model}")
 
     def validate_chat(
         self,

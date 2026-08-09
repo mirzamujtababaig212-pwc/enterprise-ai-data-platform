@@ -7,7 +7,6 @@ logger = get_logger(__name__)
 
 
 class SnowflakeWriter(BaseWriter):
-
     def __init__(
         self,
         options,

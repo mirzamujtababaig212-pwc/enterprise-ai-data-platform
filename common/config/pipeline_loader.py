@@ -2,7 +2,6 @@ import yaml
 
 
 class PipelineLoader:
-
     @staticmethod
     def load(name):
 

@@ -4,7 +4,6 @@ from common.pipelines.pipeline_config import PipelineConfig
 
 
 class BronzePipeline(BasePipeline):
-
     CONFIG = PipelineConfig(
         pipeline_name="Bronze",
         source="kafka",

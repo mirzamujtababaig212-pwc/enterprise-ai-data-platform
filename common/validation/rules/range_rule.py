@@ -2,7 +2,6 @@ from pyspark.sql.functions import col
 
 
 class RangeRule:
-
     def __init__(self, column, minimum, maximum):
         self.column = column
         self.minimum = minimum

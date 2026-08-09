@@ -1,5 +1,4 @@
 class TransformerBuilder:
-
     @staticmethod
     def build(transformer_cls, config):
 

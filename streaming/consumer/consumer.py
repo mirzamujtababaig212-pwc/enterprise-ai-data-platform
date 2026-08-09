@@ -24,7 +24,6 @@ cursor = conn.cursor()
 print("Consumer started...\n")
 
 for msg in consumer:
-
     data = msg.value
 
     cursor.execute(

@@ -1,9 +1,9 @@
 import pytest
 
 from ai_platform.llm_gateway.providers.ollama_provider import (
-    OllamaProvider,
     SUPPORTED_CHAT_MODELS,
     SUPPORTED_EMBEDDING_MODELS,
+    OllamaProvider,
 )
 
 

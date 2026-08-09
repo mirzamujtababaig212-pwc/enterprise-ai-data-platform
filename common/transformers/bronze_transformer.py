@@ -5,7 +5,6 @@ from spark.schemas.bronze_schema import bronze_schema
 
 
 class BronzeTransformer(BaseTransformer):
-
     def transform(self, df):
         bronze_df = (
             df.select(from_json(col("value").cast("string"), bronze_schema).alias("json"))

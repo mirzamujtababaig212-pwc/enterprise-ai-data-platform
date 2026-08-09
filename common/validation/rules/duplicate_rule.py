@@ -5,7 +5,6 @@ from common.validation.base_validator import BaseValidator
 
 
 class DuplicateRule(BaseValidator):
-
     def __init__(self, columns):
         self.columns = columns
 

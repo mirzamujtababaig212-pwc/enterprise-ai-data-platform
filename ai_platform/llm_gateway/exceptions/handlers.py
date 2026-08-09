@@ -1,18 +1,20 @@
 from fastapi import Request
-from fastapi.responses import JSONResponse
-from .gateway_exceptions import ProviderNotFound
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from ai_platform.llm_gateway.exceptions.error_models import (
-    ErrorResponse,
     ErrorDetail,
+    ErrorResponse,
 )
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
+    ProviderConnectionError,
     ProviderRateLimitError,
     ProviderTimeoutError,
-    ProviderConnectionError,
 )
+
+from .gateway_exceptions import ProviderNotFound
 
 
 async def provider_not_found_handler(

@@ -1,11 +1,12 @@
-import pytest
 from unittest.mock import patch
 
-from ai_platform.llm_gateway.services.capability_service import (
-    CapabilityService,
-)
+import pytest
+
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
+)
+from ai_platform.llm_gateway.services.capability_service import (
+    CapabilityService,
 )
 
 ###############################################################################

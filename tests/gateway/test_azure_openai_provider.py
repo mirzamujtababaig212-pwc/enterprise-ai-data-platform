@@ -1,9 +1,9 @@
 import pytest
 
 from ai_platform.llm_gateway.providers.azure_openai_provider import (
-    AzureOpenAIProvider,
     SUPPORTED_CHAT_MODELS,
     SUPPORTED_EMBEDDING_MODELS,
+    AzureOpenAIProvider,
 )
 
 

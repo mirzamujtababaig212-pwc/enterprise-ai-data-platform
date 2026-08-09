@@ -20,7 +20,6 @@ async def test_stream():
     chunks = []
 
     async for chunk in stream:
-
         chunks.append(chunk)
 
     assert len(chunks) > 0

@@ -5,7 +5,6 @@ from common.validation.base_validator import BaseValidator
 
 
 class DuplicateValidator(BaseValidator):
-
     def __init__(self, keys):
         self.keys = keys
 

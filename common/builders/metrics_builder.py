@@ -1,5 +1,4 @@
 class MetricsBuilder:
-
     @staticmethod
     def build(metrics_cls, config):
 

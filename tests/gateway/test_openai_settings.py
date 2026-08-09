@@ -1,4 +1,5 @@
 import importlib
+
 import pytest
 
 import ai_platform.llm_gateway.config.openai_settings as openai_settings

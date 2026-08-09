@@ -4,7 +4,6 @@ from common.pipelines.pipeline_config import PipelineConfig
 
 
 class SilverPipeline(BasePipeline):
-
     CONFIG = PipelineConfig(
         pipeline_name="Silver",
         source="silver",

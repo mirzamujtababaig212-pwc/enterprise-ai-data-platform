@@ -15,7 +15,6 @@ from common.validation.schema_validator import SchemaValidator
 
 
 class PipelineFactory:
-
     @staticmethod
     def get_pipeline(name, spark):
 
@@ -81,7 +80,6 @@ class PipelineFactory:
                     dlq=DeltaDLQ(table=Settings.storage.SILVER_DLQ_TABLE),
                 )
             elif name.lower() == "gold":
-
                 return GoldPipeline(
                     spark=spark,
                     reader=DependencyProvider.gold_reader(),

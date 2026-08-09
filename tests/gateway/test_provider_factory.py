@@ -13,7 +13,6 @@ def test_get_provider():
         "ai_platform.llm_gateway.providers.provider_factory.registry.get_provider",
         return_value=fake_provider,
     ) as mock_get:
-
         provider = ProviderFactory.get_provider("openai")
 
         assert provider is fake_provider
@@ -33,7 +32,6 @@ def test_list_providers():
         "ai_platform.llm_gateway.providers.provider_factory.registry.list_providers",
         return_value=providers,
     ) as mock_list:
-
         result = ProviderFactory.list_providers()
 
         assert result == providers

@@ -12,7 +12,6 @@ def test_provider_timeout():
     with patch(
         "ai_platform.llm_gateway.providers.openai_provider.OpenAIProvider.chat"
     ) as mock_chat:
-
         from ai_platform.llm_gateway.exceptions.provider_exceptions import (
             ProviderTimeoutError,
         )

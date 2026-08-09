@@ -1,7 +1,8 @@
-from unittest.mock import Mock
 import shutil
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
+
 import pytest
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession

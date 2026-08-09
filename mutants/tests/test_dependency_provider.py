@@ -5,7 +5,6 @@ from common.dependency_provider import DependencyProvider
 
 
 class TestDependencyProvider:
-
     #############################
     # Readers
     #############################

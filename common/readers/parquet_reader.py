@@ -5,7 +5,6 @@ logger = get_logger(__name__)
 
 
 class ParquetReader(BaseReader):
-
     def __init__(self, path, schema=None):
         self.path = path
         self.schema = schema

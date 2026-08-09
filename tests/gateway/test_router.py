@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ai_platform.llm_gateway.routing.router import Router
+import pytest
+
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
+from ai_platform.llm_gateway.routing.router import Router
 
 
 @pytest.fixture
@@ -54,7 +55,6 @@ async def test_route_chat(router, fake_provider):
             return_value=fake_provider,
         ),
     ):
-
         response = await router.route_chat(
             {
                 "provider": "openai",
@@ -78,7 +78,6 @@ async def test_route_embeddings(router, fake_provider):
             return_value=fake_provider,
         ),
     ):
-
         response = await router.route_embeddings(
             {
                 "provider": "openai",
@@ -101,7 +100,6 @@ async def test_route_stream(router, fake_provider):
             return_value=fake_provider,
         ),
     ):
-
         chunks = []
 
         async for chunk in router.route_stream(
@@ -133,7 +131,6 @@ async def test_route_health(router, fake_provider):
             return_value=fake_provider,
         ),
     ):
-
         response = await router.route_health()
 
         assert response["openai"]["status"] == "healthy"
@@ -154,7 +151,6 @@ async def test_route_models(router, fake_provider):
             return_value=fake_provider,
         ),
     ):
-
         response = await router.route_models()
 
         assert "gpt-4o" in response["openai"]
@@ -167,7 +163,6 @@ async def test_get_provider_success(router, fake_provider):
         "ai_platform.llm_gateway.routing.router.ProviderFactory.get_provider",
         return_value=fake_provider,
     ):
-
         provider = await router._get_provider("openai")
 
         assert provider is fake_provider
@@ -180,7 +175,5 @@ async def test_get_provider_not_found(router):
         "ai_platform.llm_gateway.routing.router.ProviderFactory.get_provider",
         return_value=None,
     ):
-
         with pytest.raises(ProviderNotFound):
-
             await router._get_provider("bad-provider")

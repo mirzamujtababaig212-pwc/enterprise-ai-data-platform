@@ -7,7 +7,6 @@ from common.validation.schema_validator import SchemaValidator
 
 
 class ValidatorFactory:
-
     @staticmethod
     def create(config):
 

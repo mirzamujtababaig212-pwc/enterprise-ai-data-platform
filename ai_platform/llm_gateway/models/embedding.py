@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+
 from ai_platform.llm_gateway.models.usage import UsageMetrics
 
 

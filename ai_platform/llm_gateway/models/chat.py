@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 from ai_platform.llm_gateway.models.usage import UsageMetrics
@@ -53,7 +51,7 @@ class ChatRequest(BaseModel):
         },
     )
 
-    user_id: Optional[str] = Field(
+    user_id: str | None = Field(
         default=None,
         json_schema_extra={
             "example": "user123",

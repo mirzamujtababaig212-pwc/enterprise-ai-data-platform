@@ -7,7 +7,6 @@ schema = StructType([StructField("value", StringType(), True)])
 
 
 class TestBronzeTransformer:
-
     def test_create(self):
         transformer = BronzeTransformer()
         assert transformer is not None
@@ -69,7 +68,7 @@ class TestBronzeTransformer:
 
     def test_large_dataset(self, spark):
         transformer = BronzeTransformer()
-        rows = [(f'{{"vehicle_id":"V{i}","speed":{i}.0,"rpm":{1000+i}}}',) for i in range(5000)]
+        rows = [(f'{{"vehicle_id":"V{i}","speed":{i}.0,"rpm":{1000 + i}}}',) for i in range(5000)]
         df = spark.createDataFrame(rows, ["value"])
         result = transformer.transform(df)
         assert result.count() == 5000

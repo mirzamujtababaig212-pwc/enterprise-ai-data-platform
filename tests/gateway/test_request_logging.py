@@ -2,8 +2,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from starlette.responses import Response
 from starlette.requests import Request
+from starlette.responses import Response
 
 from ai_platform.llm_gateway.middleware.request_logging import (
     RequestLoggingMiddleware,

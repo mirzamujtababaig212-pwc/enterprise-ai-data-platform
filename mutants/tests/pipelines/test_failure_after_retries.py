@@ -37,7 +37,6 @@ def test_failure_after_retries(
 
 
 class DummyPipeline(BasePipeline):
-
     CONFIG = PipelineConfig(
         pipeline_name="Dummy",
         source="dummy",

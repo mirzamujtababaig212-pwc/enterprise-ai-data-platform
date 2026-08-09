@@ -8,22 +8,20 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
-
-from ai_platform.llm_gateway.exceptions.provider_exceptions import (
-    ProviderAuthenticationError,
-    ProviderRateLimitError,
-    ProviderTimeoutError,
-    ProviderConnectionError,
-)
-
 from ai_platform.llm_gateway.exceptions.handlers import (
-    provider_not_found_handler,
     http_exception_handler,
-    validation_exception_handler,
     provider_auth_handler,
+    provider_connection_handler,
+    provider_not_found_handler,
     provider_rate_limit_handler,
     provider_timeout_handler,
-    provider_connection_handler,
+    validation_exception_handler,
+)
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderAuthenticationError,
+    ProviderConnectionError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
 )
 
 ###############################################################################
@@ -32,7 +30,6 @@ from ai_platform.llm_gateway.exceptions.handlers import (
 
 
 class DummyRequest:
-
     def __init__(self):
         self.state = SimpleNamespace(request_id="req-123")
 

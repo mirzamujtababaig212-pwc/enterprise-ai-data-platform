@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
 from opentelemetry import trace
 
 tracer = trace.get_tracer(__name__)
@@ -10,7 +9,6 @@ VALID_API_KEYS = {"super-secret-key"}
 
 
 class APIKeyMiddleware:
-
     def __init__(self, app: FastAPI):
         self.app = app
 

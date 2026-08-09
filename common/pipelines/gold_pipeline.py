@@ -3,7 +3,6 @@ from common.pipelines.pipeline_config import PipelineConfig
 
 
 class GoldPipeline(BasePipeline):
-
     CONFIG = PipelineConfig(
         pipeline_name="Gold",
         source="gold",

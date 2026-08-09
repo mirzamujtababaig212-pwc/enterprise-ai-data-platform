@@ -21,7 +21,6 @@ async def main():
     chunks = []
 
     async for chunk in provider.stream(request):
-
         print(f"CHUNK: {chunk!r}")
 
         chunks.append(chunk)

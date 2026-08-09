@@ -1,15 +1,14 @@
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from opentelemetry import trace
 
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
-
 from ai_platform.llm_gateway.providers.provider_factory import (
     ProviderFactory,
 )
-
 from ai_platform.llm_gateway.services.capability_service import (
     capability_service,
 )
@@ -18,7 +17,6 @@ tracer = trace.get_tracer(__name__)
 
 
 class Router:
-
     async def route_chat(
         self,
         request: dict[str, Any],
@@ -39,11 +37,9 @@ class Router:
         provider = await self._get_provider(provider_name)
 
         with tracer.start_as_current_span("provider_call"):
-
             response = await provider.chat(request)
 
         with tracer.start_as_current_span("response_parsing"):
-
             return response
 
     async def route_embeddings(
@@ -66,11 +62,9 @@ class Router:
         provider = await self._get_provider(provider_name)
 
         with tracer.start_as_current_span("provider_call"):
-
             response = await provider.embeddings(request)
 
         with tracer.start_as_current_span("response_parsing"):
-
             return response
 
     async def route_stream(
@@ -108,11 +102,9 @@ class Router:
         health: dict[str, Any] = {}
 
         for provider_name in ProviderFactory.list_providers():
-
             provider = await self._get_provider(provider_name)
 
             with tracer.start_as_current_span("provider_health_check") as span:
-
                 span.set_attribute(
                     "provider.name",
                     provider_name,
@@ -129,15 +121,12 @@ class Router:
         models: dict[str, list[str]] = {}
 
         for provider_name in ProviderFactory.list_providers():
-
             provider = await self._get_provider(provider_name)
 
             with tracer.start_as_current_span("provider_call"):
-
                 models[provider_name] = await provider.list_models()
 
         with tracer.start_as_current_span("response_parsing"):
-
             return models
 
     async def _get_provider(
@@ -146,7 +135,6 @@ class Router:
     ):
 
         with tracer.start_as_current_span("provider_selection") as span:
-
             span.set_attribute(
                 "provider.name",
                 provider_name,

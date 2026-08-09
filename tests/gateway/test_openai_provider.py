@@ -1,21 +1,22 @@
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
 import httpx
-from ai_platform.llm_gateway.providers.openai_provider import (
-    OpenAIProvider,
-)
+import pytest
 from openai import (
+    APIConnectionError,
+    APITimeoutError,
     AuthenticationError,
     RateLimitError,
-    APITimeoutError,
-    APIConnectionError,
 )
 
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
+    ProviderConnectionError,
     ProviderRateLimitError,
     ProviderTimeoutError,
-    ProviderConnectionError,
+)
+from ai_platform.llm_gateway.providers.openai_provider import (
+    OpenAIProvider,
 )
 
 
@@ -84,7 +85,6 @@ async def test_invalid_embedding_model():
     provider = OpenAIProvider()
 
     with pytest.raises(ValueError):
-
         await provider.embeddings(
             {
                 "model": "bad-model",
@@ -153,7 +153,6 @@ async def test_chat_without_api_key():
     provider.client = None
 
     with pytest.raises(ProviderAuthenticationError):
-
         await provider.chat(
             {
                 "prompt": "Hello",

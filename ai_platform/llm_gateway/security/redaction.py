@@ -5,8 +5,8 @@ This module provides reusable helper functions for masking sensitive
 values before they are written to application logs.
 """
 
-from typing import Any
 import re
+from typing import Any
 
 # Constant used to replace sensitive values.
 REDACTED = "********"
@@ -81,8 +81,7 @@ def sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
     sanitized_headers = headers.copy()
 
     # Iterate over the copied dictionary.
-    for header_name, header_value in sanitized_headers.items():
-
+    for header_name, _header_value in sanitized_headers.items():
         # Normalize the header name for case-insensitive comparison.
         normalized_header = header_name.lower()
 
@@ -106,11 +105,9 @@ def sanitize_body(body: Any) -> Any:
 
     # Dictionary
     if isinstance(body, dict):
-
         sanitized = {}
 
         for key, value in body.items():
-
             normalized_key = key.lower()
 
             if normalized_key in SENSITIVE_BODY_FIELDS:
@@ -122,7 +119,6 @@ def sanitize_body(body: Any) -> Any:
 
     # List
     if isinstance(body, list):
-
         return [sanitize_body(item) for item in body]
 
     # Strings

@@ -7,7 +7,6 @@ logger = get_logger(__name__)
 
 
 class ParquetWriter(BaseWriter):
-
     def __init__(self, path, mode="append"):
         self.path = path
         self.mode = mode

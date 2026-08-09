@@ -7,7 +7,6 @@ logger = get_logger(__name__)
 
 
 class DLQWriter:
-
     @staticmethod
     def write(df, target="delta", table="vehicle_dlq", mode="append"):
         start = time.time()

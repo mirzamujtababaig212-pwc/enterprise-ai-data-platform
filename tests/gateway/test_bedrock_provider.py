@@ -1,9 +1,9 @@
 import pytest
 
 from ai_platform.llm_gateway.providers.bedrock_provider import (
-    BedrockProvider,
     SUPPORTED_CHAT_MODELS,
     SUPPORTED_EMBEDDING_MODELS,
+    BedrockProvider,
 )
 
 

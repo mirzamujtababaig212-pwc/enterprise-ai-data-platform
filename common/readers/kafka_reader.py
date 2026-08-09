@@ -7,7 +7,6 @@ logger = get_logger(__name__)
 
 
 class KafkaReader(BaseReader):
-
     def __init__(self, options):
         self.options = options
 

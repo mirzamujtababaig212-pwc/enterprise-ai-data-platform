@@ -32,7 +32,6 @@ def test_gemini_stream_model_supported():
 def test_invalid_stream_model():
 
     with pytest.raises(ValueError) as excinfo:
-
         capability_service.validate_stream(
             "gemini",
             "does-not-exist",

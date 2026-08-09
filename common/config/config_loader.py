@@ -4,7 +4,6 @@ import yaml
 
 
 class ConfigLoader:
-
     @staticmethod
     def load(environment: str):
         root = Path(__file__).resolve().parents[2]

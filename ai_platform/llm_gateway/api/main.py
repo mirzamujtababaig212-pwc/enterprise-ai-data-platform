@@ -1,76 +1,67 @@
-from fastapi import Body, FastAPI, HTTPException, Request
-from datetime import datetime, timezone
 import time
-from ai_platform.llm_gateway.models.chat import (
-    ChatRequest,
-    ChatResponse,
-)
+from datetime import UTC, datetime
 
-from ai_platform.llm_gateway.models.embedding import (
-    EmbeddingRequest,
-    EmbeddingResponse,
-)
-
-from ai_platform.llm_gateway.models.health import (
-    HealthResponse,
-)
-from ai_platform.llm_gateway.auth.auth import APIKeyMiddleware
-from ai_platform.llm_gateway.models.usage import UsageMetrics
-from ai_platform.llm_gateway.routing.router import router
-from ai_platform.llm_gateway.middleware.request_id import (
-    RequestIDMiddleware,
-)
-from ai_platform.llm_gateway.middleware.logging import (
-    LoggingMiddleware,
-)
-from ai_platform.llm_gateway.middleware.timing import (
-    TimingMiddleware,
-)
-from ai_platform.llm_gateway.config.settings import settings
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
-    ProviderNotFound,
-)
-
-from ai_platform.llm_gateway.exceptions.provider_exceptions import (
-    ProviderAuthenticationError,
-    ProviderRateLimitError,
-    ProviderTimeoutError,
-    ProviderConnectionError,
-)
-
-from ai_platform.llm_gateway.exceptions.handlers import (
-    provider_not_found_handler,
-    http_exception_handler,
-    validation_exception_handler,
-    provider_auth_handler,
-    provider_rate_limit_handler,
-    provider_timeout_handler,
-    provider_connection_handler,
-)
-
-from ai_platform.llm_gateway.logging.logger import get_logger
-
-from ai_platform.llm_gateway.middleware.request_logging import (
-    RequestLoggingMiddleware,
-)
-
-from ai_platform.llm_gateway.middleware.exception_logging import (
-    ExceptionLoggingMiddleware,
-)
-
 from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-
 from prometheus_client import (
-    generate_latest,
     CONTENT_TYPE_LATEST,
+    generate_latest,
 )
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ai_platform.llm_gateway.auth.auth import APIKeyMiddleware
+from ai_platform.llm_gateway.config.settings import settings
+from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
+    ProviderNotFound,
+)
+from ai_platform.llm_gateway.exceptions.handlers import (
+    http_exception_handler,
+    provider_auth_handler,
+    provider_connection_handler,
+    provider_not_found_handler,
+    provider_rate_limit_handler,
+    provider_timeout_handler,
+    validation_exception_handler,
+)
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderAuthenticationError,
+    ProviderConnectionError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
+from ai_platform.llm_gateway.logging.logger import get_logger
+from ai_platform.llm_gateway.middleware.exception_logging import (
+    ExceptionLoggingMiddleware,
+)
+from ai_platform.llm_gateway.middleware.logging import (
+    LoggingMiddleware,
+)
+from ai_platform.llm_gateway.middleware.request_id import (
+    RequestIDMiddleware,
+)
+from ai_platform.llm_gateway.middleware.request_logging import (
+    RequestLoggingMiddleware,
+)
+from ai_platform.llm_gateway.middleware.timing import (
+    TimingMiddleware,
+)
+from ai_platform.llm_gateway.models.chat import (
+    ChatRequest,
+    ChatResponse,
+)
+from ai_platform.llm_gateway.models.embedding import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+)
+from ai_platform.llm_gateway.models.health import (
+    HealthResponse,
+)
+from ai_platform.llm_gateway.models.usage import UsageMetrics
+from ai_platform.llm_gateway.routing.router import router
 from ai_platform.llm_gateway.tracing.tracing import (
     configure_tracing,
 )
@@ -279,11 +270,11 @@ async def chat_endpoint(
         raise HTTPException(
             status_code=400,
             detail=str(e),
-        )
+        ) from e
 
     metrics = UsageMetrics(
         request_id=http_request.state.request_id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
@@ -315,11 +306,11 @@ async def embeddings_endpoint(
         raise HTTPException(
             status_code=404,
             detail=str(e),
-        )
+        ) from e
 
     metrics = UsageMetrics(
         request_id=http_request.state.request_id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=len(request.text.split()),
         tokens_out=len(vector),
@@ -362,7 +353,7 @@ async def test_error():
 
 
 @app.post("/v1/test-body")
-async def test_body(payload: dict = Body(...)):
+async def test_body(payload: dict = Body(...)):  # noqa: B008
     """
     Temporary endpoint used to verify middleware body sanitization.
     """

@@ -12,7 +12,6 @@ def test_embeddings_success():
     with patch(
         "ai_platform.llm_gateway.providers.openai_provider.OpenAIProvider.embeddings"
     ) as mock_embeddings:
-
         mock_embeddings.return_value = [0.1, 0.2, 0.3]
 
         response = client.post(

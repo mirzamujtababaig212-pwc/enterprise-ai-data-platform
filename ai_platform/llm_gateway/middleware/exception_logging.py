@@ -1,13 +1,13 @@
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from ai_platform.llm_gateway.logging.logger import get_logger
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from ai_platform.llm_gateway.logging.logger import get_logger
 
 logger = get_logger()
 
 
 class ExceptionLoggingMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(
         self,
         request: Request,

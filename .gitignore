@@ -112,6 +112,11 @@ __pycache__/
 venv/
 dbt-env/
 
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
 # -------------------------
 # Jupyter / Data Science
 # -------------------------

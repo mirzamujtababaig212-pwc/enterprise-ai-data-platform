@@ -4,7 +4,6 @@ from common.validation.base_validator import BaseValidator
 
 
 class RegexRule(BaseValidator):
-
     def __init__(self, column, pattern):
         self.column = column
         self.pattern = pattern

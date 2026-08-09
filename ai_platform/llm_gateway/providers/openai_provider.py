@@ -1,13 +1,13 @@
-from typing import Any, AsyncIterator
-
 import logging
+from collections.abc import AsyncIterator
+from typing import Any
 
 from openai import (
+    APIConnectionError,
+    APITimeoutError,
     AsyncOpenAI,
     AuthenticationError,
     RateLimitError,
-    APITimeoutError,
-    APIConnectionError,
 )
 
 from ai_platform.llm_gateway.config.openai_settings import (
@@ -15,15 +15,13 @@ from ai_platform.llm_gateway.config.openai_settings import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
 )
-
-from ai_platform.llm_gateway.providers.base_provider import BaseProvider
-
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
+    ProviderConnectionError,
     ProviderRateLimitError,
     ProviderTimeoutError,
-    ProviderConnectionError,
 )
+from ai_platform.llm_gateway.providers.base_provider import BaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +41,6 @@ SUPPORTED_EMBEDDING_MODELS = {
 
 
 class OpenAIProvider(BaseProvider):
-
     def __init__(self):
         self.default_model = OPENAI_MODEL
 
@@ -68,7 +65,6 @@ class OpenAIProvider(BaseProvider):
         )
 
         try:
-
             if self.client is None:
                 raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
@@ -95,33 +91,28 @@ class OpenAIProvider(BaseProvider):
             }
 
         except AuthenticationError as e:
-
             logger.exception("OpenAI authentication failed.")
 
             raise ProviderAuthenticationError(str(e)) from e
 
         except RateLimitError as e:
-
             logger.exception("OpenAI rate limit exceeded.")
 
             raise ProviderRateLimitError(
-                "OpenAI API quota exceeded. " "Please verify your billing or try again later."
+                "OpenAI API quota exceeded. Please verify your billing or try again later."
             ) from e
 
         except APITimeoutError as e:
-
             logger.exception("OpenAI request timed out.")
 
             raise ProviderTimeoutError(str(e)) from e
 
         except APIConnectionError as e:
-
             logger.exception("Unable to connect to OpenAI.")
 
             raise ProviderConnectionError(str(e)) from e
 
         except Exception:
-
             logger.exception("Unexpected OpenAI provider error.")
 
             raise
@@ -142,7 +133,6 @@ class OpenAIProvider(BaseProvider):
         prompt = request["prompt"]
 
         try:
-
             stream = await self.client.responses.create(
                 model=model,
                 input=prompt,
@@ -150,7 +140,6 @@ class OpenAIProvider(BaseProvider):
             )
 
             async for event in stream:
-
                 event_type = getattr(
                     event,
                     "type",
@@ -158,7 +147,6 @@ class OpenAIProvider(BaseProvider):
                 )
 
                 if event_type == "response.output_text.delta":
-
                     delta = getattr(
                         event,
                         "delta",
@@ -169,37 +157,31 @@ class OpenAIProvider(BaseProvider):
                         yield delta
 
                 elif event_type == "response.completed":
-
                     logger.debug("OpenAI streaming response completed.")
 
         except AuthenticationError as e:
-
             logger.exception("OpenAI streaming authentication failed.")
 
             raise ProviderAuthenticationError(str(e)) from e
 
         except RateLimitError as e:
-
             logger.exception("OpenAI streaming rate limit exceeded.")
 
             raise ProviderRateLimitError(
-                "OpenAI API quota exceeded. " "Please verify your billing or try again later."
+                "OpenAI API quota exceeded. Please verify your billing or try again later."
             ) from e
 
         except APITimeoutError as e:
-
             logger.exception("OpenAI streaming request timed out.")
 
             raise ProviderTimeoutError(str(e)) from e
 
         except APIConnectionError as e:
-
             logger.exception("Unable to connect to OpenAI during streaming.")
 
             raise ProviderConnectionError(str(e)) from e
 
         except Exception:
-
             logger.exception("Unexpected OpenAI streaming error.")
 
             raise

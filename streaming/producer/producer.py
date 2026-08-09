@@ -16,7 +16,6 @@ fake = Faker()
 print("Producer started...\n")
 
 while True:
-
     message = {
         "vehicle_id": random.choice(["CAR001", "CAR002", "CAR003", "CAR004"]),
         "event_time": datetime.now().isoformat(),

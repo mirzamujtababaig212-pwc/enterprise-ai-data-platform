@@ -9,7 +9,6 @@ logger = logging.getLogger("llm_gateway")
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(self, request: Request, call_next):
 
         start = time.perf_counter()

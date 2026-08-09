@@ -1,9 +1,8 @@
-from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
+from pyspark.sql import SparkSession
 
 
 class SparkSessionBuilder:
-
     @staticmethod
     def build(app_name: str) -> SparkSession:
         builder = (

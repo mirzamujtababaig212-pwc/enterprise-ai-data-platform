@@ -1,5 +1,4 @@
 class ValidatorBuilder:
-
     @staticmethod
     def build(validator_cls, config):
 

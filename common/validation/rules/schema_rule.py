@@ -1,5 +1,4 @@
 class SchemaRule:
-
     def __init__(self, expected_schema):
         self.expected_schema = expected_schema
 

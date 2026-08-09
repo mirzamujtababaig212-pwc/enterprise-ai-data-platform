@@ -1,9 +1,9 @@
 import pytest
 
 from ai_platform.llm_gateway.providers.gemini_provider import (
-    GeminiProvider,
     SUPPORTED_CHAT_MODELS,
     SUPPORTED_EMBEDDING_MODELS,
+    GeminiProvider,
 )
 
 

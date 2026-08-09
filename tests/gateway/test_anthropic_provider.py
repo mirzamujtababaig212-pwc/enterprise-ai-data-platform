@@ -1,9 +1,9 @@
 import pytest
 
 from ai_platform.llm_gateway.providers.anthropic_provider import (
-    AnthropicProvider,
     SUPPORTED_CHAT_MODELS,
     SUPPORTED_EMBEDDING_MODELS,
+    AnthropicProvider,
 )
 
 

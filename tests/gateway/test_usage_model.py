@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from ai_platform.llm_gateway.models.usage import UsageMetrics
@@ -39,7 +39,7 @@ def test_timestamp_generated():
 
     assert isinstance(metrics.timestamp, datetime)
     assert metrics.timestamp.tzinfo is not None
-    assert metrics.timestamp.utcoffset() == timezone.utc.utcoffset(metrics.timestamp)
+    assert metrics.timestamp.utcoffset() == UTC.utcoffset(metrics.timestamp)
 
 
 def test_model_dump():

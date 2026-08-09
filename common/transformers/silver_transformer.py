@@ -4,7 +4,6 @@ from common.transformers.base_transformer import BaseTransformer
 
 
 class SilverTransformer(BaseTransformer):
-
     REQUIRED_COLUMNS = [
         "vehicle_id",
         "status",

@@ -16,22 +16,16 @@ No application business logic belongs in this module.
 import os
 
 from fastapi import FastAPI
-
 from opentelemetry import trace
-
-from opentelemetry.sdk.resources import Resource
-
-from opentelemetry.sdk.trace import TracerProvider
-
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
     OTLPSpanExporter,
 )
-
 from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,
 )
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 tracer = trace.get_tracer(__name__)
 

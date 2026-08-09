@@ -4,7 +4,6 @@ from common.transformers.base_transformer import BaseTransformer
 
 
 class GoldTransformer(BaseTransformer):
-
     def transform(self, df):
         try:
             return df.groupBy("vehicle_id").agg(

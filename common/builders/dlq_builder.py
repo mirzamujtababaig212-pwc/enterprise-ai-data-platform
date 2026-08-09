@@ -1,5 +1,4 @@
 class DLQBuilder:
-
     @staticmethod
     def build(dlq_cls, config):
 

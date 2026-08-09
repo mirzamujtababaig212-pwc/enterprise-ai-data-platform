@@ -12,7 +12,6 @@ def test_models():
     with patch(
         "ai_platform.llm_gateway.providers.openai_provider.OpenAIProvider.list_models"
     ) as mock_models:
-
         mock_models.return_value = [
             "gpt-4.1",
             "gpt-4o",
