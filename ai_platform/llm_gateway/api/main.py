@@ -302,11 +302,11 @@ async def embeddings_endpoint(
     start = time.time()
     try:
         vector = await router.route_embeddings(request.model_dump())
-    except ValueError as e:
+    except ValueError as exc:
         raise HTTPException(
             status_code=404,
-            detail=str(e),
-        ) from e
+            detail=str(exc),
+        ) from exc
 
     metrics = UsageMetrics(
         request_id=http_request.state.request_id,
@@ -318,7 +318,6 @@ async def embeddings_endpoint(
         status="success",
     )
     http_request.state.metrics = metrics.model_dump()
-    print(http_request.state.metrics)
 
     return EmbeddingResponse(vector=vector, metrics=metrics)
 
