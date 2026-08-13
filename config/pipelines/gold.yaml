@@ -2,18 +2,16 @@ pipeline:
   class: gold
 
 reader:
-  type: parquet
+  type: delta
+  table: SILVER_TABLE
   path: SILVER_PATH
-  schema: silver_schema
 
 writer:
-  type: postgres
-  url: jdbc:postgresql://localhost:5432/mydb
-  table: vehicle_gold
-  properties:
-    user: postgres
-    password: postgres
-    driver: org.postgresql.Driver
+  type: delta
+  table: GOLD_TABLE
+  path: GOLD_PATH
+  mode: overwrite
+  output_mode: append
 
 transformer:
   type: gold

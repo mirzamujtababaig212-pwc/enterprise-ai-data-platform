@@ -19,7 +19,7 @@ class PipelineFactory:
     def get_pipeline(name, spark):
 
         name = name.lower()
-        metrics = (MetricsCollector(),)
+        metrics = MetricsCollector()
 
         try:
             if name == "bronze":
@@ -60,18 +60,26 @@ class PipelineFactory:
             elif name.lower() == "silver":
                 return SilverPipeline(
                     spark=spark,
-                    reader=DependencyProvider.silver_reader(),
+                    reader=DependencyProvider.silver_batch_reader(),
                     validator=CompositeValidator(
                         [
                             SchemaValidator(
                                 [
                                     "vehicle_id",
                                     "status",
-                                    "event_timestamp",
+                                    "event_time",
+                                    "speed",
+                                    "fuel_level",
+                                    "battery",
+                                    "engine_temperature",
+                                    "speed_category",
+                                    "fuel_status",
+                                    "battery_status",
+                                    "vehicle_status",
                                 ]
                             ),
                             BusinessRuleValidator(),
-                            DuplicateValidator(["vehicle_id", "timestamp"]),
+                            DuplicateValidator(["vehicle_id", "event_time"]),
                         ]
                     ),
                     writer=DependencyProvider.silver_writer(),

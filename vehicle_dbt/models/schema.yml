@@ -31,8 +31,9 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('dim_vehicle')
-              field: vehicle_id
+              arguments:
+                to: ref('dim_vehicle')
+                field: vehicle_id
       - name: total_events
         description: "Number of telemetry events"
         tests:

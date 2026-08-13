@@ -1,17 +1,32 @@
-from pyspark.errors import AnalysisException
+from pyspark.sql.utils import AnalysisException
 
 from common.readers.base_reader import BaseReader
 
 
 class DeltaReader(BaseReader):
-    def __init__(self, path, schema=None):
+
+    def __init__(
+        self,
+        path: str,
+        schema=None,
+        table=None,
+    ):
         self.path = path
-        self.schema = schema  # kept only for API compatibility
+        self.schema = schema
+        self.table = table
 
     def read(self, spark):
+
         try:
-            # Delta always reads its schema from the transaction log.
             return spark.read.format("delta").load(self.path)
 
-        except AnalysisException as e:
-            raise RuntimeError(str(e)) from e
+        except AnalysisException as exc:
+            raise RuntimeError(f"Failed to read Delta path: {self.path}") from exc
+
+    def read_stream(self, spark):
+
+        try:
+            return spark.readStream.format("delta").load(self.path)
+
+        except AnalysisException as exc:
+            raise RuntimeError(f"Failed to read Delta stream path: {self.path}") from exc

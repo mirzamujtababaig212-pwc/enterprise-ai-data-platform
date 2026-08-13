@@ -23,5 +23,5 @@ postgres:
   host: localhost
   port: 5432
   database: vehicle_platform
-  table: vehicle_gold
+  table: vehicle_metrics
   username: postgres

@@ -16,4 +16,4 @@ def test_gold_first_field():
 
 
 def test_gold_last_field():
-    assert gold_schema.fields[-1].name == "total_events"
+    assert gold_schema.fields[-1].name == "last_event_time"

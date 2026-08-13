@@ -1,18 +1,18 @@
 from pyspark.sql import Row
 from pyspark.sql.types import StringType, StructField, StructType
 
-from common.transformers.bronze_transformer import BronzeTransformer
+from common.transformers.batch_bronze_transformer import BatchBronzeTransformer
 
 schema = StructType([StructField("value", StringType(), True)])
 
 
 class TestBronzeTransformer:
     def test_create(self):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         assert transformer is not None
 
     def test_transform_returns_dataframe(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame(
             [
                 ('{"vehicle_id":"V001","speed":65.5,"rpm":2500}',),
@@ -25,7 +25,7 @@ class TestBronzeTransformer:
         assert "ingestion_time" in result.columns
 
     def test_row_count(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame(
             [
                 ('{"vehicle_id":"V001","speed":65.5,"rpm":2500}',),
@@ -38,7 +38,7 @@ class TestBronzeTransformer:
         assert "ingestion_time" in result.columns
 
     def test_schema(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame([('{"vehicle_id":"V001","speed":65.5,"rpm":2500}',)], ["value"])
         result = transformer.transform(df)
         assert "vehicle_id" in result.columns
@@ -46,7 +46,7 @@ class TestBronzeTransformer:
         assert "ingestion_time" in result.columns
 
     def test_values(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame([('{"vehicle_id":"V001","speed":65.5,"rpm":2500}',)], ["value"])
         result = transformer.transform(df)
         row = result.collect()[0]
@@ -55,26 +55,26 @@ class TestBronzeTransformer:
         assert row["rpm"] == 2500
 
     def test_empty_dataframe(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         empty = spark.createDataFrame([], schema)
         result = transformer.transform(empty)
         assert result.count() == 0
 
     def test_null_values(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame([('{"vehicle_id":"V001","speed":null,"rpm":2500}',)], ["value"])
         result = transformer.transform(df)
         assert result.count() == 1
 
     def test_large_dataset(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         rows = [(f'{{"vehicle_id":"V{i}","speed":{i}.0,"rpm":{1000 + i}}}',) for i in range(5000)]
         df = spark.createDataFrame(rows, ["value"])
         result = transformer.transform(df)
         assert result.count() == 5000
 
     def test_invalid_json(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame([('{"vehicle_id":"V001",}',)], ["value"])
         result = transformer.transform(df)
         assert result.count() == 1
@@ -82,7 +82,7 @@ class TestBronzeTransformer:
         assert row["vehicle_id"] is None
 
     def test_bronze_transformer(self, spark):
-        transformer = BronzeTransformer()
+        transformer = BatchBronzeTransformer()
         df = spark.createDataFrame([Row(value='{"vehicle_id":"V1","speed":60}')])
         result = transformer.transform(df)
         assert "vehicle_id" in result.columns

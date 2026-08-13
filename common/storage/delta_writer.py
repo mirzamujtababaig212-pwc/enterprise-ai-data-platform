@@ -1,4 +1,13 @@
-class DeltaWriter:
-    @staticmethod
-    def write_table(df, table_name, mode="append"):
-        raise NotImplementedError("Delta writer not implemented yet.")
+"""
+Backward-compatible Delta writer.
+
+Canonical implementation:
+
+    common.writers.delta_writer.DeltaWriter
+"""
+
+from common.writers.delta_writer import DeltaWriter
+
+__all__ = [
+    "DeltaWriter",
+]

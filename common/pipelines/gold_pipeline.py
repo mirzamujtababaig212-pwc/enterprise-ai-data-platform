@@ -3,14 +3,18 @@ from common.pipelines.pipeline_config import PipelineConfig
 
 
 class GoldPipeline(BasePipeline):
+
     CONFIG = PipelineConfig(
         pipeline_name="Gold",
-        source="gold",
+        source="silver",
         target="postgres",
-        table="gold",
+        table="vehicle_metrics",
         enable_validation=False,
         enable_metrics=True,
         enable_dlq=False,
         retries=3,
         retry_delay=2,
     )
+
+    def cleanup(self):
+        pass
