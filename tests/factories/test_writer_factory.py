@@ -9,11 +9,11 @@ from common.writers.s3_writer import S3Writer
 
 
 def test_create_delta():
-
     config = {
         "writer": {
             "type": "delta",
             "table": "bronze.vehicle",
+            "path": "/tmp/delta/bronze",
             "checkpoint": "/tmp/checkpoint",
         }
     }
@@ -21,10 +21,10 @@ def test_create_delta():
     writer = WriterFactory.create(config)
 
     assert isinstance(writer, DeltaWriter)
+    assert writer.table == "bronze.vehicle"
 
 
 def test_create_postgres():
-
     config = {
         "writer": {
             "type": "postgres",
@@ -40,8 +40,11 @@ def test_create_postgres():
 
 
 def test_create_console():
-
-    config = {"writer": {"type": "console"}}
+    config = {
+        "writer": {
+            "type": "console",
+        }
+    }
 
     writer = WriterFactory.create(config)
 
@@ -49,8 +52,12 @@ def test_create_console():
 
 
 def test_create_s3():
-
-    config = {"writer": {"type": "s3", "path": "/tmp/output"}}
+    config = {
+        "writer": {
+            "type": "s3",
+            "path": "/tmp/output",
+        }
+    }
 
     writer = WriterFactory.create(config)
 
@@ -58,8 +65,12 @@ def test_create_s3():
 
 
 def test_create_iceberg():
-
-    config = {"writer": {"type": "iceberg", "table": "catalog.db.vehicle"}}
+    config = {
+        "writer": {
+            "type": "iceberg",
+            "table": "catalog.db.vehicle",
+        }
+    }
 
     writer = WriterFactory.create(config)
 
@@ -67,8 +78,11 @@ def test_create_iceberg():
 
 
 def test_invalid_writer():
+    config = {
+        "writer": {
+            "type": "unknown",
+        }
+    }
 
-    config = {"writer": {"type": "unknown"}}
-
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unknown writer"):
         WriterFactory.create(config)

@@ -8,19 +8,15 @@ kafka:
 postgres:
   host: localhost
   port: 5432
-  database: enterprise
+  database: vehicle_platform
   username: postgres
-  password: postgres
 
 storage:
-  bronze_table: bronze_vehicle
-  silver_table: silver_vehicle
-  gold_table: gold_vehicle
+  bronze_table: bronze.vehicle_events
+  silver_table: silver.vehicle_events
+  gold_table: vehicle_metrics
 
 checkpoint:
   bronze: checkpoints/bronze
   silver: checkpoints/silver
   gold: checkpoints/gold
-
-s3:
-  bucket: enterprise-dev

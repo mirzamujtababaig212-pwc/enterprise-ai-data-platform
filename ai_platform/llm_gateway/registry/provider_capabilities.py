@@ -53,7 +53,7 @@ def provider_supported(provider: str) -> bool:
 
 
 def provider_exists(provider: str) -> bool:
-    return provider in PROVIDER_CAPABILITIES
+    return provider_supported(provider)
 
 
 def model_supported(
@@ -61,7 +61,15 @@ def model_supported(
     capability: str,
     model: str,
 ) -> bool:
-    return model in (PROVIDER_CAPABILITIES.get(provider, {}).get(capability, []))
+    capabilities = PROVIDER_CAPABILITIES.get(
+        provider,
+        {},
+    )
+
+    return model in capabilities.get(
+        capability,
+        [],
+    )
 
 
 def get_provider_capabilities(
@@ -74,4 +82,4 @@ def get_provider_capabilities(
 
 
 def get_models(provider: str) -> dict:
-    return PROVIDER_CAPABILITIES.get(provider, {})
+    return get_provider_capabilities(provider)

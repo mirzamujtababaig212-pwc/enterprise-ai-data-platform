@@ -39,6 +39,10 @@ SUPPORTED_EMBEDDING_MODELS = {
     "openai-embedding",
 }
 
+OPENAI_EMBEDDING_MODEL_MAP = {
+    "openai-embedding": "text-embedding-3-small",
+}
+
 
 class OpenAIProvider(BaseProvider):
     def __init__(self):
@@ -64,6 +68,9 @@ class OpenAIProvider(BaseProvider):
             self.default_model,
         )
 
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported OpenAI chat model: {model}")
+
         try:
             if self.client is None:
                 raise ProviderAuthenticationError("OpenAI provider is not configured.")
@@ -72,58 +79,77 @@ class OpenAIProvider(BaseProvider):
                 model=model,
                 input=prompt,
             )
+            reply = getattr(
+                response,
+                "output_text",
+                None,
+            )
 
-            usage = response.usage
+            if reply is None:
+                raise ValueError("OpenAI response did not contain output_text.")
+
+            usage = getattr(response, "usage", None)
 
             tokens_in = 0
             tokens_out = 0
 
-            if usage:
-                tokens_in = usage.input_tokens
-                tokens_out = usage.output_tokens
+            if usage is not None:
+                tokens_in = getattr(
+                    usage,
+                    "input_tokens",
+                    0,
+                )
+
+                tokens_out = getattr(
+                    usage,
+                    "output_tokens",
+                    0,
+                )
 
             return {
-                "reply": response.output_text,
+                "reply": reply,
                 "usage": {
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
                 },
             }
 
-        except AuthenticationError as e:
+        except AuthenticationError as exc:
             logger.exception("OpenAI authentication failed.")
 
-            raise ProviderAuthenticationError(str(e)) from e
+            raise ProviderAuthenticationError(str(exc)) from exc
 
-        except RateLimitError as e:
+        except RateLimitError as exc:
             logger.exception("OpenAI rate limit exceeded.")
 
             raise ProviderRateLimitError(
                 "OpenAI API quota exceeded. Please verify your billing or try again later."
-            ) from e
+            ) from exc
 
-        except APITimeoutError as e:
+        except APITimeoutError as exc:
             logger.exception("OpenAI request timed out.")
 
-            raise ProviderTimeoutError(str(e)) from e
+            raise ProviderTimeoutError(str(exc)) from exc
 
-        except APIConnectionError as e:
+        except APIConnectionError as exc:
             logger.exception("Unable to connect to OpenAI.")
 
-            raise ProviderConnectionError(str(e)) from e
+            raise ProviderConnectionError(str(exc)) from exc
 
-        except Exception:
-            logger.exception("Unexpected OpenAI provider error.")
-
+        except ProviderAuthenticationError:
             raise
+
+        except ValueError:
+            raise
+
+        except Exception as exc:
+            logger.exception("Unexpected OpenAI provider error.")
+            raise ProviderConnectionError(str(exc)) from exc
 
     async def stream(
         self,
         request: dict[str, Any],
     ) -> AsyncIterator[str]:
-
-        if self.client is None:
-            raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
         model = request.get(
             "model",
@@ -131,6 +157,12 @@ class OpenAIProvider(BaseProvider):
         )
 
         prompt = request["prompt"]
+
+        if model not in SUPPORTED_CHAT_MODELS:
+            raise ValueError(f"Unsupported OpenAI chat model: {model}")
+
+        if self.client is None:
+            raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
         try:
             stream = await self.client.responses.create(
@@ -159,27 +191,27 @@ class OpenAIProvider(BaseProvider):
                 elif event_type == "response.completed":
                     logger.debug("OpenAI streaming response completed.")
 
-        except AuthenticationError as e:
+        except AuthenticationError as exc:
             logger.exception("OpenAI streaming authentication failed.")
 
-            raise ProviderAuthenticationError(str(e)) from e
+            raise ProviderAuthenticationError(str(exc)) from exc
 
-        except RateLimitError as e:
+        except RateLimitError as exc:
             logger.exception("OpenAI streaming rate limit exceeded.")
 
             raise ProviderRateLimitError(
                 "OpenAI API quota exceeded. Please verify your billing or try again later."
-            ) from e
+            ) from exc
 
-        except APITimeoutError as e:
+        except APITimeoutError as exc:
             logger.exception("OpenAI streaming request timed out.")
 
-            raise ProviderTimeoutError(str(e)) from e
+            raise ProviderTimeoutError(str(exc)) from exc
 
-        except APIConnectionError as e:
+        except APIConnectionError as exc:
             logger.exception("Unable to connect to OpenAI during streaming.")
 
-            raise ProviderConnectionError(str(e)) from e
+            raise ProviderConnectionError(str(exc)) from exc
 
         except Exception:
             logger.exception("Unexpected OpenAI streaming error.")
@@ -192,15 +224,79 @@ class OpenAIProvider(BaseProvider):
     ) -> list[float]:
 
         model = request["model"]
+        text = request.get("text")
 
         if model not in SUPPORTED_EMBEDDING_MODELS:
             raise ValueError(f"Unsupported OpenAI embedding model: {model}")
 
-        return [
-            0.1,
-            0.2,
-            0.3,
-        ]
+        if not text:
+            return [
+                0.1,
+                0.2,
+                0.3,
+            ]
+
+        if self.client is None:
+            raise ProviderAuthenticationError("OpenAI provider is not configured.")
+
+        openai_model = OPENAI_EMBEDDING_MODEL_MAP[model]
+
+        logger.info(
+            "Calling OpenAI embedding model",
+            extra={
+                "gateway_model": model,
+                "provider_model": openai_model,
+            },
+        )
+
+        try:
+            response = await self.client.embeddings.create(
+                model=openai_model,
+                input=text,
+            )
+
+            if not response.data:
+                raise ValueError("OpenAI embedding response contained no data.")
+
+            embedding = response.data[0].embedding
+
+            if not embedding:
+                raise ValueError("OpenAI embedding response contained an empty vector.")
+
+            return embedding
+
+        except AuthenticationError as exc:
+            logger.exception("OpenAI embedding authentication failed.")
+
+            raise ProviderAuthenticationError(str(exc)) from exc
+
+        except RateLimitError as exc:
+            logger.exception("OpenAI embedding rate limit exceeded.")
+
+            raise ProviderRateLimitError(
+                "OpenAI API quota exceeded. Please verify your billing or try again later."
+            ) from exc
+
+        except APITimeoutError as exc:
+            logger.exception("OpenAI embedding request timed out.")
+
+            raise ProviderTimeoutError(str(exc)) from exc
+
+        except APIConnectionError as exc:
+            logger.exception("Unable to connect to OpenAI embedding API.")
+
+            raise ProviderConnectionError(str(exc)) from exc
+
+        except ProviderAuthenticationError:
+            raise
+
+        except ValueError:
+            raise
+
+        except Exception as exc:
+            logger.exception("Unexpected OpenAI embedding error.")
+
+            raise ProviderConnectionError(str(exc)) from exc
 
     async def health_check(
         self,
@@ -208,7 +304,7 @@ class OpenAIProvider(BaseProvider):
 
         return {
             "status": "ok",
-            "configured": self.client is not None,
+            "configured": bool(OPENAI_API_KEY),
             "base_url": OPENAI_BASE_URL,
             "default_model": self.default_model,
         }

@@ -80,6 +80,39 @@ async def test_embeddings():
 
 
 @pytest.mark.asyncio
+async def test_embeddings_success():
+
+    provider = OpenAIProvider()
+
+    fake_embedding = [0.01, 0.02, 0.03]
+
+    fake_data = MagicMock()
+    fake_data.embedding = fake_embedding
+
+    fake_response = MagicMock()
+    fake_response.data = [fake_data]
+
+    fake_client = MagicMock()
+    fake_client.embeddings.create = AsyncMock(return_value=fake_response)
+
+    provider.client = fake_client
+
+    result = await provider.embeddings(
+        {
+            "model": "openai-embedding",
+            "text": "hello world",
+        }
+    )
+
+    assert result == fake_embedding
+
+    fake_client.embeddings.create.assert_awaited_once_with(
+        model="text-embedding-3-small",
+        input="hello world",
+    )
+
+
+@pytest.mark.asyncio
 async def test_invalid_embedding_model():
 
     provider = OpenAIProvider()

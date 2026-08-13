@@ -11,10 +11,10 @@ def test_load_dev():
 
     assert config["postgres"]["host"] == "localhost"
     assert config["postgres"]["port"] == 5432
-    assert config["postgres"]["database"] == "enterprise"
+    assert config["postgres"]["database"] == "vehicle_platform"
 
     assert config["kafka"]["bootstrap_servers"] == "localhost:9092"
-    assert config["storage"]["bronze_table"] == "bronze_vehicle"
+    assert config["storage"]["bronze_table"] == "bronze.vehicle_events"
 
 
 def test_load_qa():

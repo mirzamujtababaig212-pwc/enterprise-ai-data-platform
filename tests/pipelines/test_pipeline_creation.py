@@ -50,14 +50,17 @@ def test_run(
         dlq=mock_dlq,
     )
     df = Mock()
-    transformed = Mock()
     mock_reader.read.return_value = df
-    mock_transformer.transform.return_value = transformed
-    with patch.object(pipeline, "write_stream") as mock_write_stream:
-        pipeline.run()
-        mock_reader.read.assert_called_once()
-        mock_transformer.transform.assert_called_once_with(df)
-        mock_write_stream.assert_called_once_with(transformed)
+    with patch.object(
+        pipeline,
+        "process_batch",
+    ) as mock_process_batch:
+        pipeline.run(mode="batch")
+    mock_reader.read.assert_called_once_with(spark)
+    mock_process_batch.assert_called_once()
+    call = mock_process_batch.call_args
+    assert call.kwargs["batch_df"] is df
+    assert "batch_id" in call.kwargs
 
 
 def test_validate(
@@ -132,7 +135,7 @@ def test_handle_invalid_records(
     mock_dlq.write.assert_called_once_with(invalid)
 
 
-def test_write(
+def test_write_valid_records(
     spark,
     mock_reader,
     mock_writer,
@@ -150,9 +153,15 @@ def test_write(
         mock_metrics,
         mock_dlq,
     )
+
     df = Mock()
-    pipeline.write(df)
-    mock_writer.write_batch.assert_called_once_with(df)
+
+    mock_transformer.transform.return_value = df
+    mock_validator.validate.return_value = (df, None)
+
+    pipeline.process_batch(df, 1)
+
+    mock_writer.write.assert_called_once_with(df)
 
 
 def test_process_batch(
@@ -180,12 +189,9 @@ def test_process_batch(
     mock_validator.validate.return_value = (valid, invalid)
     mock_transformer.transform.return_value = output
     pipeline.process_batch(batch, 10)
-    assert mock_validator.validate.call_count == 1
-    mock_validator.validate.assert_called_with(mock_transformer.transform.return_value)
-    assert mock_transformer.transform.call_count == 2
-    mock_transformer.transform.assert_any_call(batch)
-    mock_transformer.transform.assert_any_call(valid)
-    mock_writer.write.assert_called_once_with(output)
+    mock_transformer.transform.assert_called_once_with(batch)
+    mock_validator.validate.assert_called_once_with(output)
+    mock_writer.write.assert_called_once_with(valid)
     mock_dlq.write.assert_called_once_with(invalid)
     mock_metrics.record_batch.assert_called_once()
 

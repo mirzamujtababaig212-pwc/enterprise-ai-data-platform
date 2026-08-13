@@ -30,10 +30,17 @@ def test_postgres_stream():
     stream = Mock()
     df.writeStream = stream
     stream.foreachBatch.return_value = stream
+    stream.option.return_value = stream
+    stream.outputMode.return_value = stream
     stream.start.return_value = Mock()
     writer.write_stream(df, Mock())
     stream.foreachBatch.assert_called_once()
     stream.start.assert_called_once()
+    stream.option.assert_called_once_with(
+        "checkpointLocation",
+        "/tmp/checkpoints/gold",
+    )
+    stream.outputMode.assert_called_once_with("update")
 
 
 def test_postgres_writer_failure():

@@ -1,6 +1,32 @@
-from common.runner.pipeline_runner import PipelineRunner
-from common.spark.spark_builder import SparkSessionBuilder
+from common.dependency_provider import (
+    DependencyProvider,
+)
 
-spark = SparkSessionBuilder.build("BronzeToSilver")
+from common.pipelines.silver_pipeline import (
+    SilverPipeline,
+)
 
-PipelineRunner.run("silver", spark)
+from common.spark.spark_builder import (
+    SparkSessionBuilder,
+)
+
+
+def main():
+
+    spark = SparkSessionBuilder.build("SilverStreaming")
+
+    pipeline = SilverPipeline(
+        spark=spark,
+        reader=(DependencyProvider.silver_stream_reader()),
+        validator=(DependencyProvider.silver_validator()),
+        writer=(DependencyProvider.silver_writer()),
+        transformer=(DependencyProvider.silver_transformer()),
+        metrics=(DependencyProvider.metrics()),
+        dlq=(DependencyProvider.silver_dlq()),
+    )
+
+    pipeline.run()
+
+
+if __name__ == "__main__":
+    main()

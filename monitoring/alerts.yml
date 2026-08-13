@@ -1,0 +1,94 @@
+groups:
+
+  # ============================================================
+  # LLM Gateway Alerts
+  # ============================================================
+  - name: gateway-alerts
+
+    rules:
+
+      # --------------------------------------------------------
+      # High error rate
+      # --------------------------------------------------------
+      - alert: HighGatewayErrorRate
+
+        expr: |
+          rate(llm_gateway_errors_total[5m]) > 1
+
+        for: 2m
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "High LLM Gateway error rate"
+          description: |
+            LLM Gateway is generating more than
+            1 error per second over the last 5 minutes.
+
+
+      # --------------------------------------------------------
+      # High latency
+      # --------------------------------------------------------
+      - alert: HighGatewayLatency
+
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(
+              rate(
+                llm_gateway_http_request_duration_seconds_bucket[5m]
+              )
+            ) by (le)
+          ) > 2
+
+        for: 5m
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "High LLM Gateway latency"
+          description: |
+            Gateway P95 HTTP latency has exceeded
+            2 seconds for at least 5 minutes.
+
+
+      # --------------------------------------------------------
+      # Provider failures
+      # --------------------------------------------------------
+      - alert: ProviderFailuresDetected
+
+        expr: |
+          increase(llm_gateway_errors_total[5m]) > 10
+
+        for: 2m
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "Provider failures detected"
+          description: |
+            More than 10 gateway errors occurred
+            during the last 5 minutes.
+
+
+      # --------------------------------------------------------
+      # Gateway unavailable
+      # --------------------------------------------------------
+      - alert: LLMGatewayDown
+
+        expr: |
+          up{job="llm-gateway"} == 0
+
+        for: 1m
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "LLM Gateway is down"
+          description: |
+            Prometheus cannot scrape the Enterprise AI
+            Platform gateway.

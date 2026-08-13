@@ -8,10 +8,34 @@ def test_silver_pipeline(spark):
     )
     df = spark.createDataFrame(
         [
-            ("V1", "running", "2024-01-01"),
-            ("V2", "stopped", "2024-01-02"),
+            (
+                "V1",
+                "running",
+                "2024-01-01",
+                40.0,
+                50.0,
+                80.0,
+                90.0,
+            ),
+            (
+                "V2",
+                "stopped",
+                "2024-01-02",
+                0.0,
+                70.0,
+                90.0,
+                85.0,
+            ),
         ],
-        ["vehicle_id", "status", "event_timestamp"],
+        [
+            "vehicle_id",
+            "status",
+            "event_time",
+            "speed",
+            "fuel_level",
+            "battery",
+            "engine_temperature",
+        ],
     )
     result = pipeline.transformer.transform(df)
     valid, invalid = pipeline.validator.validate(result)

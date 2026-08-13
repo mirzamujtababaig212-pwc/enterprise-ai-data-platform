@@ -1,18 +1,13 @@
-from pathlib import Path
+"""
+Backward-compatible pipeline loader.
 
-import yaml
+The canonical implementation lives in:
 
+    common.config.pipeline_loader.PipelineLoader
+"""
 
-class PipelineLoader:
-    CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipelines"
+from common.config.pipeline_loader import PipelineLoader
 
-    @classmethod
-    def load(cls, pipeline):
-
-        file = cls.CONFIG_PATH / f"{pipeline.lower()}.yaml"
-
-        if not file.exists():
-            raise FileNotFoundError(file)
-
-        with open(file) as f:
-            return yaml.safe_load(f)
+__all__ = [
+    "PipelineLoader",
+]

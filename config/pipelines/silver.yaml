@@ -3,12 +3,12 @@ pipeline:
 
 reader:
   type: parquet
-  path: BRONZE_PATH
-  schema: bronze_schema
+  path: BATCH_BRONZE_PATH
 
 writer:
   type: delta
   table: SILVER_TABLE
+  path: SILVER_PATH
   checkpoint: SILVER_CHECKPOINT
   mode: append
   output_mode: append
@@ -17,11 +17,10 @@ transformer:
   type: silver
 
 validator:
-  type: composite
+  type: default
 
 metrics:
   type: default
 
 dlq:
-  type: delta
-  table: SILVER_DLQ_TABLE
+  type: default

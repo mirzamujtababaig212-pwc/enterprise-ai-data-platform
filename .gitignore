@@ -165,3 +165,32 @@ Thumbs.db
 *.tmp
 *~
 
+.env
+
+# Local Spark/metastore state
+/metastore_db/
+/metastore_db.backup_*/
+/migration_backup/
+
+# Backup files
+*.backup
+*.backup_*
+*.bak
+*.working_baseline
+*.before_*
+
+*.bak
+__pycache__/
+*.py[cod]
+
+# Local/generated data and reports
+/data/
+/reports/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Backup/snapshot files
+*.bak
+*.after_*
