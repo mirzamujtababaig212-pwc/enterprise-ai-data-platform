@@ -1,11 +1,10 @@
-import pytest
-
 from unittest.mock import MagicMock
+
+import pytest
 
 from ai_platform.llm_gateway.registry.model_registry import (
     model_registry,
 )
-
 from ai_platform.llm_gateway.registry.provider_registry import (
     ProviderRegistry,
 )
@@ -116,12 +115,30 @@ def test_list_providers():
 ###############################################################################
 
 
-def test_reload_not_implemented():
+def test_reload_reloads_configured_providers():
 
     registry = ProviderRegistry()
 
-    with pytest.raises(NotImplementedError):
-        registry.reload()
+    registry.register(
+        "temporary-provider",
+        object(),
+    )
+
+    assert registry.list_providers() == [
+        "temporary-provider",
+    ]
+
+    registry.reload()
+
+    providers = registry.list_providers()
+
+    assert "temporary-provider" not in providers
+    assert "openai" in providers
+    assert "gemini" in providers
+    assert "anthropic" in providers
+    assert "azure_openai" in providers
+    assert "bedrock" in providers
+    assert "ollama" in providers
 
 
 ###############################################################################

@@ -70,12 +70,25 @@ class ProviderRegistry:
 
         return list(self._registry.keys())
 
+    def clear(
+        self,
+    ) -> None:
+        """
+        Clear provider and model-registry state.
+        """
+
+        self._registry.clear()
+        model_registry.clear()
+
     def reload(
         self,
     ) -> None:
-        """Reload provider plugins."""
+        """
+        Clear existing providers and reload configured providers.
+        """
 
-        raise NotImplementedError
+        self.clear()
+        load_providers(self)
 
     def health(
         self,
@@ -85,7 +98,6 @@ class ProviderRegistry:
         raise NotImplementedError
 
 
-# Initialize registry and register configured providers.
 registry = ProviderRegistry()
 
 load_providers(

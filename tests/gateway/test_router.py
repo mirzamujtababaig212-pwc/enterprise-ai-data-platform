@@ -9,8 +9,15 @@ from ai_platform.llm_gateway.routing.router import Router
 
 
 @pytest.fixture
-def router():
-    return Router()
+def routing_resolver():
+    return MagicMock()
+
+
+@pytest.fixture
+def router(routing_resolver):
+    return Router(
+        routing_resolver=routing_resolver,
+    )
 
 
 @pytest.fixture
@@ -46,14 +53,14 @@ def fake_provider():
 
 
 @pytest.mark.asyncio
-async def test_route_chat(router, fake_provider):
+async def test_route_chat(router, routing_resolver, fake_provider):
 
-    with (
-        patch("ai_platform.llm_gateway.routing.router.capability_service.validate_chat"),
-        patch(
-            "ai_platform.llm_gateway.routing.router.ProviderFactory.get_provider",
-            return_value=fake_provider,
-        ),
+    routing_resolver.resolve.return_value = [
+        fake_provider,
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
     ):
         response = await router.route_chat(
             {
@@ -63,20 +70,36 @@ async def test_route_chat(router, fake_provider):
             }
         )
 
-        assert response["reply"] == "hello"
+    assert response["reply"] == "hello"
 
-        fake_provider.chat.assert_awaited_once()
+    routing_resolver.resolve.assert_called_once_with(
+        capability="chat",
+        model="gpt-4o",
+        requested_provider="openai",
+    )
+
+    fake_provider.chat.assert_awaited_once_with(
+        {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "prompt": "Hello",
+        }
+    )
 
 
 @pytest.mark.asyncio
-async def test_route_embeddings(router, fake_provider):
+async def test_route_embeddings(
+    router,
+    routing_resolver,
+    fake_provider,
+):
 
-    with (
-        patch("ai_platform.llm_gateway.routing.router.capability_service.validate_embeddings"),
-        patch(
-            "ai_platform.llm_gateway.routing.router.ProviderFactory.get_provider",
-            return_value=fake_provider,
-        ),
+    routing_resolver.resolve.return_value = [
+        fake_provider,
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_embeddings",
     ):
         response = await router.route_embeddings(
             {
@@ -85,20 +108,39 @@ async def test_route_embeddings(router, fake_provider):
             }
         )
 
-        assert response == [0.1, 0.2, 0.3]
+    assert response == [
+        0.1,
+        0.2,
+        0.3,
+    ]
 
-        fake_provider.embeddings.assert_awaited_once()
+    routing_resolver.resolve.assert_called_once_with(
+        capability="embeddings",
+        model="openai-embedding",
+        requested_provider="openai",
+    )
+
+    fake_provider.embeddings.assert_awaited_once_with(
+        {
+            "provider": "openai",
+            "model": "openai-embedding",
+        }
+    )
 
 
 @pytest.mark.asyncio
-async def test_route_stream(router, fake_provider):
+async def test_route_stream(
+    router,
+    routing_resolver,
+    fake_provider,
+):
 
-    with (
-        patch("ai_platform.llm_gateway.routing.router.capability_service.validate_stream"),
-        patch(
-            "ai_platform.llm_gateway.routing.router.ProviderFactory.get_provider",
-            return_value=fake_provider,
-        ),
+    routing_resolver.resolve.return_value = [
+        fake_provider,
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_stream",
     ):
         chunks = []
 
@@ -110,10 +152,16 @@ async def test_route_stream(router, fake_provider):
         ):
             chunks.append(chunk)
 
-        assert chunks == [
-            "chunk1",
-            "chunk2",
-        ]
+    assert chunks == [
+        "chunk1",
+        "chunk2",
+    ]
+
+    routing_resolver.resolve.assert_called_once_with(
+        capability="stream",
+        model="gpt-4o",
+        requested_provider="openai",
+    )
 
 
 @pytest.mark.asyncio
@@ -177,3 +225,58 @@ async def test_get_provider_not_found(router):
     ):
         with pytest.raises(ProviderNotFound):
             await router._get_provider("bad-provider")
+
+
+@pytest.mark.asyncio
+async def test_route_chat_no_provider_supports_model(
+    router,
+    routing_resolver,
+):
+
+    routing_resolver.resolve.return_value = []
+
+    with (
+        patch(
+            "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
+        ),
+        pytest.raises(
+            ProviderNotFound,
+            match="No provider supports chat model",
+        ),
+    ):
+        await router.route_chat(
+            {
+                "model": "does-not-exist",
+                "prompt": "Hello",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_route_chat_discovers_provider_when_not_requested(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+
+    routing_resolver.resolve.return_value = [
+        fake_provider,
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
+    ):
+        response = await router.route_chat(
+            {
+                "model": "gpt-4o",
+                "prompt": "Hello",
+            }
+        )
+
+    assert response["reply"] == "hello"
+
+    routing_resolver.resolve.assert_called_once_with(
+        capability="chat",
+        model="gpt-4o",
+        requested_provider=None,
+    )

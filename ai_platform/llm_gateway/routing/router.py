@@ -9,6 +9,9 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
 from ai_platform.llm_gateway.providers.provider_factory import (
     ProviderFactory,
 )
+from ai_platform.llm_gateway.routing.resolver import (
+    RoutingResolver,
+)
 from ai_platform.llm_gateway.services.capability_service import (
     capability_service,
 )
@@ -17,15 +20,18 @@ tracer = trace.get_tracer(__name__)
 
 
 class Router:
+    def __init__(
+        self,
+        routing_resolver: RoutingResolver | None = None,
+    ):
+        self.routing_resolver = routing_resolver or RoutingResolver()
+
     async def route_chat(
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
 
-        provider_name = request.get(
-            "provider",
-            "openai",
-        )
+        provider_name = request.get("provider")
 
         model = request["model"]
 
@@ -34,7 +40,16 @@ class Router:
             model,
         )
 
-        provider = await self._get_provider(provider_name)
+        providers = self.routing_resolver.resolve(
+            capability="chat",
+            model=model,
+            requested_provider=provider_name,
+        )
+
+        if not providers:
+            raise ProviderNotFound(f"No provider supports chat model: {model}")
+
+        provider = providers[0]
 
         with tracer.start_as_current_span("provider_call"):
             response = await provider.chat(request)
@@ -47,11 +62,7 @@ class Router:
         request: dict[str, Any],
     ) -> list[float]:
 
-        provider_name = request.get(
-            "provider",
-            "openai",
-        )
-
+        provider_name = request.get("provider")
         model = request["model"]
 
         capability_service.validate_embeddings(
@@ -59,7 +70,16 @@ class Router:
             model,
         )
 
-        provider = await self._get_provider(provider_name)
+        providers = self.routing_resolver.resolve(
+            capability="embeddings",
+            model=model,
+            requested_provider=provider_name,
+        )
+
+        if not providers:
+            raise ProviderNotFound(f"No provider supports embeddings model: {model}")
+
+        provider = providers[0]
 
         with tracer.start_as_current_span("provider_call"):
             response = await provider.embeddings(request)
@@ -72,11 +92,7 @@ class Router:
         request: dict[str, Any],
     ) -> AsyncIterator[str]:
 
-        provider_name = request.get(
-            "provider",
-            "openai",
-        )
-
+        provider_name = request.get("provider")
         model = request["model"]
 
         capability_service.validate_stream(
@@ -84,7 +100,16 @@ class Router:
             model,
         )
 
-        provider = await self._get_provider(provider_name)
+        providers = self.routing_resolver.resolve(
+            capability="stream",
+            model=model,
+            requested_provider=provider_name,
+        )
+
+        if not providers:
+            raise ProviderNotFound(f"No provider supports streaming model: {model}")
+
+        provider = providers[0]
 
         stream = provider.stream(request)
 

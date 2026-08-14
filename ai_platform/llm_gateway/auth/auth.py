@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
+
 from ai_platform.llm_gateway.config.settings import settings
 
 tracer = trace.get_tracer(__name__)
