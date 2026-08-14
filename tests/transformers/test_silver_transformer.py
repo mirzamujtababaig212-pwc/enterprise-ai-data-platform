@@ -12,7 +12,6 @@ from pyspark.sql.types import (
 
 from common.transformers.silver_transformer import SilverTransformer
 
-
 schema = StructType(
     [
         StructField("vehicle_id", StringType(), True),

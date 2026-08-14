@@ -7,6 +7,10 @@ import pytest
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 
+from ai_platform.llm_gateway.registry.provider_registry import (
+    registry,
+)
+
 _SESSION_SCRATCH_DIR = None
 
 
@@ -103,3 +107,15 @@ def mock_dlq():
 @pytest.fixture
 def mock_transformer():
     return Mock()
+
+
+@pytest.fixture(autouse=True)
+def reset_registries():
+    """
+    Restore the global provider/model registries to the
+    configured baseline after every test.
+    """
+
+    yield
+
+    registry.reload()

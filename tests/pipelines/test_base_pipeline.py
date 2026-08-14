@@ -282,7 +282,7 @@ def test_retry(
 
     assert mock_dlq.write.call_count == 1
 
-    mock_metrics.record_batch.call_count == 1
+    assert mock_metrics.record_batch.call_count == 1
 
 
 def test_write_stream(

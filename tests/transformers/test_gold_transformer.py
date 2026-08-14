@@ -1,5 +1,4 @@
 import pytest
-
 from pyspark.sql.types import (
     DoubleType,
     StringType,
@@ -8,11 +7,9 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-
 from spark.transformations.silver_to_gold_transformer import (
     SilverToGoldTransformer,
 )
-
 
 schema = StructType(
     [

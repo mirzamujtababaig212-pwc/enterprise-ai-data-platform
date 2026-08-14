@@ -4,11 +4,9 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict
 
 from common.logging.logger import get_logger
 from common.spark.spark_builder import SparkSessionBuilder
-
 
 logger = get_logger(__name__)
 
@@ -270,13 +268,13 @@ def validate_silver(
 
 def collect_gold(
     spark,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
 
     gold_df = spark.table(GOLD_TABLE)
 
     rows = gold_df.orderBy("vehicle_id").collect()
 
-    result: Dict[str, Dict[str, float]] = {}
+    result: dict[str, dict[str, float]] = {}
 
     for row in rows:
 
@@ -445,7 +443,7 @@ def validate_gold(
 
 def capture_current_state(
     spark,
-) -> Dict[str, object]:
+) -> dict[str, object]:
 
     silver_df = spark.table(SILVER_TABLE)
 
