@@ -1,5 +1,11 @@
 import pytest
 
+from unittest.mock import MagicMock
+
+from ai_platform.llm_gateway.registry.model_registry import (
+    model_registry,
+)
+
 from ai_platform.llm_gateway.registry.provider_registry import (
     ProviderRegistry,
 )
@@ -129,3 +135,77 @@ def test_health_not_implemented():
 
     with pytest.raises(NotImplementedError):
         registry.health()
+
+
+def test_register_provider_updates_model_registry():
+
+    model_registry.clear()
+
+    registry = ProviderRegistry()
+
+    provider = MagicMock()
+
+    provider.supported_chat_models.return_value = [
+        "test-chat",
+    ]
+
+    provider.supported_embedding_models.return_value = [
+        "test-embedding",
+    ]
+
+    registry.register(
+        "test-provider",
+        provider,
+    )
+
+    assert model_registry.provider_exists(
+        "test-provider",
+    )
+
+    assert model_registry.model_supported(
+        "test-provider",
+        "chat",
+        "test-chat",
+    )
+
+    assert model_registry.model_supported(
+        "test-provider",
+        "embeddings",
+        "test-embedding",
+    )
+
+    model_registry.clear()
+
+
+def test_remove_provider_updates_model_registry():
+
+    model_registry.clear()
+
+    registry = ProviderRegistry()
+
+    provider = MagicMock()
+
+    provider.supported_chat_models.return_value = [
+        "test-chat",
+    ]
+
+    provider.supported_embedding_models.return_value = []
+
+    registry.register(
+        "test-provider",
+        provider,
+    )
+
+    assert model_registry.provider_exists(
+        "test-provider",
+    )
+
+    registry.remove_provider(
+        "test-provider",
+    )
+
+    assert not model_registry.provider_exists(
+        "test-provider",
+    )
+
+    model_registry.clear()

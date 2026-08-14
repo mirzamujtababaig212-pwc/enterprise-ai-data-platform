@@ -8,8 +8,6 @@ PROVIDER_CAPABILITIES = {
             "o4-mini",
         ],
         "embeddings": [
-            "text-embedding-3-small",
-            "text-embedding-3-large",
             "openai-embedding",
         ],
         "stream": [
@@ -21,39 +19,75 @@ PROVIDER_CAPABILITIES = {
         ],
     },
     "gemini": {
-        "chat": ["gemini-chat"],
-        "embeddings": ["gemini-embedding"],
-        "stream": ["gemini-chat"],
+        "chat": [
+            "gemini-chat",
+        ],
+        "embeddings": [
+            "gemini-embedding",
+        ],
+        "stream": [
+            "gemini-chat",
+        ],
     },
     "anthropic": {
-        "chat": ["anthropic-chat"],
-        "embeddings": ["anthropic-embedding"],
-        "stream": ["anthropic-chat"],
+        "chat": [
+            "anthropic-chat",
+        ],
+        "embeddings": [
+            "anthropic-embedding",
+        ],
+        "stream": [
+            "anthropic-chat",
+        ],
     },
     "azure_openai": {
-        "chat": ["azure-openai-chat"],
-        "embeddings": ["azure-openai-embedding"],
-        "stream": ["azure-openai-chat"],
+        "chat": [
+            "azure-openai-chat",
+        ],
+        "embeddings": [
+            "azure-openai-embedding",
+        ],
+        "stream": [
+            "azure-openai-chat",
+        ],
     },
     "bedrock": {
-        "chat": ["bedrock-chat"],
-        "embeddings": ["bedrock-embedding"],
-        "stream": ["bedrock-chat"],
+        "chat": [
+            "bedrock-chat",
+        ],
+        "embeddings": [
+            "bedrock-embedding",
+        ],
+        "stream": [
+            "bedrock-chat",
+        ],
     },
     "ollama": {
-        "chat": ["ollama-chat"],
-        "embeddings": ["ollama-embedding"],
-        "stream": ["ollama-chat"],
+        "chat": [
+            "ollama-chat",
+        ],
+        "embeddings": [
+            "ollama-embedding",
+        ],
+        "stream": [
+            "ollama-chat",
+        ],
     },
 }
 
 
-def provider_supported(provider: str) -> bool:
+def provider_supported(
+    provider: str,
+) -> bool:
     return provider in PROVIDER_CAPABILITIES
 
 
-def provider_exists(provider: str) -> bool:
-    return provider_supported(provider)
+def provider_exists(
+    provider: str,
+) -> bool:
+    return provider_supported(
+        provider,
+    )
 
 
 def model_supported(
@@ -81,5 +115,9 @@ def get_provider_capabilities(
     )
 
 
-def get_models(provider: str) -> dict:
-    return get_provider_capabilities(provider)
+def get_models(
+    provider: str,
+) -> dict:
+    return get_provider_capabilities(
+        provider,
+    )
