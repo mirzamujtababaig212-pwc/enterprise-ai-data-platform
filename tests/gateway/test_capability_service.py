@@ -9,40 +9,38 @@ from ai_platform.llm_gateway.services.capability_service import (
     CapabilityService,
 )
 
-###############################################################################
-# provider_exists()
-###############################################################################
-
 
 def test_provider_exists_true():
-
     service = CapabilityService()
 
     with patch(
         "ai_platform.llm_gateway.services.capability_service.provider_exists",
         return_value=True,
     ):
-        assert service.provider_exists("openai") is True
+        assert (
+            service.provider_exists(
+                "openai",
+            )
+            is True
+        )
 
 
 def test_provider_exists_false():
-
     service = CapabilityService()
 
     with patch(
         "ai_platform.llm_gateway.services.capability_service.provider_exists",
         return_value=False,
     ):
-        assert service.provider_exists("unknown") is False
-
-
-###############################################################################
-# model_supported()
-###############################################################################
+        assert (
+            service.provider_exists(
+                "unknown",
+            )
+            is False
+        )
 
 
 def test_model_supported_true():
-
     service = CapabilityService()
 
     with patch(
@@ -53,14 +51,13 @@ def test_model_supported_true():
             service.model_supported(
                 "openai",
                 "chat",
-                "gpt-4o",
+                "gpt-4.1",
             )
             is True
         )
 
 
 def test_model_supported_false():
-
     service = CapabilityService()
 
     with patch(
@@ -71,19 +68,13 @@ def test_model_supported_false():
             service.model_supported(
                 "openai",
                 "chat",
-                "bad-model",
+                "invalid-model",
             )
             is False
         )
 
 
-###############################################################################
-# validate_provider()
-###############################################################################
-
-
 def test_validate_provider_success():
-
     service = CapabilityService()
 
     with patch.object(
@@ -91,11 +82,12 @@ def test_validate_provider_success():
         "provider_exists",
         return_value=True,
     ):
-        service.validate_provider("openai")
+        service.validate_provider(
+            "openai",
+        )
 
 
 def test_validate_provider_failure():
-
     service = CapabilityService()
 
     with patch.object(
@@ -103,131 +95,113 @@ def test_validate_provider_failure():
         "provider_exists",
         return_value=False,
     ):
-        with pytest.raises(ProviderNotFound):
-            service.validate_provider("bad-provider")
+        with pytest.raises(
+            ProviderNotFound,
+            match="Unsupported provider",
+        ):
+            service.validate_provider(
+                "unknown",
+            )
 
 
-###############################################################################
-# validate_chat()
-###############################################################################
+def test_validate_model_success():
+    service = CapabilityService()
+
+    with (
+        patch.object(
+            service,
+            "validate_provider",
+        ),
+        patch.object(
+            service,
+            "model_supported",
+            return_value=True,
+        ),
+    ):
+        service.validate_model(
+            "openai",
+            "chat",
+            "gpt-4.1",
+        )
+
+
+def test_validate_model_failure():
+    service = CapabilityService()
+
+    with (
+        patch.object(
+            service,
+            "validate_provider",
+        ),
+        patch.object(
+            service,
+            "model_supported",
+            return_value=False,
+        ),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="Unsupported openai chat model",
+        ):
+            service.validate_model(
+                "openai",
+                "chat",
+                "invalid-model",
+            )
 
 
 def test_validate_chat_success():
-
     service = CapabilityService()
 
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=True,
-        ),
-    ):
+    with patch.object(
+        service,
+        "validate_model",
+    ) as validate_model:
         service.validate_chat(
             "openai",
-            "gpt-4o",
+            "gpt-4.1",
         )
 
-
-def test_validate_chat_failure():
-
-    service = CapabilityService()
-
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=False,
-        ),
-    ):
-        with pytest.raises(ValueError):
-            service.validate_chat(
-                "openai",
-                "bad-model",
-            )
-
-
-###############################################################################
-# validate_embeddings()
-###############################################################################
+    validate_model.assert_called_once_with(
+        "openai",
+        "chat",
+        "gpt-4.1",
+    )
 
 
 def test_validate_embeddings_success():
-
     service = CapabilityService()
 
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=True,
-        ),
-    ):
+    with patch.object(
+        service,
+        "validate_model",
+    ) as validate_model:
         service.validate_embeddings(
             "openai",
-            "text-embedding-3-small",
+            "openai-embedding",
         )
 
-
-def test_validate_embeddings_failure():
-
-    service = CapabilityService()
-
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=False,
-        ),
-    ):
-        with pytest.raises(ValueError):
-            service.validate_embeddings(
-                "openai",
-                "bad-model",
-            )
-
-
-###############################################################################
-# validate_stream()
-###############################################################################
+    validate_model.assert_called_once_with(
+        "openai",
+        "embeddings",
+        "openai-embedding",
+    )
 
 
 def test_validate_stream_success():
-
     service = CapabilityService()
 
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=True,
-        ),
-    ):
+    with patch.object(
+        service,
+        "validate_model",
+    ) as validate_model:
         service.validate_stream(
             "openai",
-            "gpt-4o",
+            "gpt-4.1",
         )
 
-
-def test_validate_stream_failure():
-
-    service = CapabilityService()
-
-    with (
-        patch.object(service, "validate_provider"),
-        patch.object(
-            service,
-            "model_supported",
-            return_value=False,
-        ),
-    ):
-        with pytest.raises(ValueError):
-            service.validate_stream(
-                "openai",
-                "bad-model",
-            )
+    validate_model.assert_called_once_with(
+        "openai",
+        "stream",
+        "gpt-4.1",
+    )
