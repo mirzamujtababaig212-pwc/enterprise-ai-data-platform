@@ -1,26 +1,17 @@
 from typing import Any
 
-from ai_platform.llm_gateway.providers.resolver import (
-    ProviderResolver,
-)
-from ai_platform.llm_gateway.registry.model_registry import (
-    ModelRegistry,
-)
+from ai_platform.llm_gateway.providers.resolver import ProviderResolver
+from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
 from ai_platform.llm_gateway.registry.model_registry import (
     model_registry as default_model_registry,
 )
-from ai_platform.llm_gateway.routing.balancer import (
-    RoundRobinLoadBalancer,
-)
-from ai_platform.llm_gateway.routing.candidate_set import (
-    CandidateSet,
-)
-from ai_platform.llm_gateway.routing.candidates import (
-    RoutingCandidate,
-)
+from ai_platform.llm_gateway.routing.balancer import RoundRobinLoadBalancer
+from ai_platform.llm_gateway.routing.candidate_set import CandidateSet
 from ai_platform.llm_gateway.routing.policy import (
-    ExplicitRoutingPolicy,
     RoutingPolicy,
+)
+from ai_platform.llm_gateway.routing.registry_policy import (
+    RegistryRoutingPolicy,
 )
 
 
@@ -49,7 +40,11 @@ class RoutingResolver:
         )
 
         self.routing_policy = (
-            routing_policy if routing_policy is not None else ExplicitRoutingPolicy()
+            routing_policy
+            if routing_policy is not None
+            else RegistryRoutingPolicy(
+                model_registry=self.model_registry,
+            )
         )
 
         self.provider_resolver = (
@@ -85,17 +80,13 @@ class RoutingResolver:
         if not candidate_set:
             return []
 
-        candidates = list(candidate_set)
-
         selected = self.load_balancer.select(
-            candidates,
+            candidate_set.as_list(),
         )
 
-        providers = self.provider_resolver.resolve_many(
+        return self.provider_resolver.resolve_many(
             [selected.provider],
         )
-
-        return providers
 
     def resolve_candidates(
         self,
@@ -103,25 +94,19 @@ class RoutingResolver:
         model: str,
         requested_provider: str | None = None,
     ) -> CandidateSet:
-        """Resolve eligible routing candidates."""
+        """Resolve eligible routing candidates using the routing policy."""
 
-        providers = self.model_registry.get_providers_for_model(
-            capability,
-            model,
+        request = {
+            "capability": capability,
+            "model": model,
+            "provider": requested_provider,
+        }
+
+        candidates = self.routing_policy.resolve_candidates(
+            request,
         )
 
-        if requested_provider is not None:
-            providers = [provider for provider in providers if provider == requested_provider]
-
-        candidates = [
-            RoutingCandidate(
-                provider=provider,
-                model=model,
-            )
-            for provider in providers
-        ]
-
-        return CandidateSet(candidates)
+        return candidates
 
     def resolve_names(
         self,

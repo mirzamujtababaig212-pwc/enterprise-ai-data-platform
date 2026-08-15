@@ -293,3 +293,52 @@ def test_unknown_provider_returns_empty_candidates() -> None:
     )
 
     assert list(candidates) == []
+
+
+def test_resolver_delegates_candidate_resolution_to_policy() -> None:
+    class FakePolicy:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def resolve_candidates(self, request):
+            self.requests.append(request)
+
+            return CandidateSet(
+                [
+                    RoutingCandidate(
+                        provider="openai",
+                        model="gpt-4o",
+                    ),
+                    RoutingCandidate(
+                        provider="azure_openai",
+                        model="gpt-4o",
+                    ),
+                ]
+            )
+
+    policy = FakePolicy()
+
+    resolver = RoutingResolver(
+        model_registry=FakeModelRegistry(),
+        routing_policy=policy,
+        provider_resolver=FakeProviderResolver(),
+        load_balancer=FakeBalancer(),
+    )
+
+    candidates = resolver.resolve_candidates(
+        capability="chat",
+        model="gpt-4o",
+    )
+
+    assert [candidate.provider for candidate in candidates] == [
+        "openai",
+        "azure_openai",
+    ]
+
+    assert policy.requests == [
+        {
+            "capability": "chat",
+            "model": "gpt-4o",
+            "provider": None,
+        }
+    ]

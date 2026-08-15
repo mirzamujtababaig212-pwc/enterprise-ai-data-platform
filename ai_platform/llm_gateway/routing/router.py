@@ -37,15 +37,14 @@ class Router:
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-
         provider_name = request.get("provider")
-
         model = request["model"]
 
-        capability_service.validate_chat(
-            provider_name,
-            model,
-        )
+        if provider_name is not None:
+            capability_service.validate_chat(
+                provider_name,
+                model,
+            )
 
         providers = self.routing_resolver.resolve(
             capability="chat",
@@ -68,14 +67,14 @@ class Router:
         self,
         request: dict[str, Any],
     ) -> list[float]:
-
         provider_name = request.get("provider")
         model = request["model"]
 
-        capability_service.validate_embeddings(
-            provider_name,
-            model,
-        )
+        if provider_name is not None:
+            capability_service.validate_embeddings(
+                provider_name,
+                model,
+            )
 
         providers = self.routing_resolver.resolve(
             capability="embeddings",
@@ -98,14 +97,14 @@ class Router:
         self,
         request: dict[str, Any],
     ) -> AsyncIterator[str]:
-
         provider_name = request.get("provider")
         model = request["model"]
 
-        capability_service.validate_stream(
-            provider_name,
-            model,
-        )
+        if provider_name is not None:
+            capability_service.validate_stream(
+                provider_name,
+                model,
+            )
 
         providers = self.routing_resolver.resolve(
             capability="stream",
