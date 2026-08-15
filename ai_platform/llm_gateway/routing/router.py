@@ -20,6 +20,13 @@ tracer = trace.get_tracer(__name__)
 
 
 class Router:
+    """
+    Gateway request router.
+
+    Routing decisions are delegated to RoutingResolver.
+    Provider execution remains the responsibility of Router.
+    """
+
     def __init__(
         self,
         routing_resolver: RoutingResolver | None = None,
@@ -157,7 +164,7 @@ class Router:
     async def _get_provider(
         self,
         provider_name: str,
-    ):
+    ) -> Any:
 
         with tracer.start_as_current_span("provider_selection") as span:
             span.set_attribute(
