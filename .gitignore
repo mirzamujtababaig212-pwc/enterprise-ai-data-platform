@@ -194,3 +194,8 @@ __pycache__/
 # Backup/snapshot files
 *.bak
 *.after_*
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
