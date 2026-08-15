@@ -9,6 +9,7 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
 from ai_platform.llm_gateway.providers.provider_factory import (
     ProviderFactory,
 )
+from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
 from ai_platform.llm_gateway.routing.resolver import (
     RoutingResolver,
 )
@@ -30,8 +31,10 @@ class Router:
     def __init__(
         self,
         routing_resolver: RoutingResolver | None = None,
+        fallback_executor: FallbackExecutor | None = None,
     ):
         self.routing_resolver = routing_resolver or RoutingResolver()
+        self.fallback_executor = fallback_executor or FallbackExecutor()
 
     async def route_chat(
         self,
@@ -55,13 +58,12 @@ class Router:
         if not providers:
             raise ProviderNotFound(f"No provider supports chat model: {model}")
 
-        provider = providers[0]
+        result = await self.fallback_executor.execute(
+            providers,
+            lambda provider: provider.chat(request),
+        )
 
-        with tracer.start_as_current_span("provider_call"):
-            response = await provider.chat(request)
-
-        with tracer.start_as_current_span("response_parsing"):
-            return response
+        return result.response
 
     async def route_embeddings(
         self,
@@ -83,15 +85,14 @@ class Router:
         )
 
         if not providers:
-            raise ProviderNotFound(f"No provider supports embeddings model: {model}")
+            raise ProviderNotFound(f"No provider supports chat model: {model}")
 
-        provider = providers[0]
+        result = await self.fallback_executor.execute(
+            providers,
+            lambda provider: provider.embeddings(request),
+        )
 
-        with tracer.start_as_current_span("provider_call"):
-            response = await provider.embeddings(request)
-
-        with tracer.start_as_current_span("response_parsing"):
-            return response
+        return result.response
 
     async def route_stream(
         self,

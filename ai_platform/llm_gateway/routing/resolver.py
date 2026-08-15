@@ -80,12 +80,16 @@ class RoutingResolver:
         if not candidate_set:
             return []
 
-        selected = self.load_balancer.select(
-            candidate_set.as_list(),
-        )
+        candidates = candidate_set.as_list()
+
+        selected = self.load_balancer.select(candidates)
+
+        selected_index = candidates.index(selected)
+
+        ordered_candidates = candidates[selected_index:] + candidates[:selected_index]
 
         return self.provider_resolver.resolve_many(
-            [selected.provider],
+            [candidate.provider for candidate in ordered_candidates]
         )
 
     def resolve_candidates(

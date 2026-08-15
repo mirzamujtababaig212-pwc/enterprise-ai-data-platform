@@ -241,6 +241,7 @@ def test_resolver_selects_balanced_provider() -> None:
 
     assert providers == [
         "provider:azure_openai",
+        "provider:openai",
     ]
 
     assert len(balancer.calls) == 1
