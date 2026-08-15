@@ -6,15 +6,27 @@ services:
       dockerfile: deploy/docker/llm-gateway.Dockerfile
 
     ports:
-      - "8000:8000"
+      - "8001:8000"
 
     environment:
-      ENVIRONMENT: demo
-      SERVICE_NAME: enterprise-ai-llm-gateway
-      SERVICE_VERSION: "0.1.0"
-      LOG_LEVEL: INFO
-      ENABLE_METRICS: "true"
-      ENABLE_TRACING: "true"
+      ENVIRONMENT: ${ENVIRONMENT:-demo}
+      SERVICE_NAME: ${SERVICE_NAME:-enterprise-ai-llm-gateway}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      ENABLE_TRACING: ${ENABLE_TRACING:-true}
+
+      API_KEY: ${API_KEY}
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS:-mock}
+
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
 
     healthcheck:
       test:
@@ -29,8 +41,31 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    depends_on:
+      otel-collector:
+        condition: service_started
 
     restart: unless-stopped
+    networks:
+      - default
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+
+    volumes:
+      - ./otel/otel-collector.yml:/etc/otelcol/config.yaml:ro
+
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+
+    restart: unless-stopped
+
+    networks:
+      - default
 
   prometheus:
     image: prom/prometheus:latest
@@ -45,6 +80,11 @@ services:
       llm-gateway:
         condition: service_healthy
 
+    restart: unless-stopped
+
+    networks:
+      - default
+
   grafana:
     image: grafana/grafana:latest
 
@@ -52,6 +92,14 @@ services:
       - "3000:3000"
 
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
 
     restart: unless-stopped
+
+    networks:
+      - default
+
+networks:
+  default:
+    name: deploy_default

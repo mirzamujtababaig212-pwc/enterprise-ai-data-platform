@@ -20,17 +20,15 @@ RUN pip install --no-cache-dir --upgrade pip \
         pydantic \
         pydantic-settings \
         httpx \
-        prometheus-client
+        prometheus-client \
+        opentelemetry-api \
+        opentelemetry-sdk \
+        openai \
+        opentelemetry-exporter-otlp-proto-grpc \
+        opentelemetry-instrumentation-fastapi
 
 USER appuser
 
 EXPOSE 8000
 
-CMD [
-    "uvicorn",
-    "ai_platform.llm_gateway.api.app:app",
-    "--host",
-    "0.0.0.0",
-    "--port",
-    "8000"
-]
+CMD ["uvicorn", "ai_platform.llm_gateway.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
