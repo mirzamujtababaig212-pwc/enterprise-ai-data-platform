@@ -5,6 +5,8 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
 )
 from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
 from ai_platform.llm_gateway.routing.policies import RoutingPolicy
+from ai_platform.llm_gateway.routing.candidates import RoutingCandidate
+from ai_platform.llm_gateway.routing.policy import ExplicitRoutingPolicy
 
 
 class FakeProvider:
@@ -138,3 +140,73 @@ def test_invalid_capability_returns_no_candidates(policy):
     )
 
     assert candidates == []
+
+
+def build_policy() -> ExplicitRoutingPolicy:
+    return ExplicitRoutingPolicy(
+        [
+            RoutingCandidate(
+                provider="openai",
+                model="gpt-4o",
+            ),
+            RoutingCandidate(
+                provider="azure_openai",
+                model="gpt-4o",
+            ),
+            RoutingCandidate(
+                provider="gemini",
+                model="gemini-2.5-pro",
+            ),
+        ]
+    )
+
+
+def test_explicit_provider_and_model() -> None:
+    policy = build_policy()
+
+    result = policy.resolve_candidates(
+        {
+            "provider": "openai",
+            "model": "gpt-4o",
+        }
+    )
+
+    assert len(result) == 1
+    assert result.as_list()[0].key == "openai:gpt-4o"
+
+
+def test_provider_only() -> None:
+    policy = build_policy()
+
+    result = policy.resolve_candidates(
+        {
+            "provider": "openai",
+        }
+    )
+
+    assert len(result) == 1
+    assert result.providers() == ["openai"]
+
+
+def test_model_only() -> None:
+    policy = build_policy()
+
+    result = policy.resolve_candidates(
+        {
+            "model": "gpt-4o",
+        }
+    )
+
+    assert len(result) == 2
+    assert result.providers() == [
+        "openai",
+        "azure_openai",
+    ]
+
+
+def test_no_provider_or_model_uses_defaults() -> None:
+    policy = build_policy()
+
+    result = policy.resolve_candidates({})
+
+    assert len(result) == 3
