@@ -333,6 +333,15 @@ async def list_models():
 
 
 @app.get(
+    "/health",
+    tags=health_tag,
+    summary="Liveness Health Check",
+)
+async def health():
+    return {"status": "healthy"}
+
+
+@app.get(
     "/v1/health",
     response_model=HealthResponse,
     tags=health_tag,

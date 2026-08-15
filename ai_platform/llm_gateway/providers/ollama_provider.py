@@ -1,5 +1,5 @@
 from typing import Any
-
+from typing import Iterable
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
 
 SUPPORTED_CHAT_MODELS = {
@@ -46,3 +46,6 @@ class OllamaProvider(BaseProvider):
 
     def supported_embedding_models(self):
         return list(SUPPORTED_EMBEDDING_MODELS)
+
+    def supported_stream_models(self) -> Iterable[str]:
+        return self.supported_chat_models()

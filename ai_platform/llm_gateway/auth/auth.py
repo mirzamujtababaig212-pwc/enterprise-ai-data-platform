@@ -10,6 +10,7 @@ API_KEY_NAME = "x-api-key"
 VALID_API_KEYS = {key.strip() for key in settings.API_KEY.split(",") if key.strip()}
 
 PUBLIC_PATHS = {
+    "/health",
     "/docs",
     "/redoc",
     "/openapi.json",

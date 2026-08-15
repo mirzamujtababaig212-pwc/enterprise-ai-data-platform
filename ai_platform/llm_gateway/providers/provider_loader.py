@@ -13,6 +13,9 @@ from ai_platform.llm_gateway.providers.bedrock_provider import (
 from ai_platform.llm_gateway.providers.gemini_provider import (
     GeminiProvider,
 )
+from ai_platform.llm_gateway.providers.mock_provider import (
+    MockProvider,
+)
 from ai_platform.llm_gateway.providers.ollama_provider import (
     OllamaProvider,
 )
@@ -27,6 +30,7 @@ PROVIDER_CLASSES = {
     "azure_openai": AzureOpenAIProvider,
     "bedrock": BedrockProvider,
     "ollama": OllamaProvider,
+    "mock": MockProvider,
 }
 
 
