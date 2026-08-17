@@ -4,7 +4,6 @@ import sys
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 DATABASE = "metastore_roundtrip"
 TABLE = "roundtrip_check"
 FULL_TABLE_NAME = f"{DATABASE}.{TABLE}"

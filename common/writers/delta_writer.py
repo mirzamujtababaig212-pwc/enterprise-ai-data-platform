@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from common.logging.logger import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -30,10 +29,10 @@ class DeltaWriter:
     def __init__(
         self,
         table: str,
-        path: Optional[str] = None,
+        path: str | None = None,
         mode: str = "append",
-        checkpoint: Optional[str] = None,
-        output_mode: Optional[str] = None,
+        checkpoint: str | None = None,
+        output_mode: str | None = None,
     ) -> None:
 
         if not table or not table.strip():
@@ -146,10 +145,10 @@ class DeltaWriter:
         self,
         df,
         foreach_batch: Callable,
-        checkpoint: Optional[str] = None,
-        output_mode: Optional[str] = None,
-        query_name: Optional[str] = None,
-        trigger: Optional[dict] = None,
+        checkpoint: str | None = None,
+        output_mode: str | None = None,
+        query_name: str | None = None,
+        trigger: dict | None = None,
     ):
         """
         Start a streaming Delta write.

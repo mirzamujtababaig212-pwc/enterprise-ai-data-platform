@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from typing import Any
-from typing import Iterable
+
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
 
 SUPPORTED_CHAT_MODELS = {

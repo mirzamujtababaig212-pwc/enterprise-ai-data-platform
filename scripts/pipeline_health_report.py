@@ -3,7 +3,6 @@ from __future__ import annotations
 from common.control.pipeline_control import PipelineControl
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 PIPELINE_NAME = "enterprise_medallion_pipeline"
 
 

@@ -19,15 +19,14 @@ All parsing operations therefore use tolerant/safe parsing.
 from pathlib import Path
 
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
 from pyspark.sql.types import (
-    StructType,
-    StructField,
     StringType,
+    StructField,
+    StructType,
 )
+from pyspark.sql.window import Window
 
 from common.spark.spark_builder import SparkSessionBuilder
-
 
 # ============================================================================
 # PATHS

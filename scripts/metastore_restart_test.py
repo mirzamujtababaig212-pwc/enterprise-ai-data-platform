@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 EXPECTED_DATABASES = [
     "bronze",
     "silver",

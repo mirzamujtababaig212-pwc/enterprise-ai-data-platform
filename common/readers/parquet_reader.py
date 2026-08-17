@@ -1,7 +1,6 @@
 from common.logging.logger import get_logger
 from common.readers.base_reader import BaseReader
 
-
 logger = get_logger(__name__)
 
 

@@ -16,6 +16,7 @@ PUBLIC_PATHS = {
     "/openapi.json",
     "/favicon.ico",
     "/metrics",
+    "/healthz",
 }
 
 

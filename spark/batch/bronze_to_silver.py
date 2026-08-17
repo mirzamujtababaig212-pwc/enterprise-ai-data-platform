@@ -1,11 +1,9 @@
 from common.dependency_provider import (
     DependencyProvider,
 )
-
 from common.pipelines.silver_pipeline import (
     SilverPipeline,
 )
-
 from common.spark.spark_builder import (
     SparkSessionBuilder,
 )

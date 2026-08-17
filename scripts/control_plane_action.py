@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from common.control.pipeline_control import PipelineControl
@@ -9,7 +9,7 @@ from common.spark.spark_builder import SparkSessionBuilder
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def parse_optional_int(

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class FailureCategory(str, Enum):
+class FailureCategory(StrEnum):
     """Categories used to determine whether a provider failure is retryable."""
 
     TRANSIENT = "transient"

@@ -4,8 +4,8 @@ from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
 from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
-from ai_platform.llm_gateway.routing.policies import RoutingPolicy
 from ai_platform.llm_gateway.routing.candidates import RoutingCandidate
+from ai_platform.llm_gateway.routing.policies import RoutingPolicy
 from ai_platform.llm_gateway.routing.policy import ExplicitRoutingPolicy
 
 

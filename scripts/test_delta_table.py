@@ -1,6 +1,5 @@
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 spark = SparkSessionBuilder.build("TestDeltaTable")
 
 spark.sql("CREATE DATABASE IF NOT EXISTS silver")

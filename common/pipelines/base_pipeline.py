@@ -5,7 +5,6 @@ from typing import ClassVar
 from common.logging.logger import get_logger
 from common.pipelines.pipeline_config import PipelineConfig
 
-
 logger = get_logger(__name__)
 
 

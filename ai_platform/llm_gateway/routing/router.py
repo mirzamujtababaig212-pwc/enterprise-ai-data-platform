@@ -85,7 +85,7 @@ class Router:
         )
 
         if not providers:
-            raise ProviderNotFound(f"No provider supports chat model: {model}")
+            raise ProviderNotFound(f"No provider supports embeddings model: {model}")
 
         result = await self.fallback_executor.execute(
             providers,

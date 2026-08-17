@@ -1,6 +1,5 @@
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 spark = SparkSessionBuilder.build("TestDeltaWrite")
 
 source_path = "data/bronze"

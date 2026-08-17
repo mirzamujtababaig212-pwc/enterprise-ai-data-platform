@@ -6,13 +6,11 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from common.control.pipeline_control import PipelineControl
 from common.spark.spark_builder import SparkSessionBuilder
-
 
 PIPELINE_NAME = "enterprise_medallion_pipeline"
 
@@ -28,7 +26,7 @@ def utc_now() -> datetime:
     Return timezone-aware UTC datetime.
     """
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def build_logger() -> logging.Logger:
@@ -121,7 +119,7 @@ def table_exists(
 def get_table_row_count(
     spark,
     table_name: str,
-) -> Optional[int]:
+) -> int | None:
     """
     Return current row count.
 
@@ -144,8 +142,8 @@ def collect_stage_metrics(
     spark,
     stage_name: str,
 ) -> tuple[
-    Optional[int],
-    Optional[int],
+    int | None,
+    int | None,
 ]:
     """
     Collect stage input/output row counts.
@@ -326,8 +324,8 @@ def main() -> int:
     spark = None
     control = None
 
-    run_id: Optional[str] = None
-    control_start_time: Optional[datetime] = None
+    run_id: str | None = None
+    control_start_time: datetime | None = None
 
     try:
 

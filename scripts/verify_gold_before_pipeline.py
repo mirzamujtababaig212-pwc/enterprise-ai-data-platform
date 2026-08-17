@@ -4,7 +4,6 @@ from pathlib import Path
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 DATABASE = "gold"
 TABLE = "vehicle_metrics"
 FULL_TABLE = f"{DATABASE}.{TABLE}"

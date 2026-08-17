@@ -1,10 +1,10 @@
 """Data quality rule orchestration."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from ai_platform.data.contracts import DataQualityRule
-
 
 Record = dict[str, Any]
 

@@ -342,6 +342,15 @@ async def health():
 
 
 @app.get(
+    "/healthz",
+    tags=health_tag,
+    summary="Infrastructure Health Check",
+)
+async def healthz():
+    return {"status": "healthy"}
+
+
+@app.get(
     "/v1/health",
     response_model=HealthResponse,
     tags=health_tag,

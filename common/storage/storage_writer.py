@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from common.logging.logger import get_logger
-
 from common.storage.delta_writer import DeltaWriter
 from common.storage.fabric_writer import FabricWriter
 from common.storage.postgres_writer import PostgresWriter
 from common.storage.snowflake_writer import SnowflakeWriter
-
 
 logger = get_logger(__name__)
 

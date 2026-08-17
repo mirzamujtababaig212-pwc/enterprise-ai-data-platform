@@ -1,10 +1,9 @@
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 from pyspark.sql import functions as F
 
 from common.spark.spark_builder import SparkSessionBuilder
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,7 +15,7 @@ QUARANTINE_PATH = PROJECT_ROOT / "data" / "quarantine" / "kafka_vehicle_events"
 def main() -> None:
     spark = SparkSessionBuilder.build("BronzeSilverMetrics")
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     try:
         bronze = spark.read.format("parquet").load(str(BRONZE_PATH))

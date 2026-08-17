@@ -3,7 +3,6 @@ import time
 from common.logging.logger import get_logger
 from common.validation.base_validator import BaseValidator
 
-
 logger = get_logger(__name__)
 
 

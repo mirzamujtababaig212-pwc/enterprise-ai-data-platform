@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from ai_platform.llm_gateway.exceptions.gateway_exceptions import ProviderNotFound
 from ai_platform.llm_gateway.routing.router import Router
 
 
@@ -267,5 +268,8 @@ async def test_router_raises_when_resolver_returns_no_provider() -> None:
         ],
     }
 
-    with pytest.raises(Exception):
+    with pytest.raises(
+        ProviderNotFound,
+        match="No provider supports chat model",
+    ):
         await router.route_chat(request)

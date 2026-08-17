@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict
-
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
@@ -70,7 +68,7 @@ class SilverGoldReconciliation:
     def reconcile(
         silver_df: DataFrame,
         gold_df: DataFrame,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
 
         eligible_silver = SilverGoldReconciliation._eligible_silver(silver_df).cache()
 

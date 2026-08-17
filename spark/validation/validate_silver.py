@@ -4,7 +4,6 @@ from pyspark.sql import functions as F
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SILVER_PATH = PROJECT_ROOT / "data" / "silver" / "kafka_vehicle_events"

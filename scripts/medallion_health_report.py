@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from common.spark.spark_builder import SparkSessionBuilder
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,7 +55,7 @@ def main() -> None:
         report = {
             "platform": "enterprise_ai_platform",
             "report_type": "medallion_health",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "spark_version": spark.version,
             "tables": [],
         }

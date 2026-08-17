@@ -1,0 +1,105 @@
+platform:
+  name: enterprise-ai-platform
+  version: "0.2.0"
+
+domains:
+
+  data_engineering:
+    enabled: true
+    capabilities:
+      - batch_processing
+      - streaming
+      - kafka
+      - spark
+      - delta_lake
+      - medallion_architecture
+      - data_quality
+      - dead_letter_queue
+      - schema_validation
+      - pipeline_factory
+      - pipeline_registry
+      - dbt
+
+  data_platform:
+    enabled: true
+    capabilities:
+      - bronze
+      - silver
+      - gold
+      - delta
+      - parquet
+      - postgres
+      - s3
+      - snowflake
+      - fabric
+      - iceberg
+
+  data_science:
+    enabled: true
+    capabilities:
+      - eda
+      - statistics
+      - feature_engineering
+      - feature_store
+      - experimentation
+      - visualization
+
+  machine_learning:
+    enabled: true
+    capabilities:
+      - model_training
+      - model_validation
+      - model_serving
+
+  llm:
+    enabled: true
+    capabilities:
+      - llm_gateway
+      - provider_routing
+      - embeddings
+      - usage_tracking
+      - cost_tracking
+
+  rag:
+    enabled: true
+
+  agents:
+    enabled: true
+
+  observability:
+    enabled: true
+    capabilities:
+      - prometheus
+      - grafana
+      - opentelemetry
+      - tracing
+
+  orchestration:
+    enabled: true
+    capabilities:
+      - airflow
+      - workflow_engine
+
+  platform_engineering:
+    enabled: true
+    capabilities:
+      - docker
+      - kubernetes
+      - helm
+      - terraform
+      - argocd
+      - github_actions
+
+clouds:
+
+  aws:
+    enabled: true
+    status: reference
+
+  azure:
+    enabled: true
+    status: adapter
+
+  gcp:
+    enabled: true
+    status: adapter

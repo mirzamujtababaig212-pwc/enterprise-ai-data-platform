@@ -1,12 +1,12 @@
 from __future__ import annotations
-from common.config.settings import Settings
+
 from pathlib import Path
 
+from common.config.settings import Settings
 from common.logging.logger import get_logger
 from common.spark.spark_builder import SparkSessionBuilder
 from common.validation.data_quality import DataQualityValidator
 from common.writers.delta_writer import DeltaWriter
-
 from spark.schemas.gold_schema import (
     GOLD_REQUIRED_COLUMNS,
 )
@@ -19,7 +19,6 @@ from spark.validation.gold_validator import (
 from spark.validation.silver_gold_reconciliation import (
     SilverGoldReconciliation,
 )
-
 
 logger = get_logger(__name__)
 

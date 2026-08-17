@@ -5,19 +5,15 @@ from pathlib import Path
 from pyspark.sql import functions as F
 
 from common.spark.spark_builder import SparkSessionBuilder
-
 from spark.transformations.silver_to_gold_transformer import (
     SilverToGoldTransformer,
 )
-
 from spark.validation.gold_validator import (
     GoldValidator,
 )
-
 from spark.validation.silver_gold_reconciliation import (
     SilverGoldReconciliation,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
