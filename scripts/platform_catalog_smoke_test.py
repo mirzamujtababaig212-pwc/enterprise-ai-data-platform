@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 TABLES = [
     "bronze.vehicle_events",
     "silver.vehicle_events",

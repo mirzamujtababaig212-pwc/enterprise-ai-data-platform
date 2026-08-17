@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from common.spark.spark_builder import SparkSessionBuilder
 from common.control.pipeline_control import PipelineControl
-
+from common.spark.spark_builder import SparkSessionBuilder
 
 DEFAULT_PIPELINE = "enterprise_medallion_pipeline"
 

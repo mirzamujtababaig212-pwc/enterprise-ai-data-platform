@@ -7,7 +7,6 @@ from pyspark.sql.functions import (
 from common.transformers.base_transformer import (
     BaseTransformer,
 )
-
 from spark.schemas.bronze_schema import (
     bronze_schema,
 )

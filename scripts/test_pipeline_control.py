@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from common.control.pipeline_control import PipelineControl
 from common.spark.spark_builder import SparkSessionBuilder
@@ -28,9 +28,9 @@ def main() -> None:
         # Simulate pipeline execution
         # --------------------------------------------------------------
 
-        stage1_start = datetime.now(timezone.utc)
+        stage1_start = datetime.now(UTC)
 
-        stage1_end = datetime.now(timezone.utc)
+        stage1_end = datetime.now(UTC)
 
         control.record_stage(
             run_id=run_id,
@@ -45,9 +45,9 @@ def main() -> None:
             dq_failures=0,
         )
 
-        stage2_start = datetime.now(timezone.utc)
+        stage2_start = datetime.now(UTC)
 
-        stage2_end = datetime.now(timezone.utc)
+        stage2_end = datetime.now(UTC)
 
         control.record_stage(
             run_id=run_id,
@@ -71,7 +71,7 @@ def main() -> None:
             pipeline_name="enterprise_medallion_pipeline",
             start_time=start_time,
             status="SUCCESS",
-            end_time=datetime.now(timezone.utc),
+            end_time=datetime.now(UTC),
             error_message=None,
         )
 

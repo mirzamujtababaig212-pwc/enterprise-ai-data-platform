@@ -6,6 +6,8 @@ from ai_platform.llm_gateway.registry.model_registry import (
 )
 from ai_platform.llm_gateway.registry.provider_capabilities import (
     model_supported as static_model_supported,
+)
+from ai_platform.llm_gateway.registry.provider_capabilities import (
     provider_exists as static_provider_exists,
 )
 

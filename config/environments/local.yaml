@@ -1,0 +1,32 @@
+environment:
+  name: local
+  cloud: local
+
+storage:
+  provider: local
+  base_path: ./data
+  raw: ./data/raw
+  bronze: ./data/bronze
+  silver: ./data/silver
+  gold: ./data/gold
+  checkpoints: ./data/checkpoints
+
+streaming:
+  broker: kafka
+  bootstrap_servers: localhost:9092
+
+compute:
+  engine: spark
+  master: local[*]
+
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+
+observability:
+  prometheus: http://localhost:9090
+  grafana: http://localhost:3000
+
+llm:
+  gateway: http://localhost:8000

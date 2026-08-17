@@ -1,9 +1,8 @@
 from common.config.settings import Settings
 from common.logging.logger import get_logger
-from common.spark.spark_builder import SparkSessionBuilder
 from common.readers.kafka_reader import KafkaReader
+from common.spark.spark_builder import SparkSessionBuilder
 from common.transformers.bronze_transformer import BronzeTransformer
-
 
 logger = get_logger(__name__)
 

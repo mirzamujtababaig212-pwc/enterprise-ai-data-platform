@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 GOLD_TABLE = "gold.vehicle_metrics"
 
 

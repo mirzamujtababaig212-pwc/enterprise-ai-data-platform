@@ -7,6 +7,7 @@ DEFAULT_PROVIDERS = [
     "azure_openai",
     "bedrock",
     "ollama",
+    "mock",
 ]
 
 

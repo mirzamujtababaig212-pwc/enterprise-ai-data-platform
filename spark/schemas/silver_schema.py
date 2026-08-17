@@ -8,7 +8,6 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-
 silver_schema = StructType(
     [
         StructField(

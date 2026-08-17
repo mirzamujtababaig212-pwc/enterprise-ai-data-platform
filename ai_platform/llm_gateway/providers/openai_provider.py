@@ -329,3 +329,6 @@ class OpenAIProvider(BaseProvider):
     ) -> list[str]:
 
         return list(SUPPORTED_EMBEDDING_MODELS)
+
+    def supported_stream_models(self) -> list[str]:
+        return list(SUPPORTED_CHAT_MODELS)

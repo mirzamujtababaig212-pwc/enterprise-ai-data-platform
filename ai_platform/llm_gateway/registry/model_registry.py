@@ -1,22 +1,27 @@
+from collections.abc import Iterable
 from typing import Any
+
+from ai_platform.llm_gateway.models.capabilities import (
+    ProviderCapabilities,
+    RegistrySnapshot,
+)
 
 
 class ModelRegistry:
     """
-    Runtime registry of provider capabilities.
+    Runtime registry of provider implementations and capabilities.
 
-    Provider implementations are the source of truth for the models they
-    support. The registry discovers those capabilities when providers are
-    registered.
+    The registry maintains:
+        1. The actual provider instances.
+        2. Capability metadata discovered from those providers.
 
-    Capability names currently supported:
-        - chat
-        - embeddings
-        - stream
+    Provider implementations remain the source of truth for supported
+    models and capabilities.
     """
 
     def __init__(self):
-        self._models: dict[str, dict[str, list[str]]] = {}
+        self._providers: dict[str, Any] = {}
+        self._snapshot = RegistrySnapshot.empty()
 
     def register_provider(
         self,
@@ -24,52 +29,195 @@ class ModelRegistry:
         provider: Any,
     ) -> None:
         """
-        Register the capabilities exposed by a provider.
+        Register a provider implementation and discover its capabilities.
         """
 
-        chat_models = []
+        self._providers[provider_name] = provider
 
-        embedding_models = []
-        if hasattr(provider, "supported_chat_models"):
-            chat_models = list(provider.supported_chat_models())
+        capabilities = self._discover_capabilities(
+            provider,
+        )
 
-        if hasattr(provider, "supported_embedding_models"):
-            embedding_models = list(provider.supported_embedding_models())
+        providers = dict(
+            self._snapshot.providers,
+        )
 
-        self._models[provider_name] = {
-            "chat": chat_models,
-            "embeddings": embedding_models,
+        providers[provider_name] = capabilities
+
+        self._snapshot = RegistrySnapshot(
+            providers=providers,
+        )
+
+    def unregister_provider(
+        self,
+        provider_name: str,
+    ) -> None:
+        """
+        Remove a provider and atomically rebuild the snapshot.
+        """
+
+        self._providers.pop(
+            provider_name,
+            None,
+        )
+
+        providers = dict(
+            self._snapshot.providers,
+        )
+
+        providers.pop(
+            provider_name,
+            None,
+        )
+
+        self._snapshot = RegistrySnapshot(
+            providers=providers,
+        )
+
+    def get_provider(
+        self,
+        provider_name: str,
+    ) -> Any:
+        return self._providers[provider_name]
+
+    def provider_exists(
+        self,
+        provider_name: str,
+    ) -> bool:
+        return provider_name in self._providers
+
+    def model_supported(
+        self,
+        provider_name: str,
+        capability: str,
+        model: str,
+    ) -> bool:
+        return self._snapshot.model_supported(
+            provider_name,
+            capability,
+            model,
+        )
+
+    def get_models(
+        self,
+        provider_name: str,
+    ) -> dict[str, list[str]]:
+        capabilities = self._snapshot.providers.get(
+            provider_name,
+        )
+
+        if capabilities is None:
+            return {}
+
+        return {
+            "chat": list(capabilities.chat),
+            "embeddings": list(capabilities.embeddings),
+            "stream": list(capabilities.stream),
         }
 
-        stream_models = self._get_supported_models(
+    def get_providers_for_model(
+        self,
+        capability: str,
+        model: str,
+    ) -> list[str]:
+        return [
+            provider
+            for provider, capabilities in self._snapshot.providers.items()
+            if capabilities.supports(
+                capability,
+                model,
+            )
+        ]
+
+    def list_providers(self) -> list[str]:
+        return list(
+            self._providers.keys(),
+        )
+
+    def list_models(
+        self,
+        capability: str | None = None,
+    ) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+
+        for (
+            provider,
+            capabilities,
+        ) in self._snapshot.providers.items():
+
+            if capability is None:
+                models = sorted(
+                    set(
+                        capabilities.chat + capabilities.embeddings + capabilities.stream,
+                    )
+                )
+            else:
+                models = sorted(
+                    capabilities.models_for(
+                        capability,
+                    )
+                )
+
+            result[provider] = models
+
+        return result
+
+    def snapshot(self) -> RegistrySnapshot:
+        """
+        Return the immutable current capability snapshot.
+        """
+
+        return self._snapshot
+
+    def clear(self) -> None:
+        self._providers.clear()
+        self._snapshot = RegistrySnapshot.empty()
+
+    @classmethod
+    def _discover_capabilities(
+        cls,
+        provider: Any,
+    ) -> ProviderCapabilities:
+
+        chat = cls._get_supported_models(
+            provider,
+            "supported_chat_models",
+        )
+
+        embeddings = cls._get_supported_models(
+            provider,
+            "supported_embedding_models",
+        )
+
+        stream = cls._get_supported_models(
             provider,
             "supported_stream_models",
         )
 
-        # Backward-compatible behavior:
+        # Backward compatibility:
         #
-        # All current providers implement stream() but do not yet expose
-        # supported_stream_models(). In that case, stream capability follows
-        # chat capability.
-        if not stream_models and hasattr(provider, "stream"):
-            stream_models = list(chat_models)
+        # If a provider exposes stream() but does not explicitly
+        # expose supported_stream_models(), inherit chat models.
+        if not stream and hasattr(provider, "stream"):
+            stream = list(chat)
 
-        self._models[provider_name] = {
-            "chat": sorted(set(chat_models)),
-            "embeddings": sorted(set(embedding_models)),
-            "stream": sorted(set(stream_models)),
-        }
+        return ProviderCapabilities(
+            chat=tuple(sorted(set(chat))),
+            embeddings=tuple(sorted(set(embeddings))),
+            stream=tuple(sorted(set(stream))),
+        )
 
     @staticmethod
     def _get_supported_models(
         provider: Any,
         method_name: str,
     ) -> list[str]:
-        """
-        Safely obtain a provider's supported model list.
-        """
 
-        method = getattr(provider, method_name, None)
+        method = getattr(
+            provider,
+            method_name,
+            None,
+        )
 
         if method is None:
             return []
@@ -79,135 +227,26 @@ class ModelRegistry:
         if models is None:
             return []
 
-        return list(models)
-
-    def unregister_provider(
-        self,
-        provider_name: str,
-    ) -> None:
-        """
-        Remove a provider from the registry.
-        """
-
-        self._models.pop(
-            provider_name,
-            None,
+        return list(
+            ModelRegistry._cast_models(models),
         )
 
-    def provider_exists(
-        self,
-        provider_name: str,
-    ) -> bool:
+    @staticmethod
+    def _cast_models(
+        models: Iterable[str],
+    ) -> Iterable[str]:
         """
-        Return whether a provider is registered.
-        """
-
-        return provider_name in self._models
-
-    def model_supported(
-        self,
-        provider_name: str,
-        capability: str,
-        model: str,
-    ) -> bool:
-        """
-        Check whether a provider supports a model for a capability.
+        Normalize provider model identifiers.
         """
 
-        provider_models = self._models.get(
-            provider_name,
-            {},
-        )
+        for model in models:
+            if model is None:
+                continue
 
-        return model in provider_models.get(
-            capability,
-            [],
-        )
+            value = str(model).strip()
 
-    def get_models(
-        self,
-        provider_name: str,
-    ) -> dict[str, list[str]]:
-        """
-        Return all capabilities for a provider.
-        """
-
-        return self._models.get(
-            provider_name,
-            {},
-        )
-
-    def get_providers_for_model(
-        self,
-        capability: str,
-        model: str,
-    ) -> list[str]:
-        """
-        Return providers supporting a model for a capability.
-        """
-
-        providers = []
-
-        for provider_name, capabilities in self._models.items():
-            models = capabilities.get(
-                capability,
-                [],
-            )
-
-            if model in models:
-                providers.append(provider_name)
-
-        return providers
-
-    def list_providers(self) -> list[str]:
-        """
-        Return registered providers.
-        """
-
-        return list(self._models.keys())
-
-    def list_models(
-        self,
-        capability: str | None = None,
-    ) -> dict[str, list[str]]:
-        """
-        Return registered models.
-
-        If capability is supplied, return only that capability.
-
-        Otherwise, return the union of all models exposed by each provider.
-        """
-
-        result: dict[str, list[str]] = {}
-
-        for provider_name, capabilities in self._models.items():
-
-            if capability is None:
-                models = []
-
-                for provider_models in capabilities.values():
-                    models.extend(provider_models)
-
-                result[provider_name] = sorted(set(models))
-
-            else:
-                result[provider_name] = sorted(
-                    set(
-                        capabilities.get(
-                            capability,
-                            [],
-                        )
-                    )
-                )
-
-        return result
-
-    def clear(self) -> None:
-        """
-        Remove all registered providers and capabilities.
-        """
-
-        self._models.clear()
+            if value:
+                yield value
 
 
 model_registry = ModelRegistry()

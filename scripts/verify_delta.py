@@ -2,7 +2,6 @@ import os
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 spark = SparkSessionBuilder.build("VerifyDelta")
 
 print("\n===== SPARK VERSION =====")

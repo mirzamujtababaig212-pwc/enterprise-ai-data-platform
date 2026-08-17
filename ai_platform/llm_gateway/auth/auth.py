@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
+
 from ai_platform.llm_gateway.config.settings import settings
 
 tracer = trace.get_tracer(__name__)
@@ -9,11 +10,13 @@ API_KEY_NAME = "x-api-key"
 VALID_API_KEYS = {key.strip() for key in settings.API_KEY.split(",") if key.strip()}
 
 PUBLIC_PATHS = {
+    "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/favicon.ico",
     "/metrics",
+    "/healthz",
 }
 
 

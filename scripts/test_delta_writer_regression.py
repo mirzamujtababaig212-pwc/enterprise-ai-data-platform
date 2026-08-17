@@ -5,7 +5,6 @@ from pathlib import Path
 from common.spark.spark_builder import SparkSessionBuilder
 from common.writers.delta_writer import DeltaWriter
 
-
 TEST_DATABASE = "gold"
 TEST_TABLE = "vehicle_metrics_writer_test"
 TEST_FULL_TABLE = f"{TEST_DATABASE}.{TEST_TABLE}"

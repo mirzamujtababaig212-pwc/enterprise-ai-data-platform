@@ -194,3 +194,22 @@ __pycache__/
 # Backup/snapshot files
 *.bak
 *.after_*
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+deploy/.env.demo
+.env
+.env.*
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+tfplan
+crash.log
+crash.*.log

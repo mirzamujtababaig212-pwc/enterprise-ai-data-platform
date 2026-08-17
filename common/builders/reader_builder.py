@@ -1,8 +1,6 @@
 from common.config.settings import Settings
-
 from spark.schemas.bronze_schema import bronze_schema
 from spark.schemas.silver_schema import silver_schema
-
 
 SCHEMAS = {
     "bronze_schema": bronze_schema,

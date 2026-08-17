@@ -2,7 +2,6 @@ from pathlib import Path
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SILVER_DELTA_PATH = PROJECT_ROOT / "data" / "silver_delta"
 

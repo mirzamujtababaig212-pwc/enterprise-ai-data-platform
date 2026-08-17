@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 

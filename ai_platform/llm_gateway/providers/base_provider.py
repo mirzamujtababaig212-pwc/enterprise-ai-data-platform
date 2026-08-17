@@ -41,3 +41,8 @@ class BaseProvider(ABC):
     def supported_embedding_models(
         self,
     ) -> list[str]: ...
+
+    @abstractmethod
+    def supported_stream_models(
+        self,
+    ) -> list[str]: ...

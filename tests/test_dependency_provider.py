@@ -1,4 +1,5 @@
 from unittest.mock import patch
+
 from common.config.settings import Settings
 from common.dependency_provider import DependencyProvider
 

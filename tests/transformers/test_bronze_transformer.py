@@ -1,11 +1,11 @@
 from datetime import datetime
 
 from pyspark.sql.types import (
-    StructField,
-    StructType,
-    StringType,
     IntegerType,
     LongType,
+    StringType,
+    StructField,
+    StructType,
     TimestampType,
 )
 

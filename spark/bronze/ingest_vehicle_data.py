@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from common.logging.logger import get_logger
 from common.spark.spark_builder import SparkSessionBuilder
 from common.writers.delta_writer import DeltaWriter

@@ -1,6 +1,5 @@
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 TABLE_NAME = "bronze.vehicle_events"
 
 

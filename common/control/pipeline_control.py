@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
 import uuid
+from datetime import UTC, datetime
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
@@ -14,7 +13,6 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
-
 
 PIPELINE_RUN_TABLE = "control.pipeline_run_history"
 PIPELINE_STAGE_TABLE = "control.pipeline_stage_history"
@@ -99,7 +97,7 @@ class PipelineControl:
         Spark TimestampType is persisted as a timezone-naive UTC
         timestamp in this local control-plane implementation.
         """
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return datetime.now(UTC).replace(tzinfo=None)
 
     @staticmethod
     def _normalize_timestamp(
@@ -114,7 +112,7 @@ class PipelineControl:
         if value.tzinfo is None:
             return value
 
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.astimezone(UTC).replace(tzinfo=None)
 
     # ==============================================================
     # INITIALIZATION
@@ -355,11 +353,11 @@ class PipelineControl:
         status: str,
         start_time: datetime,
         end_time: datetime,
-        input_rows: Optional[int] = None,
-        output_rows: Optional[int] = None,
-        dq_checks: Optional[int] = None,
-        dq_failures: Optional[int] = None,
-        error_message: Optional[str] = None,
+        input_rows: int | None = None,
+        output_rows: int | None = None,
+        dq_checks: int | None = None,
+        dq_failures: int | None = None,
+        error_message: str | None = None,
     ) -> None:
         """
         Insert or update a stage execution record.

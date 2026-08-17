@@ -3,7 +3,6 @@ import time
 from common.logging.logger import get_logger
 from common.writers.base_writer import BaseWriter
 
-
 logger = get_logger(__name__)
 
 

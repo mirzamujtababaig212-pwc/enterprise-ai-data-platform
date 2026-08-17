@@ -1,0 +1,23 @@
+environment:
+  name: aws
+  cloud: aws
+  region: us-east-1
+
+storage:
+  raw: s3://enterprise-data-ai-platform/raw
+  bronze: s3://enterprise-data-ai-platform/bronze
+  silver: s3://enterprise-data-ai-platform/silver
+  gold: s3://enterprise-data-ai-platform/gold
+  checkpoints: s3://enterprise-data-ai-platform/checkpoints
+
+streaming:
+  broker: kafka
+
+compute:
+  engine: spark
+
+database:
+  type: postgres
+
+llm:
+  provider: bedrock

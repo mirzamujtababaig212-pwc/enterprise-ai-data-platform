@@ -2,7 +2,6 @@ from pathlib import Path
 
 from common.spark.spark_builder import SparkSessionBuilder
 
-
 DATABASE_NAME = "bronze"
 TABLE_NAME = "vehicle_events"
 

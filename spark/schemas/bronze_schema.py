@@ -7,7 +7,6 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-
 bronze_schema = StructType(
     [
         StructField(

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from common.logging.logger import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -41,7 +39,7 @@ class DataQualityValidator:
 
         self.df = dataframe
         self.dataset_name = dataset_name
-        self.results: List[ValidationResult] = []
+        self.results: list[ValidationResult] = []
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -153,7 +151,7 @@ class DataQualityValidator:
 
     def check_unique(
         self,
-        columns: List[str],
+        columns: list[str],
     ) -> None:
 
         duplicate_count = self.df.groupBy(*columns).count().filter(F.col("count") > 1).count()
@@ -174,7 +172,7 @@ class DataQualityValidator:
 
     def check_columns(
         self,
-        expected_columns: List[str],
+        expected_columns: list[str],
     ) -> None:
 
         actual_columns = self.df.columns
@@ -195,7 +193,7 @@ class DataQualityValidator:
     # Final result
     # ------------------------------------------------------------------
 
-    def validate(self) -> Dict[str, object]:
+    def validate(self) -> dict[str, object]:
 
         failed = [result for result in self.results if not result.passed]
 
