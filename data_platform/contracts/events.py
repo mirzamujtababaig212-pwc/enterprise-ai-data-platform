@@ -12,9 +12,7 @@ class EnterpriseEvent(BaseModel):
     event_type: str
     source: str
     entity_id: str
-    event_time: datetime = Field(
-        default_factory=lambda: datetime.now(UTC)
-    )
+    event_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     payload: dict[str, Any]
     schema_version: str = "1.0"
 

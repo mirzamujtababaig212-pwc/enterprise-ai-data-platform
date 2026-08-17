@@ -1,4 +1,3 @@
-from collections.abc import Iterable
 from typing import Any
 
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
@@ -48,5 +47,5 @@ class BedrockProvider(BaseProvider):
     def supported_embedding_models(self):
         return list(SUPPORTED_EMBEDDING_MODELS)
 
-    def supported_stream_models(self) -> Iterable[str]:
+    def supported_stream_models(self) -> list[str]:
         return self.supported_chat_models()
