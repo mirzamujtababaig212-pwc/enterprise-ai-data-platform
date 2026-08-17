@@ -203,3 +203,13 @@ __pycache__/
 deploy/.env.demo
 .env
 .env.*
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+tfplan
+crash.log
+crash.*.log
