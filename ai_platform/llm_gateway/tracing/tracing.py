@@ -58,10 +58,15 @@ def configure_tracing(app: FastAPI) -> None:
         "development",
     )
 
-    otlp_endpoint = os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "localhost:4317",
-    )
+    export_enabled = os.getenv(
+        "OTEL_EXPORT_ENABLED",
+        "true",
+    ).strip().lower() in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
 
     resource = Resource.create(
         {
@@ -79,18 +84,28 @@ def configure_tracing(app: FastAPI) -> None:
         tracer_provider,
     )
 
-    exporter = OTLPSpanExporter(
-        endpoint=otlp_endpoint,
-        insecure=True,
-    )
+    if export_enabled:
+        otlp_endpoint = os.getenv(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+        )
 
-    span_processor = BatchSpanProcessor(
-        exporter,
-    )
+        if not otlp_endpoint:
+            raise RuntimeError(
+                "OTEL_EXPORT_ENABLED is true but " "OTEL_EXPORTER_OTLP_ENDPOINT is not configured"
+            )
 
-    tracer_provider.add_span_processor(
-        span_processor,
-    )
+        exporter = OTLPSpanExporter(
+            endpoint=otlp_endpoint,
+            insecure=True,
+        )
+
+        span_processor = BatchSpanProcessor(
+            exporter,
+        )
+
+        tracer_provider.add_span_processor(
+            span_processor,
+        )
 
     FastAPIInstrumentor.instrument_app(
         app,
