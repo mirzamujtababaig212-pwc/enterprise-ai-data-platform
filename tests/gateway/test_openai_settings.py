@@ -15,6 +15,7 @@ def test_validate_openai_settings_success(monkeypatch):
 
 def test_validate_openai_settings_failure(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PROVIDER_CREDENTIALS", raising=False)
 
     importlib.reload(openai_settings)
 
