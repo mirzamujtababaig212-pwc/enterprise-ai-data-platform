@@ -1,5 +1,4 @@
 class FakeProvider:
-
     def supported_chat_models(self):
         return [
             "gpt-4.1",
@@ -19,7 +18,6 @@ class FakeProvider:
 
 
 class FakeRoutingResolver:
-
     def resolve(
         self,
         capability,
@@ -30,7 +28,6 @@ class FakeRoutingResolver:
 
 
 class FakeProviderResolver:
-
     def resolve(
         self,
         provider_name,

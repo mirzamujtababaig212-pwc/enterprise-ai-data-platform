@@ -71,6 +71,6 @@ class RoutingPolicy:
             capability,
             model,
         ):
-            raise ValueError(f"Unsupported " f"{provider} " f"{capability} " f"model: " f"{model}")
+            raise ValueError(f"Unsupported {provider} {capability} model: {model}")
 
         return provider

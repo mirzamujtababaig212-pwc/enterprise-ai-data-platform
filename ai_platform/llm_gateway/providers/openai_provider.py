@@ -11,13 +11,14 @@ from openai import (
 )
 
 from ai_platform.llm_gateway.config.openai_settings import (
-    OPENAI_API_KEY,
-    OPENAI_BASE_URL,
-    OPENAI_MODEL,
+    OpenAISettings,
+    get_openai_settings,
 )
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
     ProviderConnectionError,
+    ProviderExecutionError,
+    ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
@@ -45,16 +46,75 @@ OPENAI_EMBEDDING_MODEL_MAP = {
 
 
 class OpenAIProvider(BaseProvider):
-    def __init__(self):
-        self.default_model = OPENAI_MODEL
+    def __init__(
+        self,
+        client: AsyncOpenAI | None = None,
+        settings: OpenAISettings | None = None,
+    ) -> None:
+        self.settings = settings or get_openai_settings()
 
-        self.client = None
+        self.default_model = self.settings.model
 
-        if OPENAI_API_KEY:
+        self.client = client
+
+        if self.client is None and self.settings.api_key:
             self.client = AsyncOpenAI(
-                api_key=OPENAI_API_KEY,
-                base_url=OPENAI_BASE_URL,
+                api_key=self.settings.api_key,
+                base_url=self.settings.base_url,
+                timeout=self.settings.timeout,
+                max_retries=self.settings.max_retries,
             )
+
+    @staticmethod
+    def _rate_limit_message(exc: RateLimitError) -> str:
+        """Extract the most useful OpenAI rate-limit/quota information."""
+
+        body = getattr(exc, "body", None)
+
+        if isinstance(body, dict):
+            error_body = body.get("error")
+
+            if isinstance(error_body, dict):
+                code = error_body.get("code")
+                message = error_body.get("message")
+
+                if code:
+                    if message:
+                        return f"OpenAI error code: {code}. {message}"
+                    return f"OpenAI error code: {code}."
+
+                if message:
+                    return str(message)
+
+        return str(exc)
+
+    @staticmethod
+    def _is_quota_exceeded(exc: RateLimitError) -> bool:
+        """Return True when OpenAI explicitly reports exhausted quota."""
+
+        code = getattr(exc, "code", None)
+
+        if isinstance(code, str) and code.lower() in {
+            "insufficient_quota",
+            "quota_exceeded",
+        }:
+            return True
+
+        body = getattr(exc, "body", None)
+
+        if isinstance(body, dict):
+            error_body = body.get("error")
+
+            if isinstance(error_body, dict):
+                body_code = error_body.get("code")
+
+                if isinstance(body_code, str) and body_code.lower() in {
+                    "insufficient_quota",
+                    "quota_exceeded",
+                }:
+                    return True
+
+        return False
 
     async def chat(
         self,
@@ -71,10 +131,10 @@ class OpenAIProvider(BaseProvider):
         if model not in SUPPORTED_CHAT_MODELS:
             raise ValueError(f"Unsupported OpenAI chat model: {model}")
 
-        try:
-            if self.client is None:
-                raise ProviderAuthenticationError("OpenAI provider is not configured.")
+        if self.client is None:
+            raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
+        try:
             response = await self.client.responses.create(
                 model=model,
                 input=prompt,
@@ -90,21 +150,25 @@ class OpenAIProvider(BaseProvider):
 
             usage = getattr(response, "usage", None)
 
-            tokens_in = 0
-            tokens_out = 0
-
-            if usage is not None:
-                tokens_in = getattr(
+            tokens_in = (
+                getattr(
                     usage,
                     "input_tokens",
                     0,
                 )
+                if usage
+                else 0
+            )
 
-                tokens_out = getattr(
+            tokens_out = (
+                getattr(
                     usage,
                     "output_tokens",
                     0,
                 )
+                if usage
+                else 0
+            )
 
             return {
                 "reply": reply,
@@ -117,24 +181,35 @@ class OpenAIProvider(BaseProvider):
         except AuthenticationError as exc:
             logger.exception("OpenAI authentication failed.")
 
-            raise ProviderAuthenticationError(str(exc)) from exc
-
-        except RateLimitError as exc:
-            logger.exception("OpenAI rate limit exceeded.")
-
-            raise ProviderRateLimitError(
-                "OpenAI API quota exceeded. Please verify your billing or try again later."
-            ) from exc
+            raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
             logger.exception("OpenAI request timed out.")
 
-            raise ProviderTimeoutError(str(exc)) from exc
+            raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
             logger.exception("Unable to connect to OpenAI.")
 
-            raise ProviderConnectionError(str(exc)) from exc
+            raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
+
+        except RateLimitError as exc:
+            message = self._rate_limit_message(exc)
+
+            if self._is_quota_exceeded(exc):
+                logger.exception(
+                    "OpenAI quota exceeded: %s",
+                    message,
+                )
+
+                raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
+
+            logger.exception(
+                "OpenAI rate limit exceeded: %s",
+                message,
+            )
+
+            raise ProviderRateLimitError(f"OpenAI rate limit exceeded: {message}") from exc
 
         except ProviderAuthenticationError:
             raise
@@ -144,7 +219,7 @@ class OpenAIProvider(BaseProvider):
 
         except Exception as exc:
             logger.exception("Unexpected OpenAI provider error.")
-            raise ProviderConnectionError(str(exc)) from exc
+            raise ProviderExecutionError("Unexpected OpenAI provider error.") from exc
 
     async def stream(
         self,
@@ -194,29 +269,39 @@ class OpenAIProvider(BaseProvider):
         except AuthenticationError as exc:
             logger.exception("OpenAI streaming authentication failed.")
 
-            raise ProviderAuthenticationError(str(exc)) from exc
-
-        except RateLimitError as exc:
-            logger.exception("OpenAI streaming rate limit exceeded.")
-
-            raise ProviderRateLimitError(
-                "OpenAI API quota exceeded. Please verify your billing or try again later."
-            ) from exc
+            raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
             logger.exception("OpenAI streaming request timed out.")
 
-            raise ProviderTimeoutError(str(exc)) from exc
+            raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
             logger.exception("Unable to connect to OpenAI during streaming.")
 
-            raise ProviderConnectionError(str(exc)) from exc
+            raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
 
-        except Exception:
+        except RateLimitError as exc:
+            message = self._rate_limit_message(exc)
+
+            if self._is_quota_exceeded(exc):
+                logger.exception(
+                    "OpenAI streaming quota exceeded: %s",
+                    message,
+                )
+
+                raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
+
+            logger.exception(
+                "OpenAI streaming rate limit exceeded: %s",
+                message,
+            )
+
+            raise ProviderRateLimitError(f"OpenAI rate limit exceeded: {message}") from exc
+
+        except Exception as exc:
             logger.exception("Unexpected OpenAI streaming error.")
-
-            raise
+            raise ProviderConnectionError("Unexpected OpenAI streaming error.") from exc
 
     async def embeddings(
         self,
@@ -229,25 +314,13 @@ class OpenAIProvider(BaseProvider):
         if model not in SUPPORTED_EMBEDDING_MODELS:
             raise ValueError(f"Unsupported OpenAI embedding model: {model}")
 
-        if not text:
-            return [
-                0.1,
-                0.2,
-                0.3,
-            ]
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Embedding input text must not be empty.")
 
         if self.client is None:
             raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
         openai_model = OPENAI_EMBEDDING_MODEL_MAP[model]
-
-        logger.info(
-            "Calling OpenAI embedding model",
-            extra={
-                "gateway_model": model,
-                "provider_model": openai_model,
-            },
-        )
 
         try:
             response = await self.client.embeddings.create(
@@ -268,27 +341,35 @@ class OpenAIProvider(BaseProvider):
         except AuthenticationError as exc:
             logger.exception("OpenAI embedding authentication failed.")
 
-            raise ProviderAuthenticationError(str(exc)) from exc
+            raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
         except RateLimitError as exc:
-            logger.exception("OpenAI embedding rate limit exceeded.")
+            message = self._rate_limit_message(exc)
 
-            raise ProviderRateLimitError(
-                "OpenAI API quota exceeded. Please verify your billing or try again later."
-            ) from exc
+            if self._is_quota_exceeded(exc):
+                logger.exception(
+                    "OpenAI embedding quota exceeded: %s",
+                    message,
+                )
+
+                raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
+
+            logger.exception(
+                "OpenAI embedding rate limit exceeded: %s",
+                message,
+            )
+
+            raise ProviderRateLimitError(f"OpenAI rate limit exceeded: {message}") from exc
 
         except APITimeoutError as exc:
             logger.exception("OpenAI embedding request timed out.")
 
-            raise ProviderTimeoutError(str(exc)) from exc
+            raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
             logger.exception("Unable to connect to OpenAI embedding API.")
 
-            raise ProviderConnectionError(str(exc)) from exc
-
-        except ProviderAuthenticationError:
-            raise
+            raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
 
         except ValueError:
             raise
@@ -296,7 +377,7 @@ class OpenAIProvider(BaseProvider):
         except Exception as exc:
             logger.exception("Unexpected OpenAI embedding error.")
 
-            raise ProviderConnectionError(str(exc)) from exc
+            raise ProviderConnectionError("Unexpected OpenAI embedding error.") from exc
 
     async def health_check(
         self,
@@ -304,8 +385,8 @@ class OpenAIProvider(BaseProvider):
 
         return {
             "status": "ok",
-            "configured": bool(OPENAI_API_KEY),
-            "base_url": OPENAI_BASE_URL,
+            "configured": bool(self.settings.api_key),
+            "base_url": self.settings.base_url,
             "default_model": self.default_model,
         }
 
@@ -322,13 +403,13 @@ class OpenAIProvider(BaseProvider):
         self,
     ) -> list[str]:
 
-        return list(SUPPORTED_CHAT_MODELS)
+        return sorted(SUPPORTED_CHAT_MODELS)
 
     def supported_embedding_models(
         self,
     ) -> list[str]:
 
-        return list(SUPPORTED_EMBEDDING_MODELS)
+        return sorted(SUPPORTED_EMBEDDING_MODELS)
 
     def supported_stream_models(self) -> list[str]:
-        return list(SUPPORTED_CHAT_MODELS)
+        return sorted(SUPPORTED_CHAT_MODELS)

@@ -20,7 +20,7 @@ class ProviderAttempt:
     provider_name: str
     success: bool
     failure_category: FailureCategory | None = None
-    error: BaseException | None = None
+    error: Exception | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,9 @@ class FallbackExecutor:
     def __init__(
         self,
         classifier: ProviderFailureClassifier | None = None,
+        max_retries=2,
+        base_delay=1.0,
+        max_delay=8.0,
     ) -> None:
         self.classifier = classifier or failure_classifier
 
@@ -53,7 +56,7 @@ class FallbackExecutor:
 
         attempts: list[ProviderAttempt] = []
 
-        last_error: BaseException | None = None
+        last_error: Exception | None = None
 
         for provider in providers:
             provider_name = self._provider_name(provider)
@@ -74,7 +77,7 @@ class FallbackExecutor:
                     attempts=tuple(attempts),
                 )
 
-            except BaseException as error:
+            except Exception as error:
                 last_error = error
 
                 category = self.classifier.classify(error)

@@ -4,9 +4,12 @@ Canonical Prometheus metrics for the Enterprise AI Gateway.
 All gateway Prometheus collectors are defined in this module.
 
 IMPORTANT:
-    Do not define the same collectors anywhere else.
-    ai_platform.llm_gateway.observability.prometheus only re-exports
-    these objects for backward compatibility.
+    This module must be the single source of truth for gateway metrics.
+
+    Do not define these collectors again in:
+        ai_platform.llm_gateway.observability.prometheus
+
+    The observability module should only re-export these objects for backward compatibility.
 """
 
 from prometheus_client import Counter, Histogram
@@ -56,9 +59,38 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
 
 PROVIDER_REQUESTS_TOTAL = Counter(
     "llm_gateway_provider_requests_total",
-    "Total requests by provider.",
+    "Total requests sent to LLM providers.",
     [
         "provider",
+    ],
+)
+
+
+PROVIDER_LATENCY_SECONDS = Histogram(
+    "llm_gateway_provider_latency_seconds",
+    "Latency of provider requests.",
+    [
+        "provider",
+    ],
+)
+
+
+PROVIDER_ERRORS_TOTAL = Counter(
+    "llm_gateway_provider_errors_total",
+    "Total provider errors.",
+    [
+        "provider",
+        "error_type",
+    ],
+)
+
+
+FALLBACK_REQUESTS_TOTAL = Counter(
+    "llm_gateway_fallback_requests_total",
+    "Total requests routed to a fallback provider.",
+    [
+        "primary_provider",
+        "fallback_provider",
     ],
 )
 

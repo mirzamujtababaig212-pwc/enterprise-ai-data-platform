@@ -58,12 +58,34 @@ class Router:
         if not providers:
             raise ProviderNotFound(f"No provider supports chat model: {model}")
 
-        result = await self.fallback_executor.execute(
-            providers,
-            lambda provider: provider.chat(request),
-        )
+        with tracer.start_as_current_span("gateway.chat") as span:
+            span.set_attribute(
+                "llm.model",
+                model,
+            )
 
-        return result.response
+            if provider_name:
+                span.set_attribute(
+                    "llm.requested_provider",
+                    provider_name,
+                )
+
+            result = await self.fallback_executor.execute(
+                providers,
+                lambda provider: provider.chat(request),
+            )
+
+            span.set_attribute(
+                "llm.provider",
+                result.provider_name,
+            )
+
+            span.set_attribute(
+                "llm.attempt_count",
+                len(result.attempts),
+            )
+
+            return result.response
 
     async def route_embeddings(
         self,
@@ -87,12 +109,34 @@ class Router:
         if not providers:
             raise ProviderNotFound(f"No provider supports embeddings model: {model}")
 
-        result = await self.fallback_executor.execute(
-            providers,
-            lambda provider: provider.embeddings(request),
-        )
+        with tracer.start_as_current_span("gateway.embeddings") as span:
+            span.set_attribute(
+                "llm.model",
+                model,
+            )
 
-        return result.response
+            if provider_name:
+                span.set_attribute(
+                    "llm.requested_provider",
+                    provider_name,
+                )
+
+            result = await self.fallback_executor.execute(
+                providers,
+                lambda provider: provider.embeddings(request),
+            )
+
+            span.set_attribute(
+                "llm.provider",
+                result.provider_name,
+            )
+
+            span.set_attribute(
+                "llm.attempt_count",
+                len(result.attempts),
+            )
+
+            return result.response
 
     async def route_stream(
         self,
@@ -118,14 +162,41 @@ class Router:
 
         provider = providers[0]
 
-        stream = provider.stream(request)
+        with tracer.start_as_current_span("provider_call") as span:
+            span.set_attribute(
+                "provider.name",
+                getattr(
+                    provider,
+                    "name",
+                    getattr(
+                        provider,
+                        "provider_name",
+                        provider.__class__.__name__,
+                    ),
+                ),
+            )
 
-        try:
-            with tracer.start_as_current_span("provider_call"):
+            span.set_attribute(
+                "provider.model",
+                model,
+            )
+
+            try:
+                stream = provider.stream(request)
+
                 async for chunk in stream:
                     yield chunk
-        except GeneratorExit:
-            raise
+
+            except GeneratorExit:
+                raise
+
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_attribute(
+                    "provider.stream.error",
+                    True,
+                )
+                raise
 
     async def route_health(
         self,

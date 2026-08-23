@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     Response,
@@ -14,6 +14,7 @@ from prometheus_client import (
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_platform.llm_gateway.auth.auth import APIKeyMiddleware
+from ai_platform.llm_gateway.auth.security import api_key_header
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
@@ -77,12 +78,14 @@ Enterprise AI Platform
 A production-ready LLM Gateway providing:
 
 - Multi-provider routing
-- Authentication
+- API-key authentication
 - Metrics
-- Observability
+- Prometheus observability
+- OpenTelemetry tracing
 - Embeddings
-- Chat Completion
-- Health Monitoring
+- Chat completion
+- Health monitoring
+- Provider resilience
 """,
     contact={
         "name": "Enterprise AI Team",
@@ -90,6 +93,9 @@ A production-ready LLM Gateway providing:
     },
     license_info={
         "name": "Apache 2.0",
+    },
+    swagger_ui_parameters={
+        "persistAuthorization": True,
     },
 )
 logger.info(
@@ -210,6 +216,7 @@ models_tag = ["Models"]
     tags=chat_tag,
     summary="Generate chat completion",
     description="Routes a prompt to the selected LLM provider and returns the generated response.",
+    dependencies=[Depends(api_key_header)],
 )
 async def chat_endpoint(
     http_request: Request,
@@ -294,6 +301,7 @@ async def chat_endpoint(
     tags=embedding_tag,
     summary="Generate embeddings",
     description="Creates vector embeddings for the supplied text.",
+    dependencies=[Depends(api_key_header)],
 )
 async def embeddings_endpoint(
     http_request: Request,
@@ -327,6 +335,7 @@ async def embeddings_endpoint(
     tags=models_tag,
     summary="List available models",
     description="Returns all configured providers and their supported models.",
+    dependencies=[Depends(api_key_header)],
 )
 async def list_models():
     return await router.route_models()
@@ -356,6 +365,7 @@ async def healthz():
     tags=health_tag,
     summary="Health Check",
     description="Returns gateway and provider health status.",
+    dependencies=[Depends(api_key_header)],
 )
 async def health_check():
     return HealthResponse(

@@ -28,7 +28,9 @@ def test_default_model(monkeypatch):
 
     importlib.reload(openai_settings)
 
-    assert openai_settings.OPENAI_MODEL == "gpt-4.1-mini"
+    settings = openai_settings.get_openai_settings()
+
+    assert settings.model == "gpt-4.1-mini"
 
 
 def test_custom_model(monkeypatch):
@@ -36,7 +38,9 @@ def test_custom_model(monkeypatch):
 
     importlib.reload(openai_settings)
 
-    assert openai_settings.OPENAI_MODEL == "gpt-4o"
+    settings = openai_settings.get_openai_settings()
+
+    assert settings.model == "gpt-4o"
 
 
 def test_default_base_url(monkeypatch):
@@ -44,7 +48,9 @@ def test_default_base_url(monkeypatch):
 
     importlib.reload(openai_settings)
 
-    assert openai_settings.OPENAI_BASE_URL == "https://api.openai.com/v1"
+    settings = openai_settings.get_openai_settings()
+
+    assert settings.base_url == "https://api.openai.com/v1"
 
 
 def test_custom_base_url(monkeypatch):
@@ -55,4 +61,6 @@ def test_custom_base_url(monkeypatch):
 
     importlib.reload(openai_settings)
 
-    assert openai_settings.OPENAI_BASE_URL == "https://example.com/v1"
+    settings = openai_settings.get_openai_settings()
+
+    assert settings.base_url == "https://example.com/v1"

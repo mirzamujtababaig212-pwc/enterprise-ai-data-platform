@@ -66,20 +66,6 @@ async def test_supported_embedding_models():
 
 
 @pytest.mark.asyncio
-async def test_embeddings():
-
-    provider = OpenAIProvider()
-
-    vector = await provider.embeddings(
-        {
-            "model": "openai-embedding",
-        }
-    )
-
-    assert vector == [0.1, 0.2, 0.3]
-
-
-@pytest.mark.asyncio
 async def test_embeddings_success():
 
     provider = OpenAIProvider()
@@ -110,6 +96,39 @@ async def test_embeddings_success():
         model="text-embedding-3-small",
         input="hello world",
     )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_without_text():
+
+    provider = OpenAIProvider()
+
+    with pytest.raises(
+        ValueError,
+        match="Embedding input text must not be empty.",
+    ):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_with_whitespace_text():
+
+    provider = OpenAIProvider()
+
+    with pytest.raises(
+        ValueError,
+        match="Embedding input text must not be empty.",
+    ):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "   ",
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -347,5 +366,125 @@ async def test_chat_rate_limit_error():
             {
                 "prompt": "Hello",
                 "model": "gpt-4o",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_empty_response():
+
+    provider = OpenAIProvider()
+
+    fake_response = MagicMock()
+    fake_response.data = []
+
+    fake_client = MagicMock()
+    fake_client.embeddings.create = AsyncMock(return_value=fake_response)
+
+    provider.client = fake_client
+
+    with pytest.raises(
+        ValueError,
+        match="OpenAI embedding response contained no data.",
+    ):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "hello world",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_empty_vector():
+
+    provider = OpenAIProvider()
+
+    fake_data = MagicMock()
+    fake_data.embedding = []
+
+    fake_response = MagicMock()
+    fake_response.data = [fake_data]
+
+    fake_client = MagicMock()
+    fake_client.embeddings.create = AsyncMock(return_value=fake_response)
+
+    provider.client = fake_client
+
+    with pytest.raises(
+        ValueError,
+        match="OpenAI embedding response contained an empty vector.",
+    ):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "hello world",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_authentication_error():
+
+    provider = OpenAIProvider()
+
+    fake_client = MagicMock()
+
+    fake_client.embeddings.create.side_effect = AuthenticationError(
+        "bad key",
+        response=MagicMock(),
+        body={},
+    )
+
+    provider.client = fake_client
+
+    with pytest.raises(ProviderAuthenticationError):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "hello world",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_timeout():
+
+    provider = OpenAIProvider()
+
+    fake_client = MagicMock()
+
+    fake_client.embeddings.create.side_effect = APITimeoutError(request=MagicMock())
+
+    provider.client = fake_client
+
+    with pytest.raises(ProviderTimeoutError):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "hello world",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_connection_error():
+
+    provider = OpenAIProvider()
+
+    fake_client = MagicMock()
+
+    fake_client.embeddings.create.side_effect = APIConnectionError(
+        message="connection failed",
+        request=MagicMock(),
+    )
+
+    provider.client = fake_client
+
+    with pytest.raises(ProviderConnectionError):
+        await provider.embeddings(
+            {
+                "model": "openai-embedding",
+                "text": "hello world",
             }
         )

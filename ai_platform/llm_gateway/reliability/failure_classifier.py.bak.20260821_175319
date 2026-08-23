@@ -7,11 +7,10 @@ from typing import Any
 
 
 class FailureCategory(StrEnum):
-    """Categories used to determine provider retry/fallback behavior."""
+    """Categories used to determine whether a provider failure is retryable."""
 
     TRANSIENT = "transient"
     RATE_LIMITED = "rate_limited"
-    QUOTA_EXCEEDED = "quota_exceeded"
     TIMEOUT = "timeout"
     AUTHENTICATION = "authentication"
     AUTHORIZATION = "authorization"
@@ -22,12 +21,7 @@ class FailureCategory(StrEnum):
 
 
 class ProviderFailureClassifier:
-    """Classify provider exceptions for retry and fallback decisions."""
-
-    _QUOTA_NAMES = (
-        "insufficient_quota",
-        "quota_exceeded",
-    )
+    """Classify provider exceptions for retry/fallback decisions."""
 
     _RATE_LIMIT_NAMES = (
         "ratelimit",
@@ -81,9 +75,6 @@ class ProviderFailureClassifier:
 
         text = self._exception_text(error)
 
-        if self._contains_any(text, self._QUOTA_NAMES):
-            return FailureCategory.QUOTA_EXCEEDED
-
         if self._contains_any(text, self._RATE_LIMIT_NAMES):
             return FailureCategory.RATE_LIMITED
 
@@ -108,7 +99,7 @@ class ProviderFailureClassifier:
         return FailureCategory.UNKNOWN
 
     def is_retryable(self, error: BaseException) -> bool:
-        """Return whether the error should be retried."""
+        """Return whether retry/fallback is appropriate."""
 
         category = self.classify(error)
 
@@ -119,12 +110,7 @@ class ProviderFailureClassifier:
         }
 
     def is_fallback_eligible(self, error: BaseException) -> bool:
-        """
-        Return whether another provider may be attempted.
-
-        Authentication, authorization, invalid request, unknown,
-        and configuration failures are intentionally fail-fast.
-        """
+        """Return whether another provider should be attempted."""
 
         category = self.classify(error)
 
@@ -132,7 +118,7 @@ class ProviderFailureClassifier:
             FailureCategory.TRANSIENT,
             FailureCategory.RATE_LIMITED,
             FailureCategory.TIMEOUT,
-            FailureCategory.QUOTA_EXCEEDED,
+            FailureCategory.UNKNOWN,
         }
 
     @staticmethod
@@ -154,11 +140,6 @@ class ProviderFailureClassifier:
 
             if value is not None:
                 parts.append(str(value))
-
-        body = getattr(error, "body", None)
-
-        if body is not None:
-            parts.append(str(body))
 
         return " ".join(parts).lower()
 

@@ -16,3 +16,13 @@ class ProviderTimeoutError(ProviderError):
 
 class ProviderConnectionError(ProviderError):
     pass
+
+
+class ProviderExecutionError(ProviderError):
+    """Raised when an unexpected provider execution error occurs."""
+
+    pass
+
+
+class ProviderQuotaExceededError(ProviderError):
+    pass

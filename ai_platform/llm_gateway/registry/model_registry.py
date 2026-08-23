@@ -144,7 +144,6 @@ class ModelRegistry:
             provider,
             capabilities,
         ) in self._snapshot.providers.items():
-
             if capability is None:
                 models = sorted(
                     set(

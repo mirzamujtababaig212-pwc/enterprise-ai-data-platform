@@ -76,11 +76,11 @@ def test_model_not_found_is_not_retryable() -> None:
     assert not classifier.is_fallback_eligible(error)
 
 
-def test_unknown_error_can_fallback() -> None:
+def test_unknown_error_cannot_fallback() -> None:
     classifier = ProviderFailureClassifier()
 
     error = RuntimeError("unexpected provider failure")
 
     assert classifier.classify(error) == FailureCategory.UNKNOWN
     assert not classifier.is_retryable(error)
-    assert classifier.is_fallback_eligible(error)
+    assert not classifier.is_fallback_eligible(error)

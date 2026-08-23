@@ -2,6 +2,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderConnectionError,
+)
 from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
 from ai_platform.llm_gateway.routing.router import Router
 
@@ -196,7 +199,7 @@ async def test_chat_first_provider_fails_second_succeeds(
 ):
     provider_a = FakeProvider(
         "provider-a",
-        chat_exception=RuntimeError("provider-a failure"),
+        chat_exception=ProviderConnectionError("provider-a failure"),
     )
 
     provider_b = FakeProvider(
@@ -238,12 +241,12 @@ async def test_chat_first_and_second_fail_third_succeeds(
 ):
     provider_a = FakeProvider(
         "provider-a",
-        chat_exception=RuntimeError("provider-a failure"),
+        chat_exception=ProviderConnectionError("provider-a failure"),
     )
 
     provider_b = FakeProvider(
         "provider-b",
-        chat_exception=RuntimeError("provider-b failure"),
+        chat_exception=ProviderConnectionError("provider-b failure"),
     )
 
     provider_c = FakeProvider(
@@ -286,17 +289,17 @@ async def test_chat_all_providers_fail_raises_final_classified_exception(
 ):
     provider_a = FakeProvider(
         "provider-a",
-        chat_exception=RuntimeError("provider-a failure"),
+        chat_exception=ProviderConnectionError("provider-a failure"),
     )
 
     provider_b = FakeProvider(
         "provider-b",
-        chat_exception=RuntimeError("provider-b failure"),
+        chat_exception=ProviderConnectionError("provider-b failure"),
     )
 
     provider_c = FakeProvider(
         "provider-c",
-        chat_exception=RuntimeError("provider-c failure"),
+        chat_exception=ProviderConnectionError("provider-c failure"),
     )
 
     fallback_executor = FallbackExecutor()
@@ -316,7 +319,7 @@ async def test_chat_all_providers_fail_raises_final_classified_exception(
         ],
     }
 
-    with pytest.raises(RuntimeError, match="provider-c failure") as exc_info:
+    with pytest.raises(ProviderConnectionError, match="provider-c failure") as exc_info:
         await router.route_chat(request)
 
     assert exc_info.value is not None
@@ -384,7 +387,7 @@ async def test_embeddings_use_fallback_chain(
 ):
     provider_a = FakeProvider(
         "provider-a",
-        embeddings_exception=RuntimeError("provider-a embeddings failure"),
+        embeddings_exception=ProviderConnectionError("provider-a embeddings failure"),
     )
 
     provider_b = FakeProvider(
@@ -505,3 +508,41 @@ async def test_stream_does_not_use_fallback_executor(
         pass
 
     fallback_executor.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider_error_does_not_fallback(
+    capability_service,
+):
+    provider_a = FakeProvider(
+        "provider-a",
+        chat_exception=RuntimeError("unexpected provider failure"),
+    )
+
+    provider_b = FakeProvider(
+        "provider-b",
+        chat_result={
+            "provider": "provider-b",
+            "response": "success-b",
+        },
+    )
+
+    fallback_executor = FallbackExecutor()
+
+    router, routing_resolver = build_router(
+        [provider_a, provider_b],
+        fallback_executor=fallback_executor,
+    )
+
+    request = {
+        "model": "test-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="unexpected provider failure"):
+        await router.route_chat(request)
