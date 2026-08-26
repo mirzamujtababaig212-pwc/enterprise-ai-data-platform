@@ -9,7 +9,6 @@ from common.writers.postgres_writer import PostgresWriter
 from common.writers.s3_writer import S3Writer
 from common.writers.snowflake_writer import SnowflakeWriter
 
-
 EXPECTED_WRITERS = {
     "console": ConsoleWriter,
     "delta": DeltaWriter,
