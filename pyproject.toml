@@ -33,15 +33,15 @@ classifiers = [
 ]
 
 dependencies = [
-    "fastapi>=0.116",
-    "uvicorn[standard]>=0.35",
-    "pydantic>=2.11",
+    "fastapi>=0.116,<0.117",
+    "uvicorn[standard]>=0.35,<0.36",
+    "pydantic>=2.11,<2.13",
     "pydantic-settings>=2.10",
     "httpx>=0.28",
     "redis>=6.4",
     "sqlalchemy>=2.0",
     "alembic>=1.16",
-    "prometheus-client>=0.23",
+    "prometheus-client>=0.23,<0.24",
     "opentelemetry-api>=1.37",
     "opentelemetry-sdk>=1.37",
     "opentelemetry-exporter-otlp-proto-grpc>=1.37",
@@ -53,6 +53,7 @@ dependencies = [
 
 dev = [
     "pytest>=8.4",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=7.0",
     "ruff>=0.12",
     "black>=25.1",
@@ -60,7 +61,8 @@ dev = [
     "mypy>=1.17",
     "bandit>=1.8",
     "pre-commit>=4.3",
-    "pip-audit>=2.9"
+    "pip-audit>=2.9",
+    "httpx2",
 ]
 
 [tool.setuptools.packages.find]
