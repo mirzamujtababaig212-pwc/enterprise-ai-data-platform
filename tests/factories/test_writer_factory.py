@@ -6,6 +6,7 @@ from common.writers.delta_writer import DeltaWriter
 from common.writers.iceberg_writer import IcebergWriter
 from common.writers.postgres_writer import PostgresWriter
 from common.writers.s3_writer import S3Writer
+from common.config.settings import Settings
 
 
 def test_create_delta():
@@ -86,3 +87,23 @@ def test_invalid_writer():
 
     with pytest.raises(ValueError, match="Unknown writer"):
         WriterFactory.create(config)
+
+
+def test_create_delta_resolves_storage_symbols():
+    config = {
+        "writer": {
+            "type": "delta",
+            "table": "BRONZE_TABLE",
+            "path": "BRONZE_PATH",
+            "checkpoint": "BRONZE_CHECKPOINT",
+            "mode": "append",
+            "output_mode": "append",
+        }
+    }
+
+    writer = WriterFactory.create(config)
+
+    assert isinstance(writer, DeltaWriter)
+    assert writer.table == Settings.storage.BRONZE_TABLE
+    assert str(writer.path) == str(Settings.storage.BRONZE_PATH)
+    assert str(writer.checkpoint) == str(Settings.storage.BRONZE_CHECKPOINT)
