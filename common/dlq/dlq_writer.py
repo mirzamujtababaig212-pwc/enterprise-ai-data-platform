@@ -1,16 +1,44 @@
+from __future__ import annotations
+
 import time
 
 from common.logging.logger import get_logger
-from common.storage.storage_writer import StorageWriter
+from common.writers.storage_writer import StorageWriter
 
 logger = get_logger(__name__)
 
 
 class DLQWriter:
+    """
+    Dead-letter queue writer.
+
+    Delegates persistence to the canonical writer subsystem.
+    """
+
     @staticmethod
-    def write(df, target="delta", table="vehicle_dlq", mode="append"):
+    def write(
+        df,
+        target="delta",
+        table="vehicle_dlq",
+        mode="append",
+    ):
         start = time.time()
-        StorageWriter.write_batch(df=df, target=target, table=table, mode=mode)
+
+        StorageWriter.write(
+            df=df,
+            target=target,
+            table=table,
+            mode=mode,
+        )
+
         duration = time.time() - start
-        logger.info("DLQ Records=%s", df.count())
-        logger.info("DLQ Write Time=%.2f sec", duration)
+
+        logger.info(
+            "DLQ Records=%s",
+            df.count(),
+        )
+
+        logger.info(
+            "DLQ Write Time=%.2f sec",
+            duration,
+        )
