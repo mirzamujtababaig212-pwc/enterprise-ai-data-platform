@@ -1,6 +1,9 @@
 import pytest
 
 from common.factories.transformer_factory import TransformerFactory
+from spark.transformations.silver_to_gold_transformer import (
+    SilverToGoldTransformer,
+)
 
 
 def test_create_bronze():
@@ -27,7 +30,7 @@ def test_create_gold():
 
     transformer = TransformerFactory.create(config)
 
-    assert transformer.__class__.__name__ == "GoldTransformer"
+    assert isinstance(transformer, SilverToGoldTransformer)
 
 
 def test_invalid_transformer():

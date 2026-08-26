@@ -1,4 +1,7 @@
 from common.factories.pipeline_factory import PipelineFactory
+from spark.transformations.silver_to_gold_transformer import (
+    SilverToGoldTransformer,
+)
 
 
 def test_create_bronze_pipeline(spark):
@@ -24,6 +27,9 @@ def test_create_gold_pipeline(spark):
     pipeline = PipelineFactory.get_pipeline("gold", spark)
     assert pipeline.reader.__class__.__name__ == "DeltaReader"
     assert pipeline.writer.__class__.__name__ == "DeltaWriter"
-    assert pipeline.transformer.__class__.__name__ == "GoldTransformer"
+    assert isinstance(
+        pipeline.transformer,
+        SilverToGoldTransformer,
+    )
     assert pipeline.validator.__class__.__name__ == "NoOpValidator"
     assert pipeline.dlq.__class__.__name__ == "NoOpDLQ"

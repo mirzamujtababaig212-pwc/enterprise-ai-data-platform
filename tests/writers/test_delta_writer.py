@@ -6,7 +6,8 @@ from common.config.settings import Settings
 from common.writers.delta_writer import DeltaWriter
 
 
-def test_write_batch():
+@patch("common.writers.delta_writer.Path.mkdir")
+def test_write_batch(mock_mkdir):
     writer = DeltaWriter(
         table=Settings.storage.BRONZE_TABLE,
         path=Settings.storage.BRONZE_PATH,
@@ -59,7 +60,8 @@ def test_write_aliases_to_batch():
         mock_write_batch.assert_called_once_with(df)
 
 
-def test_write_stream():
+@patch("common.writers.delta_writer.Path.mkdir")
+def test_write_stream(mock_mkdir):
     writer = DeltaWriter(
         table=Settings.storage.BRONZE_TABLE,
         path=Settings.storage.BRONZE_PATH,
@@ -98,7 +100,8 @@ def test_write_stream():
     stream.start.assert_called_once()
 
 
-def test_write_stream_explicit_checkpoint():
+@patch("common.writers.delta_writer.Path.mkdir")
+def test_write_stream_explicit_checkpoint(mock_mkdir):
     writer = DeltaWriter(
         table=Settings.storage.BRONZE_TABLE,
         path=Settings.storage.BRONZE_PATH,
@@ -125,7 +128,8 @@ def test_write_stream_explicit_checkpoint():
     )
 
 
-def test_delta_writer_failure():
+@patch("common.writers.delta_writer.Path.mkdir")
+def test_delta_writer_failure(mock_mkdir):
     writer = DeltaWriter(
         table=Settings.storage.BRONZE_TABLE,
         path=Settings.storage.BRONZE_PATH,

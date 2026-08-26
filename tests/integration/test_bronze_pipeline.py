@@ -11,7 +11,9 @@ def test_bronze_transform_validation(spark):
         [
             (
                 "key-1",
-                '{"vehicle_id":"1"}',
+                '{"vehicle_id":"1",'
+                '"event_time":"2024-01-01T10:00:00",'
+                '"speed":65.5,"rpm":2500}',
                 "vehicle-events",
                 0,
                 1,
@@ -19,7 +21,9 @@ def test_bronze_transform_validation(spark):
             ),
             (
                 "key-2",
-                '{"vehicle_id":"2"}',
+                '{"vehicle_id":"2",'
+                '"event_time":"2024-01-01T10:01:00",'
+                '"speed":72.0,"rpm":2800}',
                 "vehicle-events",
                 0,
                 2,

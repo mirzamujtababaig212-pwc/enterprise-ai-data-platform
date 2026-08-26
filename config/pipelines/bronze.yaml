@@ -8,6 +8,7 @@ reader:
 writer:
   type: delta
   table: BRONZE_TABLE
+  path: BRONZE_PATH
   checkpoint: BRONZE_CHECKPOINT
   mode: append
   output_mode: append
@@ -18,6 +19,12 @@ transformer:
 validator:
   type: composite
   schema:
+    - kafka_key
+    - kafka_topic
+    - kafka_partition
+    - kafka_offset
+    - kafka_timestamp
+    - raw_value
     - vehicle_id
     - event_time
     - latitude
@@ -28,15 +35,11 @@ validator:
     - battery
     - engine_temperature
     - gear
-    - topic
-    - partition
-    - offset
-    - timestamp
-    - ingestion_timestamp
     - ingestion_time
 
   required:
     - vehicle_id
+    - event_time
 
   duplicate_keys:
     - vehicle_id

@@ -94,10 +94,6 @@ class TestDependencyProvider:
         transformer = DependencyProvider.silver_transformer()
         assert transformer is not None
 
-    def test_gold_transformer(self):
-        transformer = DependencyProvider.gold_transformer()
-        assert transformer is not None
-
     # =========================================================
     # Metrics
     # =========================================================

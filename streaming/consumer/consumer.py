@@ -1,5 +1,5 @@
 import json
-
+import os
 import psycopg2
 from kafka import KafkaConsumer
 
@@ -12,11 +12,11 @@ consumer = KafkaConsumer(
 )
 
 conn = psycopg2.connect(
-    host="localhost",
-    port=5432,
-    database="vehicle_platform",
-    user="postgres",
-    password="password",
+    host=os.getenv("POSTGRES_HOST", "localhost"),
+    port=int(os.getenv("POSTGRES_PORT", "5432")),
+    database=os.getenv("POSTGRES_DB", "vehicle_platform"),
+    user=os.getenv("POSTGRES_USER", "postgres"),
+    password=os.getenv("POSTGRES_PASSWORD", "password"),
 )
 
 cursor = conn.cursor()
