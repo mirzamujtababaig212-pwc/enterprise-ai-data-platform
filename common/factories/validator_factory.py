@@ -33,7 +33,22 @@ class ValidatorFactory:
             return NoOpValidator()
 
         if validator_type == "composite":
-            return CompositeValidator()
+            validators = []
+
+            schema = validator_cfg.get("schema")
+            required = validator_cfg.get("required")
+            duplicate_keys = validator_cfg.get("duplicate_keys")
+
+            if schema:
+                validators.append(SchemaValidator(schema))
+
+            if required:
+                validators.append(NullValidator(required))
+
+            if duplicate_keys:
+                validators.append(DuplicateValidator(duplicate_keys))
+
+            return CompositeValidator(validators)
 
         if validator_type != "default":
             raise ValueError(f"Unknown validator type: {validator_type}")
@@ -67,7 +82,7 @@ class ValidatorFactory:
                         ]
                     ),
                     NullValidator(["vehicle_id"]),
-                    DuplicateValidator(["vehicle_id"]),
+                    DuplicateValidator(["vehicle_id", "event_time"]),
                 ]
             )
 

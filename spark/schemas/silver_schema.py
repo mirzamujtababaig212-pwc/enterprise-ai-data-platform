@@ -61,27 +61,37 @@ silver_schema = StructType(
             True,
         ),
         StructField(
-            "topic",
+            "kafka_key",
             StringType(),
             True,
         ),
         StructField(
-            "partition",
+            "kafka_topic",
+            StringType(),
+            True,
+        ),
+        StructField(
+            "kafka_partition",
             IntegerType(),
             True,
         ),
         StructField(
-            "offset",
+            "kafka_offset",
             LongType(),
             True,
         ),
         StructField(
-            "timestamp",
+            "kafka_timestamp",
             TimestampType(),
             True,
         ),
         StructField(
-            "ingestion_timestamp",
+            "raw_value",
+            StringType(),
+            True,
+        ),
+        StructField(
+            "ingestion_time",
             TimestampType(),
             True,
         ),

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -31,7 +32,7 @@ class StorageConfig:
     # PROJECT ROOT
     # ==============================================================
 
-    PROJECT_ROOT = Path("/home/annie/enterprise_ai_platform")
+    PROJECT_ROOT = Path(os.getenv("ENTERPRISE_AI_PLATFORM_ROOT", "/app"))
 
     # ==============================================================
     # SOURCE DATA

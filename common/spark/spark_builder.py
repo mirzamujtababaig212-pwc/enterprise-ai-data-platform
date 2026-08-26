@@ -13,8 +13,8 @@ class SparkSessionBuilder:
 
     Supports:
 
-    - Spark 4.0.1
-    - Delta Lake 4.3.1
+    - Spark 3.5.6
+    - Delta Lake 3.3.2
     - Spark Structured Streaming Kafka Consumer
     - Hive-compatible catalog
     - Local WSL2 execution
@@ -26,12 +26,12 @@ class SparkSessionBuilder:
     runtime configuration.
     """
 
-    SPARK_VERSION = "4.0.1"
-    SCALA_VERSION = "2.13"
+    SPARK_VERSION = "3.5.6"
+    SCALA_VERSION = "2.12"
 
-    DELTA_PACKAGE = "io.delta:delta-spark_4.0_2.13:4.3.1"
+    DELTA_PACKAGE = "io.delta:delta-spark_2.12:3.3.2"
 
-    KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
+    KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6"
 
     @staticmethod
     def build(
@@ -53,7 +53,7 @@ class SparkSessionBuilder:
         # SPARK WAREHOUSE
         # ==========================================================
 
-        warehouse_dir = (project_root / "spark-warehouse").resolve()
+        warehouse_dir = project_root / "spark-warehouse"
 
         warehouse_dir.mkdir(
             parents=True,
@@ -141,13 +141,13 @@ class SparkSessionBuilder:
         # -------------------------------------------------------------
         # Kafka Structured Streaming connector
         #
-        # Spark 4.0.1
-        # Scala 2.13
+        # Spark 3.5.6
+        # Scala 2.12
         # -------------------------------------------------------------
 
         existing_packages = builder._options.get("spark.jars.packages")
 
-        kafka_package = "org.apache.spark:" "spark-sql-kafka-0-10_2.13:" "4.0.1"
+        kafka_package = SparkSessionBuilder.KAFKA_PACKAGE
 
         if existing_packages:
             packages = f"{existing_packages},{kafka_package}"

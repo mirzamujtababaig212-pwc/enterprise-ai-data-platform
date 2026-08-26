@@ -10,9 +10,6 @@ from common.readers.parquet_reader import ParquetReader
 from common.transformers.bronze_transformer import (
     BronzeTransformer,
 )
-from common.transformers.gold_transformer import (
-    GoldTransformer,
-)
 from common.transformers.silver_transformer import (
     SilverTransformer,
 )
@@ -125,6 +122,12 @@ class DependencyProvider:
             [
                 SchemaValidator(
                     [
+                        "kafka_key",
+                        "kafka_topic",
+                        "kafka_partition",
+                        "kafka_offset",
+                        "kafka_timestamp",
+                        "raw_value",
                         "vehicle_id",
                         "event_time",
                         "latitude",
@@ -135,23 +138,19 @@ class DependencyProvider:
                         "battery",
                         "engine_temperature",
                         "gear",
-                        "topic",
-                        "partition",
-                        "offset",
-                        "timestamp",
-                        "ingestion_timestamp",
+                        "ingestion_time",
                     ]
                 ),
                 NullValidator(
                     [
                         "vehicle_id",
-                        "timestamp",
+                        "event_time",
                     ]
                 ),
                 DuplicateValidator(
                     [
                         "vehicle_id",
-                        "timestamp",
+                        "event_time",
                     ]
                 ),
             ]
@@ -213,11 +212,6 @@ class DependencyProvider:
     def silver_transformer():
 
         return SilverTransformer()
-
-    @staticmethod
-    def gold_transformer():
-
-        return GoldTransformer()
 
     # =========================================================
     # Metrics

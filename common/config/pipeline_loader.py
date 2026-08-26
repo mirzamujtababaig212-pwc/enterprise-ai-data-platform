@@ -20,7 +20,7 @@ class PipelineLoader:
 
     becomes:
 
-        path: /home/annie/enterprise_ai_platform/data/delta/silver/vehicle_events
+        path: /app/data/delta/silver/vehicle_events
     """
 
     CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config" / "pipelines"
@@ -35,7 +35,7 @@ class PipelineLoader:
         config_path = PipelineLoader.CONFIG_ROOT / f"{pipeline_name}.yaml"
 
         if not config_path.exists():
-            raise FileNotFoundError(f"Pipeline configuration not found: " f"{config_path}")
+            raise FileNotFoundError(f"Pipeline configuration not found: {config_path}")
 
         with config_path.open(
             "r",
@@ -44,7 +44,7 @@ class PipelineLoader:
             config = yaml.safe_load(file)
 
         if not isinstance(config, dict):
-            raise ValueError(f"Pipeline configuration must be a mapping: " f"{config_path}")
+            raise ValueError(f"Pipeline configuration must be a mapping: {config_path}")
 
         return PipelineLoader._resolve(deepcopy(config))
 
