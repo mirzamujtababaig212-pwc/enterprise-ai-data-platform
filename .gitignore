@@ -208,8 +208,27 @@ deploy/.env.demo
 **/.terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfstate
+terraform.tfstate.*
 *.tfvars
 *.tfplan
 tfplan
+tfplan.*
 crash.log
 crash.*.log
+terraform/aws/**/.terraform/
+
+# Temporary / checkpoint files
+*.bak
+*.bak.*
+*.checkpoint.*
+*.pre_contract_alignment
+*.pre_kafka_alignment
+
+# Local database backups
+metastore_db.backup.*/
+
+# Deployment / Terraform local artifacts
+task-def*.json
+tfplan.json
+plan.txt

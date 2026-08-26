@@ -10,26 +10,7 @@ module "s3" {
 
   project_name = var.project_name
   environment  = var.environment
-}
-
-output "ecr_repository_url" {
-  description = "ECR repository URL."
-  value       = module.ecr.repository_url
-}
-
-output "ecr_repository_name" {
-  description = "ECR repository name."
-  value       = module.ecr.repository_name
-}
-
-output "s3_bucket_name" {
-  description = "Platform S3 bucket."
-  value       = module.s3.bucket_name
-}
-
-output "s3_bucket_arn" {
-  description = "Platform S3 bucket ARN."
-  value       = module.s3.bucket_arn
+  kms_key_arn  = module.kms.key_arn
 }
 
 module "vpc" {
@@ -45,6 +26,15 @@ module "iam" {
 
   project_name = var.project_name
   environment  = var.environment
+
+  provider_credentials_secret_arn = module.secrets.provider_credentials_secret_arn
+  gateway_api_key_secret_arn      = module.secrets.gateway_api_key_secret_arn
+  environment_parameter_arn       = module.secrets.environment_parameter_arn
+  log_level_parameter_arn         = module.secrets.log_level_parameter_arn
+  default_provider_parameter_arn  = module.secrets.default_provider_parameter_arn
+
+  s3_bucket_arn = module.s3.bucket_arn
+  kms_key_arn   = module.kms.key_arn
 }
 
 module "alb" {
@@ -63,7 +53,7 @@ module "ecs" {
   project_name = var.project_name
   environment  = var.environment
   aws_region   = var.aws_region
-
+  desired_count = var.ecs_desired_count
   vpc_id            = module.vpc.vpc_id
   public_subnet_ids = module.vpc.public_subnet_ids
 
@@ -73,9 +63,40 @@ module "ecs" {
   execution_role_arn = module.iam.ecs_execution_role_arn
   task_role_arn      = module.iam.ecs_task_role_arn
 
-  container_image = "${module.ecr.repository_url}:latest"
+  container_image = "${module.ecr.repository_url}:${var.image_tag}"
 
   s3_bucket_name = module.s3.bucket_name
 
+  provider_credentials_secret_arn = module.secrets.provider_credentials_secret_arn
+  gateway_api_key_secret_arn      = module.secrets.gateway_api_key_secret_arn
+  environment_parameter_arn       = module.secrets.environment_parameter_arn
+  log_level_parameter_arn         = module.secrets.log_level_parameter_arn
+  default_provider_parameter_arn  = module.secrets.default_provider_parameter_arn
+
   alb_listener_dependency = module.alb.http_listener
+}
+
+module "secrets" {
+  source = "../modules/secrets"
+
+  name_prefix = "${var.project_name}/${var.environment}"
+  environment = var.environment
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+module "kms" {
+  source = "../modules/kms"
+
+  name_prefix = "${var.project_name}-${var.environment}"
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
 }

@@ -71,7 +71,6 @@ logs/
 *~
 
 # Tests
-tests/
 
 # Build artifacts
 build/

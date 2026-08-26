@@ -4,24 +4,19 @@ LABEL maintainer="Mirza Mujtaba Baig"
 LABEL application="Enterprise AI Platform"
 LABEL version="1.0.0"
 
-USER root
-
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV ENTERPRISE_AI_PLATFORM_ROOT=/app
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 WORKDIR /app
 
-COPY requirements/base.txt requirements/base.txt
-COPY requirements/dbt.txt requirements/dbt.txt
-COPY requirements/docker.txt requirements/docker.txt
-
-RUN pip install --upgrade pip
-
-RUN pip install \
-    --no-cache-dir \
-    -r requirements/docker.txt
+RUN useradd \ 
+    --create-home \ 
+    --shell /usr/sbin/nologin \ 
+    appuser 
 
 RUN apt-get update && \
     apt-get install -y \
@@ -30,12 +25,26 @@ RUN apt-get update && \
         build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+COPY pyproject.toml requirements.txt ./
+COPY requirements/base.txt requirements/base.txt
+COPY requirements/dbt.txt requirements/dbt.txt
+COPY requirements/docker.txt requirements/docker.txt
+
+RUN pip install --no-cache-dir --upgrade pip \ 
+    && pip install --no-cache-dir -r requirements.txt
+
+RUN pip install \
+    --no-cache-dir \
+    -r requirements/docker.txt
+
 ENV PATH=$JAVA_HOME/bin:$PATH
 
 COPY . .
 
-RUN chmod +x entrypoint.sh
+RUN chown -R appuser:appuser /app && \
+    chmod +x /app/entrypoint.sh
+
+USER appuser
 
 EXPOSE 8000
 

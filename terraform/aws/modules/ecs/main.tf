@@ -93,6 +93,53 @@ resource "aws_ecs_task_definition" "gateway" {
         {
           name  = "S3_BUCKET"
           value = var.s3_bucket_name
+        },
+
+        {
+          name  = "OTEL_EXPORT_ENABLED"
+          value = "false"
+        },
+
+        {
+          name  = "OTEL_SERVICE_NAME"
+          value = "llm-gateway"
+        },
+
+        {
+          name  = "OTEL_SERVICE_VERSION"
+          value = "1.0.0"
+        },
+
+        {
+          name  = "OTEL_DEPLOYMENT_ENVIRONMENT"
+          value = var.environment
+        }
+      ]
+
+      secrets = [
+        {
+          name      = "PROVIDER_CREDENTIALS"
+          valueFrom = var.provider_credentials_secret_arn
+        },
+
+        {
+          name      = "PLATFORM_ENVIRONMENT"
+          valueFrom = var.environment_parameter_arn
+        },
+
+        {
+          name      = "LOG_LEVEL"
+          valueFrom = var.log_level_parameter_arn
+        },
+
+        {
+          name      = "DEFAULT_PROVIDER"
+          valueFrom = var.default_provider_parameter_arn
+        },
+
+        {
+          name      = "API_KEY"
+          valueFrom = var.gateway_api_key_secret_arn
         }
       ]
 
@@ -131,7 +178,7 @@ resource "aws_ecs_service" "gateway" {
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.gateway.arn
 
-  desired_count = 1
+  desired_count = var.desired_count
 
   launch_type = "FARGATE"
 

@@ -15,3 +15,14 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "image_tag" {
+  description = "Immutable container image tag to deploy."
+  type        = string
+}
+
+variable "ecs_desired_count" {
+  description = "Number of ECS gateway tasks to run."
+  type        = number
+  default     = 1
+}
