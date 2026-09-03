@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from faker import Faker
 from kafka import KafkaProducer
+from uuid import uuid4
 
 DEFAULT_KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 DEFAULT_KAFKA_TOPIC = "vehicle-telemetry"
@@ -64,7 +65,12 @@ def generate_vehicle_telemetry(fake: Faker | None = None) -> dict[str, Any]:
     """Generate one synthetic vehicle telemetry event."""
     del fake  # Reserved for future Faker-backed fields.
 
+    event_time = datetime.now(timezone.utc)
+
     return {
+        "event_id": str(uuid4()),
+        "schema_version": "1.0",
+        "source": "vehicle-simulator",
         "vehicle_id": random.choice(
             [
                 "CAR001",
@@ -73,7 +79,8 @@ def generate_vehicle_telemetry(fake: Faker | None = None) -> dict[str, Any]:
                 "CAR004",
             ]
         ),
-        "event_time": datetime.now(timezone.utc).isoformat(),
+        "event_time": event_time.isoformat(),
+        "ingestion_time": datetime.now(timezone.utc).isoformat(),
         "latitude": round(random.uniform(17.30, 17.45), 6),
         "longitude": round(random.uniform(78.35, 78.55), 6),
         "speed": round(random.uniform(20, 120), 2),

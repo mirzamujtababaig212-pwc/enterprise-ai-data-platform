@@ -10,6 +10,7 @@ from ai_platform.llm_gateway.exceptions.error_models import (
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
     ProviderConnectionError,
+    ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
@@ -114,5 +115,24 @@ async def provider_connection_handler(
             "status": "error",
             "error": {"code": 503, "message": str(exc)},
             "request_id": getattr(request.state, "request_id", None),
+        },
+    )
+
+
+async def provider_quota_exceeded_exception_handler(
+    request: Request,
+    exc: ProviderQuotaExceededError,
+) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+
+    return JSONResponse(
+        status_code=429,
+        content={
+            "status": "error",
+            "error": {
+                "code": 429,
+                "message": str(exc),
+            },
+            "request_id": request_id,
         },
     )

@@ -78,4 +78,6 @@ def test_chat_success(client):
     fake_client.responses.create.assert_awaited_once_with(
         model="gpt-4.1",
         input="Hello",
+        temperature=0.7,
+        max_output_tokens=1024,
     )
