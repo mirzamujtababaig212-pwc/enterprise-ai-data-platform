@@ -40,6 +40,13 @@ class Router:
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
+        result = await self.route_chat_with_metadata(request)
+        return result.response
+
+    async def route_chat_with_metadata(
+        self,
+        request: dict[str, Any],
+    ):
         provider_name = request.get("provider")
         model = request["model"]
 
@@ -85,12 +92,19 @@ class Router:
                 len(result.attempts),
             )
 
-            return result.response
+            return result
 
     async def route_embeddings(
         self,
         request: dict[str, Any],
     ) -> list[float]:
+        result = await self.route_embeddings_with_metadata(request)
+        return result.response
+
+    async def route_embeddings_with_metadata(
+        self,
+        request: dict[str, Any],
+    ):
         provider_name = request.get("provider")
         model = request["model"]
 
@@ -136,7 +150,7 @@ class Router:
                 len(result.attempts),
             )
 
-            return result.response
+            return result
 
     async def route_stream(
         self,

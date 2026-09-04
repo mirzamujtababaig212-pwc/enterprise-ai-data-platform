@@ -8,8 +8,10 @@ from rag.chunking.recursive import RecursiveChunker
 from rag.query import RAGQueryService
 from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.in_memory import InMemoryVectorStore
+from app.control_plane.usage.store import InMemoryUsageStore
 
 _llm_router = Router()
+_usage_store = InMemoryUsageStore()
 
 _vehicle_risk_predictor = VehicleRiskPredictor(
     model_alias="champion",
@@ -69,3 +71,7 @@ def get_rag_query_service() -> RAGQueryService:
 
 def get_rag_indexer() -> RAGIndexer:
     return _rag_indexer
+
+
+def get_usage_store() -> InMemoryUsageStore:
+    return _usage_store

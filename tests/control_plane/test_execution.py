@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
+import numpy as np
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
@@ -52,23 +55,31 @@ def test_control_plane_embeddings_executes_mock_provider() -> None:
 
 
 def test_control_plane_vehicle_risk_executes_champion_model() -> None:
-    response = client.post(
-        "/api/v1/ml/vehicle-risk/predict",
-        json={
-            "event_count": 10,
-            "avg_speed": 55.0,
-            "max_speed": 85.0,
-            "speed_stddev": 12.0,
-            "avg_rpm": 2200.0,
-            "max_rpm": 3500.0,
-            "avg_fuel_level": 65.0,
-            "min_fuel_level": 45.0,
-            "avg_battery": 12.4,
-            "avg_engine_temperature": 88.0,
-            "max_engine_temperature": 102.0,
-        },
-        headers=AUTH_HEADERS,
-    )
+    mock_model = MagicMock()
+    mock_model.predict.return_value = np.array([1])
+    mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])
+
+    with patch(
+        "mlflow.sklearn.load_model",
+        return_value=mock_model,
+    ):
+        response = client.post(
+            "/api/v1/ml/vehicle-risk/predict",
+            json={
+                "event_count": 10,
+                "avg_speed": 55.0,
+                "max_speed": 85.0,
+                "speed_stddev": 12.0,
+                "avg_rpm": 2200.0,
+                "max_rpm": 3500.0,
+                "avg_fuel_level": 65.0,
+                "min_fuel_level": 45.0,
+                "avg_battery": 12.4,
+                "avg_engine_temperature": 88.0,
+                "max_engine_temperature": 102.0,
+            },
+            headers=AUTH_HEADERS,
+        )
 
     assert response.status_code == 200
 
