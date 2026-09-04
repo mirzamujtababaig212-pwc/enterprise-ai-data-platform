@@ -82,6 +82,8 @@ def build_test_query_service() -> RAGQueryService:
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"x-api-key": "super-secret-key"}
+
 
 def teardown_function() -> None:
     app.dependency_overrides.clear()
@@ -101,6 +103,7 @@ def test_control_plane_rag_index_executes() -> None:
                 "source": "architecture.md",
             },
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -122,6 +125,7 @@ def test_control_plane_rag_index_rejects_empty_content() -> None:
             "document_id": "doc-empty",
             "content": "",
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422
@@ -176,6 +180,7 @@ def test_control_plane_rag_query_executes() -> None:
             "query": "What does the platform support?",
             "top_k": 1,
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -206,6 +211,7 @@ def test_control_plane_rag_query_rejects_invalid_top_k() -> None:
             "query": "What does the platform support?",
             "top_k": 0,
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422
@@ -222,6 +228,7 @@ def test_control_plane_rag_query_rejects_empty_query() -> None:
             "query": "",
             "top_k": 5,
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422

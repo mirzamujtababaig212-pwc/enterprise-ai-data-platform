@@ -49,5 +49,15 @@ async def capabilities() -> CapabilitiesResponse:
                 description="Vehicle risk inference through the MLflow champion model.",
                 status="available",
             ),
+            Capability(
+                name="rag.index",
+                description="Enterprise document indexing with chunking and vector embeddings.",
+                status="available",
+            ),
+            Capability(
+                name="rag.query",
+                description="Enterprise retrieval-augmented generation with semantic retrieval and LLM generation.",
+                status="available",
+            ),
         ],
     )

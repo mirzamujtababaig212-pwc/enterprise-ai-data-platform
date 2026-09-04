@@ -4,11 +4,14 @@ from app.control_plane.app import app
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"x-api-key": "super-secret-key"}
+
 
 def test_vehicle_risk_route_rejects_missing_fields() -> None:
     response = client.post(
         "/api/v1/ml/vehicle-risk/predict",
         json={},
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422
@@ -31,6 +34,7 @@ def test_vehicle_risk_route_rejects_unknown_fields() -> None:
             "max_engine_temperature": 90.0,
             "unexpected": "field",
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 422

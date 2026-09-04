@@ -4,6 +4,8 @@ from app.control_plane.app import app
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"x-api-key": "super-secret-key"}
+
 
 def test_health() -> None:
     response = client.get("/api/v1/health")
@@ -24,7 +26,7 @@ def test_platform_health() -> None:
 
 
 def test_platform_capabilities() -> None:
-    response = client.get("/api/v1/platform/capabilities")
+    response = client.get("/api/v1/platform/capabilities", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
 

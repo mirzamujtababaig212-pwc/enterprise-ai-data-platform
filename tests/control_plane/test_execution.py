@@ -6,6 +6,8 @@ from app.control_plane.app import app
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"x-api-key": "super-secret-key"}
+
 
 def test_control_plane_chat_executes_mock_provider() -> None:
     response = client.post(
@@ -15,6 +17,7 @@ def test_control_plane_chat_executes_mock_provider() -> None:
             "provider": "mock",
             "model": "mock-gpt",
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -35,6 +38,7 @@ def test_control_plane_embeddings_executes_mock_provider() -> None:
             "model": "mock-embedding",
             "text": "Enterprise AI Platform",
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -63,6 +67,7 @@ def test_control_plane_vehicle_risk_executes_champion_model() -> None:
             "avg_engine_temperature": 88.0,
             "max_engine_temperature": 102.0,
         },
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
