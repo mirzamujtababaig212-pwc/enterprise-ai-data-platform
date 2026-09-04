@@ -8,6 +8,7 @@ from app.api.chat import router as chat_router
 from app.config.settings import Settings
 from app.gateway.router import ProviderRouter
 from app.providers.openai import OpenAIProvider
+from ml.api.routes import router as vehicle_risk_router
 
 settings = Settings.from_environment()
 
@@ -68,3 +69,4 @@ async def readyz():
 
 
 app.include_router(chat_router)
+app.include_router(vehicle_risk_router)

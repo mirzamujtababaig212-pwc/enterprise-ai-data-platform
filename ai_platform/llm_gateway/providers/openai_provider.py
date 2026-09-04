@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -10,6 +11,7 @@ from openai import (
     RateLimitError,
 )
 
+from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.llm_gateway.config.openai_settings import (
     OpenAISettings,
     get_openai_settings,
@@ -116,12 +118,115 @@ class OpenAIProvider(BaseProvider):
 
         return False
 
+    @staticmethod
+    def _chat_input(request: dict[str, Any]) -> str | list[dict[str, str]]:
+        """Resolve the OpenAI Responses API input from a Gateway request."""
+
+        messages = request.get("messages")
+
+        if messages is not None:
+            if not isinstance(messages, list):
+                raise ValueError("OpenAI chat messages must be a list.")
+
+            if not messages:
+                raise ValueError("OpenAI chat messages must not be empty.")
+
+            normalized_messages: list[dict[str, str]] = []
+
+            for message in messages:
+                if not isinstance(message, dict):
+                    raise ValueError("OpenAI chat messages must contain dictionaries.")
+
+                role = message.get("role")
+                content = message.get("content")
+
+                if not isinstance(role, str) or not role.strip():
+                    raise ValueError("OpenAI chat message role must not be empty.")
+
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("OpenAI chat message content must not be empty.")
+
+                normalized_messages.append(
+                    {
+                        "role": role,
+                        "content": content,
+                    }
+                )
+
+            return normalized_messages
+
+        prompt = request.get("prompt")
+
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("OpenAI chat prompt must not be empty.")
+
+        return prompt
+
+    @staticmethod
+    def _extract_tool_calls(
+        response: Any,
+    ) -> list[AgentToolCall]:
+        """Translate OpenAI Responses API function calls into Agent contracts."""
+
+        output_items = getattr(response, "output", None)
+
+        if not isinstance(output_items, (list, tuple)):
+            return []
+
+        tool_calls: list[AgentToolCall] = []
+
+        for item in output_items:
+            item_type = getattr(item, "type", None)
+
+            if item_type != "function_call":
+                continue
+
+            call_id = getattr(item, "call_id", None)
+            name = getattr(item, "name", None)
+            arguments = getattr(item, "arguments", None)
+
+            if not isinstance(call_id, str) or not call_id.strip():
+                raise ValueError("OpenAI function call did not contain a valid call_id.")
+
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("OpenAI function call did not contain a valid tool name.")
+
+            if isinstance(arguments, str):
+                try:
+                    parsed_arguments = json.loads(arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"OpenAI function call arguments were not valid JSON " f"for tool '{name}'."
+                    ) from exc
+            elif isinstance(arguments, dict):
+                parsed_arguments = arguments
+            else:
+                raise ValueError(
+                    f"OpenAI function call arguments were invalid " f"for tool '{name}'."
+                )
+
+            if not isinstance(parsed_arguments, dict):
+                raise ValueError(
+                    f"OpenAI function call arguments must decode to an object "
+                    f"for tool '{name}'."
+                )
+
+            tool_calls.append(
+                AgentToolCall(
+                    call_id=call_id,
+                    name=name,
+                    arguments=parsed_arguments,
+                )
+            )
+
+        return tool_calls
+
     async def chat(
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
 
-        prompt = request["prompt"]
+        chat_input = self._chat_input(request)
 
         model = request.get(
             "model",
@@ -135,10 +240,16 @@ class OpenAIProvider(BaseProvider):
             raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
         try:
+            tools = self._chat_tools(request)
+
             response = await self.client.responses.create(
                 model=model,
-                input=prompt,
+                input=chat_input,
+                temperature=request.get("temperature", 0.7),
+                max_output_tokens=request.get("max_tokens", 1024),
+                **({"tools": tools} if tools is not None else {}),
             )
+
             reply = getattr(
                 response,
                 "output_text",
@@ -170,12 +281,15 @@ class OpenAIProvider(BaseProvider):
                 else 0
             )
 
+            tool_calls = self._extract_tool_calls(response)
+
             return {
                 "reply": reply,
                 "usage": {
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
                 },
+                "tool_calls": tool_calls,
             }
 
         except AuthenticationError as exc:
@@ -413,3 +527,43 @@ class OpenAIProvider(BaseProvider):
 
     def supported_stream_models(self) -> list[str]:
         return sorted(SUPPORTED_CHAT_MODELS)
+
+    @staticmethod
+    def _chat_tools(request: dict[str, Any]) -> list[dict[str, Any]] | None:
+        raw_tools = request.get("tools")
+
+        if raw_tools is None:
+            return None
+
+        if not isinstance(raw_tools, list):
+            raise ValueError("OpenAI chat tools must be a list.")
+
+        tools: list[dict[str, Any]] = []
+
+        for tool in raw_tools:
+            if not isinstance(tool, dict):
+                raise ValueError("OpenAI chat tools must contain dictionaries.")
+
+            name = tool.get("name")
+            description = tool.get("description")
+            input_schema = tool.get("input_schema", {})
+
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("OpenAI chat tool name must be a non-empty string.")
+
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError("OpenAI chat tool description must be a non-empty string.")
+
+            if not isinstance(input_schema, dict):
+                raise ValueError("OpenAI chat tool input_schema must be a dictionary.")
+
+            tools.append(
+                {
+                    "type": "function",
+                    "name": name,
+                    "description": description,
+                    "parameters": dict(input_schema),
+                }
+            )
+
+        return tools

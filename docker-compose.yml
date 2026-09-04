@@ -29,6 +29,9 @@ services:
       # LLM Providers
       # --------------------------------------------------------
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DEFAULT_PROVIDER: ${DEFAULT_PROVIDER}
+      DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL}
+      OPENAI_MODEL: ${OPENAI_MODEL}
       # --------------------------------------------------------
       # Kafka
       # --------------------------------------------------------
@@ -49,6 +52,15 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_EXPORTER_OTLP_INSECURE: "true"
+      # --------------------------------------------------------
+      # MLflow / MinIO
+      # --------------------------------------------------------
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: enterprise-ai-platform
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
+      AWS_DEFAULT_REGION: us-east-1
       # --------------------------------------------------------
       # Environment
       # --------------------------------------------------------
@@ -267,6 +279,33 @@ services:
       - jaeger
     restart: unless-stopped
 
+  # ============================================================
+  # MLflow
+  # ============================================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.15.2
+    container_name: mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root s3://mlflow-artifacts/
+      --allowed-hosts "*"
+    ports:
+      - "5051:5000"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - mlflow_data:/mlflow
+    depends_on:
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
 # ==============================================================
 # Persistent Volumes
 # ==============================================================
@@ -275,3 +314,4 @@ volumes:
   minio_data:
   prometheus_data:
   grafana_data:
+  mlflow_data:

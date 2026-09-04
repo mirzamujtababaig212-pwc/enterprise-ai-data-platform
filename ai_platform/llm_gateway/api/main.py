@@ -27,10 +27,12 @@ from ai_platform.llm_gateway.exceptions.handlers import (
     provider_rate_limit_handler,
     provider_timeout_handler,
     validation_exception_handler,
+    provider_quota_exceeded_exception_handler,
 )
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
     ProviderConnectionError,
+    ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
@@ -66,6 +68,7 @@ from ai_platform.llm_gateway.routing.router import router
 from ai_platform.llm_gateway.tracing.tracing import (
     configure_tracing,
 )
+from ml.api.routes import router as vehicle_risk_router
 
 logger = get_logger()
 
@@ -105,6 +108,7 @@ logger.info(
         "version": settings.APP_VERSION,
     },
 )
+app.include_router(vehicle_risk_router)
 
 # ============================================================================
 # MIDDLEWARE
@@ -200,6 +204,11 @@ app.add_exception_handler(
 app.add_exception_handler(
     ProviderConnectionError,
     provider_connection_handler,
+)
+
+app.add_exception_handler(
+    ProviderQuotaExceededError,
+    provider_quota_exceeded_exception_handler,
 )
 
 # Configure logging
