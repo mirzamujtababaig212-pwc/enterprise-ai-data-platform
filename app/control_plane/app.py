@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.control_plane.routes.health import router as health_router
 from app.control_plane.routes.llm import router as llm_router
 from app.control_plane.routes.ml import router as ml_router
+from app.control_plane.routes.rag import router as rag_router
 from app.control_plane.routes.platform import router as platform_router
 
 app = FastAPI(
@@ -17,3 +18,4 @@ app.include_router(health_router)
 app.include_router(platform_router)
 app.include_router(llm_router)
 app.include_router(ml_router)
+app.include_router(rag_router)
