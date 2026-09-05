@@ -14,7 +14,7 @@ from ml.models.customer_churn import (
     FEATURE_COLUMNS,
     MODEL_NAME,
     TARGET_COLUMN,
-    validate_feature_columns,
+    validate_feature_dataframe,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -33,7 +33,7 @@ class CustomerChurnTrainer(
         if dataframe is None or dataframe.empty:
             raise ValueError("Customer churn training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
         config = config or TrainingConfig()
 

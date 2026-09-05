@@ -19,7 +19,7 @@ from ml.models.loan_default import (
     TARGET_COLUMN,
     LoanDefaultEvaluationAdapter,
     LoanDefaultMLP,
-    validate_feature_columns,
+    validate_feature_dataframe,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -39,7 +39,7 @@ class LoanDefaultTrainer(
         if dataframe is None or dataframe.empty:
             raise ValueError("Loan default training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
         config = config or TrainingConfig()
 

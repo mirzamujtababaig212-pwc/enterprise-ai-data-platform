@@ -15,7 +15,7 @@ from ml.models.vehicle_risk import (
     FEATURE_COLUMNS,
     MODEL_NAME,
     TARGET_COLUMN,
-    validate_feature_columns,
+    validate_feature_dataframe,
 )
 
 from .schemas import (
@@ -211,7 +211,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
         if dataframe.empty:
             raise ValueError("Training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
     @staticmethod
     def _create_bootstrap_labels(
