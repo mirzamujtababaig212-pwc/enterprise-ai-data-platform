@@ -9,6 +9,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from ml.platform import EvaluationService
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,12 @@ class EvaluationResult:
         return metrics
 
 
-class ModelEvaluator:
+class ModelEvaluator(
+    EvaluationService[
+        tuple[object, object, object],
+        EvaluationResult,
+    ]
+):
     """
     Evaluates binary classification models.
     """

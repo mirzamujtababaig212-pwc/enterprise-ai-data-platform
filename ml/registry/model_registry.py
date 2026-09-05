@@ -6,6 +6,7 @@ from typing import Any
 import os
 import mlflow
 from mlflow import MlflowClient
+from ml.platform import ModelRegistry
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class RegisteredModelResult:
     alias: str
 
 
-class ModelRegistryManager:
+class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
     """
     Production wrapper around the MLflow Model Registry.
 

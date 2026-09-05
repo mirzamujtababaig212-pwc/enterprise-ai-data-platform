@@ -22,9 +22,10 @@ from .schemas import (
     TrainingConfig,
     TrainingResult,
 )
+from ml.platform import TrainingService
 
 
-class VehicleRiskTrainer:
+class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
     """
     Production vehicle-risk model trainer.
 

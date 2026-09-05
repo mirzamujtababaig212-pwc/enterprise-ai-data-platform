@@ -17,7 +17,7 @@ from ml.observability.metrics import (
     ML_INFERENCE_PREDICTIONS_TOTAL,
     ML_INFERENCE_REQUESTS_TOTAL,
 )
-
+from ml.platform import InferenceService
 
 tracer = trace.get_tracer(__name__)
 
@@ -34,7 +34,7 @@ class VehicleRiskPrediction:
     model_alias: str
 
 
-class VehicleRiskPredictor:
+class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]):
     """
     Production inference wrapper.
 
