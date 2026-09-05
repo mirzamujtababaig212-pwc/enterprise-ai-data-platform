@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ml.evaluation import EvaluationPolicy, EvaluationQualityGate, EvaluationResult
+from ml.evaluation import (
+    EvaluationQualityGate,
+    EvaluationResult,
+    VEHICLE_RISK_POLICY,
+)
 from ml.models.vehicle_risk import MODEL_NAME
 from ml.registry import ModelRegistryManager
 from ml.training import (
@@ -215,10 +219,7 @@ def main() -> None:
         roc_auc=metrics.get("validation_roc_auc"),
     )
 
-    policy = EvaluationPolicy(
-        min_f1=0.80,
-        min_roc_auc=0.80,
-    )
+    policy = VEHICLE_RISK_POLICY
 
     quality_gate = EvaluationQualityGate.evaluate(
         result=evaluation,
