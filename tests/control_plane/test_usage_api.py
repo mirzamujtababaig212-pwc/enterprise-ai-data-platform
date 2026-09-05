@@ -1,17 +1,13 @@
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
-from app.control_plane.dependencies import get_usage_store
 from app.control_plane.usage.models import UsageEvent
 
 client = TestClient(app)
 
 
-def setup_function() -> None:
-    get_usage_store().clear()
-
-
 def _record_event(
+    usage_store,
     *,
     request_id: str = "req-123",
     capability: str = "llm.chat",
@@ -28,18 +24,18 @@ def _record_event(
         latency_ms=50,
         status=status,
     )
-    get_usage_store().record(event)
+    usage_store.record(event)
     return event
 
 
-def test_usage_requires_api_key() -> None:
+def test_usage_requires_api_key(usage_store) -> None:
     response = client.get("/api/v1/platform/usage")
 
     assert response.status_code == 401
 
 
-def test_usage_returns_events() -> None:
-    _record_event()
+def test_usage_returns_events(usage_store) -> None:
+    _record_event(usage_store)
 
     response = client.get(
         "/api/v1/platform/usage",
@@ -58,9 +54,9 @@ def test_usage_returns_events() -> None:
     assert body["events"][0]["model"] == "gpt-4.1-mini"
 
 
-def test_usage_filters_by_request_id() -> None:
-    _record_event(request_id="req-123")
-    _record_event(request_id="req-456")
+def test_usage_filters_by_request_id(usage_store) -> None:
+    _record_event(usage_store, request_id="req-123")
+    _record_event(usage_store, request_id="req-456")
 
     response = client.get(
         "/api/v1/platform/usage?request_id=req-123",
@@ -75,9 +71,9 @@ def test_usage_filters_by_request_id() -> None:
     assert body["events"][0]["request_id"] == "req-123"
 
 
-def test_usage_filters_by_capability() -> None:
-    _record_event(capability="llm.chat")
-    _record_event(capability="llm.embeddings")
+def test_usage_filters_by_capability(usage_store) -> None:
+    _record_event(usage_store, capability="llm.chat")
+    _record_event(usage_store, capability="llm.embeddings")
 
     response = client.get(
         "/api/v1/platform/usage?capability=llm.embeddings",
@@ -92,9 +88,9 @@ def test_usage_filters_by_capability() -> None:
     assert body["events"][0]["capability"] == "llm.embeddings"
 
 
-def test_usage_filters_by_status() -> None:
-    _record_event(status="success")
-    _record_event(status="error")
+def test_usage_filters_by_status(usage_store) -> None:
+    _record_event(usage_store, status="success")
+    _record_event(usage_store, status="error")
 
     response = client.get(
         "/api/v1/platform/usage?status=error",
@@ -109,9 +105,9 @@ def test_usage_filters_by_status() -> None:
     assert body["events"][0]["status"] == "error"
 
 
-def test_usage_respects_limit() -> None:
+def test_usage_respects_limit(usage_store) -> None:
     for index in range(5):
-        _record_event(request_id=f"req-{index}")
+        _record_event(usage_store, request_id=f"req-{index}")
 
     response = client.get(
         "/api/v1/platform/usage?limit=2",

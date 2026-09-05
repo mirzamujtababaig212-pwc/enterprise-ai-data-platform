@@ -3,17 +3,11 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
-from app.control_plane.dependencies import (
-    get_usage_store,
-)
+
 
 client = TestClient(app)
 
 AUTH_HEADERS = {"x-api-key": "super-secret-key"}
-
-
-def setup_function() -> None:
-    get_usage_store().clear()
 
 
 def test_chat_route_rejects_missing_required_fields() -> None:
@@ -36,7 +30,7 @@ def test_embeddings_route_rejects_missing_required_fields() -> None:
     assert response.status_code == 422
 
 
-def test_chat_records_usage_event() -> None:
+def test_chat_records_usage_event(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_chat_with_metadata.return_value = type(
         "ChatResult",
@@ -76,7 +70,7 @@ def test_chat_records_usage_event() -> None:
 
     request_id = body["metrics"]["request_id"]
 
-    events = get_usage_store().list(
+    events = usage_store.list(
         request_id=request_id,
     )
 
@@ -94,7 +88,7 @@ def test_chat_records_usage_event() -> None:
     assert event.latency_ms >= 0
 
 
-def test_chat_records_actual_fallback_provider() -> None:
+def test_chat_records_actual_fallback_provider(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_chat_with_metadata.return_value = type(
         "ChatResult",
@@ -130,7 +124,7 @@ def test_chat_records_actual_fallback_provider() -> None:
 
     request_id = response.json()["metrics"]["request_id"]
 
-    events = get_usage_store().list(
+    events = usage_store.list(
         request_id=request_id,
     )
 
@@ -138,7 +132,7 @@ def test_chat_records_actual_fallback_provider() -> None:
     assert events[0].provider == "fallback-provider"
 
 
-def test_chat_records_error_usage_event() -> None:
+def test_chat_records_error_usage_event(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_chat_with_metadata.side_effect = ValueError("Invalid chat request")
 
@@ -158,7 +152,7 @@ def test_chat_records_error_usage_event() -> None:
 
     assert response.status_code == 400
 
-    events = get_usage_store().list()
+    events = usage_store.list()
 
     assert len(events) == 1
 
@@ -172,7 +166,7 @@ def test_chat_records_error_usage_event() -> None:
     assert event.tokens_out == 0
 
 
-def test_embeddings_records_usage_event() -> None:
+def test_embeddings_records_usage_event(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_embeddings_with_metadata.return_value = type(
         "EmbeddingResult",
@@ -205,7 +199,7 @@ def test_embeddings_records_usage_event() -> None:
 
     request_id = body["metrics"]["request_id"]
 
-    events = get_usage_store().list(
+    events = usage_store.list(
         request_id=request_id,
     )
 
@@ -223,7 +217,7 @@ def test_embeddings_records_usage_event() -> None:
     assert event.latency_ms >= 0
 
 
-def test_embeddings_records_actual_fallback_provider() -> None:
+def test_embeddings_records_actual_fallback_provider(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_embeddings_with_metadata.return_value = type(
         "EmbeddingResult",
@@ -252,7 +246,7 @@ def test_embeddings_records_actual_fallback_provider() -> None:
 
     request_id = response.json()["metrics"]["request_id"]
 
-    events = get_usage_store().list(
+    events = usage_store.list(
         request_id=request_id,
     )
 
@@ -260,7 +254,7 @@ def test_embeddings_records_actual_fallback_provider() -> None:
     assert events[0].provider == "fallback-provider"
 
 
-def test_embeddings_records_error_usage_event() -> None:
+def test_embeddings_records_error_usage_event(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_embeddings_with_metadata.side_effect = ValueError(
         "Embedding provider failure",
@@ -282,7 +276,7 @@ def test_embeddings_records_error_usage_event() -> None:
 
     assert response.status_code == 404
 
-    events = get_usage_store().list()
+    events = usage_store.list()
 
     assert len(events) == 1
 
