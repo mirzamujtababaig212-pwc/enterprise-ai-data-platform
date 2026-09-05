@@ -13,6 +13,18 @@ def registry() -> ModelRegistryManager:
     return ModelRegistryManager()
 
 
+def test_registration_rejected_when_evaluation_fails(
+    registry: ModelRegistryManager,
+) -> None:
+    with pytest.raises(ValueError, match="evaluation"):
+        registry.register_model(
+            model_uri="runs:/fake-run/model",
+            model_name="RejectedModel",
+            run_id="fake-run",
+            evaluation_passed=False,
+        )
+
+
 def test_vehicle_risk_champion_exists(
     registry: ModelRegistryManager,
 ) -> None:
