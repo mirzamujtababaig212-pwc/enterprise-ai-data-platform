@@ -31,6 +31,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER}
       DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL}
+      DEFAULT_EMBEDDING_MODEL: ${DEFAULT_EMBEDDING_MODEL:-openai-embedding}
       OPENAI_MODEL: ${OPENAI_MODEL}
       # --------------------------------------------------------
       # Kafka
@@ -66,7 +67,7 @@ services:
       # --------------------------------------------------------
       ENVIRONMENT: ${ENVIRONMENT:-local}
     command: >
-      uvicorn ai_platform.llm_gateway.api.main:app
+      uvicorn app.control_plane.app:app
       --host 0.0.0.0
       --port 8000
     stdin_open: true

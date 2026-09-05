@@ -49,6 +49,6 @@ USER appuser
 
 EXPOSE 8000
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 CMD ["uvicorn", "ai_platform.llm_gateway.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

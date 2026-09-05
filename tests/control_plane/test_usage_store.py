@@ -104,3 +104,11 @@ def test_clear_removes_events():
     store.clear()
 
     assert store.list() == []
+
+
+def test_in_memory_usage_store_implements_repository_contract():
+    from app.control_plane.usage.repository import UsageRepository
+
+    repository: UsageRepository = InMemoryUsageStore()
+
+    assert repository is not None

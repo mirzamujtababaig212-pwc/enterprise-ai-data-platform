@@ -1103,3 +1103,193 @@ async def test_llm_agent_tool_events_do_not_capture_tool_payloads() -> None:
 
     for event in tool_events:
         assert event.metadata == {}
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_emits_complete_lifecycle_after_tool_execution() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway()
+    tool_registry = InMemoryToolRegistry()
+
+    await tool_registry.register(
+        FakeTool(name="search"),
+    )
+
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find something.",
+            session_id="session-123",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "RAG retrieves relevant context for generation."
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_STARTED,
+        AgentExecutionEventType.LLM_REQUESTED,
+        AgentExecutionEventType.LLM_COMPLETED,
+        AgentExecutionEventType.TOOL_CALL_REQUESTED,
+        AgentExecutionEventType.TOOL_CALL_COMPLETED,
+        AgentExecutionEventType.LLM_REQUESTED,
+        AgentExecutionEventType.LLM_COMPLETED,
+        AgentExecutionEventType.AGENT_COMPLETED,
+    ]
+
+    first_llm_completed = observer.events[2]
+    final_llm_completed = observer.events[6]
+    agent_completed = observer.events[7]
+
+    assert first_llm_completed.tool_round == 0
+    assert first_llm_completed.provider == "fake"
+    assert first_llm_completed.model == "gpt-test"
+    assert first_llm_completed.metadata == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+
+    assert final_llm_completed.tool_round == 1
+    assert final_llm_completed.provider == "fake"
+    assert final_llm_completed.model == "gpt-test"
+    assert final_llm_completed.metadata == {
+        "prompt_tokens": 25,
+        "completion_tokens": 10,
+        "total_tokens": 35,
+    }
+
+    assert agent_completed.tool_round == 1
+    assert agent_completed.provider == "fake"
+    assert agent_completed.model == "gpt-test"
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_emits_agent_failed_on_llm_failure() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+    )
+
+    class FailingLLMGateway:
+        async def route_chat(
+            self,
+            request: dict[str, Any],
+        ) -> dict[str, Any]:
+            raise RuntimeError("LLM provider failure")
+
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Explain RAG.",
+            session_id="session-failure",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            FailingLLMGateway(),
+            definition.llm_config,
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="LLM provider failure",
+    ):
+        await agent.run(context)
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_STARTED,
+        AgentExecutionEventType.LLM_REQUESTED,
+        AgentExecutionEventType.AGENT_FAILED,
+    ]
+
+    failed = observer.events[-1]
+
+    assert failed.agent_name == definition.name
+    assert failed.session_id == "session-failure"
+    assert failed.tool_round == 0
+    assert failed.metadata == {
+        "error_type": "RuntimeError",
+    }
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_emits_agent_failed_on_tool_loop_limit() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    gateway = FakeMultiRoundToolCallingLLMGateway()
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-loop-limit",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    with pytest.raises(
+        AgentToolLoopLimitError,
+        match="Agent 'production-llm-agent' exceeded the maximum tool-call rounds \\(3\\)",
+    ):
+        await agent.run(context)
+
+    assert observer.events[-1].event_type == AgentExecutionEventType.AGENT_FAILED
+    assert observer.events[-1].agent_name == definition.name
+    assert observer.events[-1].session_id == "session-loop-limit"
+    assert observer.events[-1].tool_round == 3
+    assert observer.events[-1].metadata == {
+        "error_type": "AgentToolLoopLimitError",
+    }

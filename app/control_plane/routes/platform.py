@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.control_plane.dependencies import get_usage_store
 from app.control_plane.schemas.capabilities import (
@@ -77,9 +77,8 @@ async def usage(
     capability: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=100, gt=0, le=1000),
+    usage_store=Depends(get_usage_store),
 ) -> UsageResponse:
-    usage_store = get_usage_store()
-
     events = usage_store.list(
         request_id=request_id,
         capability=capability,

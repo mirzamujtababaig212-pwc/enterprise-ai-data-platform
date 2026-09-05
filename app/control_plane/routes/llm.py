@@ -20,7 +20,9 @@ from app.control_plane.dependencies import (
 )
 from app.control_plane.usage.models import UsageEvent
 from ai_platform.llm_gateway.gateway.cost import build_usage_record
-
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderRateLimitError,
+)
 
 router = APIRouter(
     prefix="/api/v1/llm",
@@ -36,10 +38,10 @@ router = APIRouter(
 async def chat(
     http_request: Request,
     request: ChatRequest,
+    usage_store=Depends(get_usage_store),
 ) -> ChatResponse:
     start = time.time()
     llm_router = get_llm_router()
-    usage_store = get_usage_store()
 
     request_id = getattr(
         http_request.state,
@@ -68,6 +70,21 @@ async def chat(
         )
         raise HTTPException(
             status_code=404,
+            detail=str(exc),
+        ) from exc
+    except ProviderRateLimitError as exc:
+        usage_store.record(
+            UsageEvent(
+                request_id=request_id,
+                capability="llm.chat",
+                provider=request.provider,
+                model=request.model,
+                latency_ms=(time.time() - start) * 1000,
+                status="error",
+            )
+        )
+        raise HTTPException(
+            status_code=429,
             detail=str(exc),
         ) from exc
     except ValueError as exc:
@@ -151,10 +168,10 @@ async def chat(
 async def embeddings(
     http_request: Request,
     request: EmbeddingRequest,
+    usage_store=Depends(get_usage_store),
 ) -> EmbeddingResponse:
     start = time.time()
     llm_router = get_llm_router()
-    usage_store = get_usage_store()
 
     request_id = getattr(
         http_request.state,

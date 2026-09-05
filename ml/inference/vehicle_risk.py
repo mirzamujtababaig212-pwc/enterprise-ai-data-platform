@@ -13,11 +13,12 @@ from ml.models.vehicle_risk import (
 )
 from ml.observability.metrics import (
     ML_INFERENCE_DURATION_SECONDS,
+    ML_INFERENCE_CLASSIFICATIONS_TOTAL,
     ML_INFERENCE_ERRORS_TOTAL,
     ML_INFERENCE_PREDICTIONS_TOTAL,
     ML_INFERENCE_REQUESTS_TOTAL,
 )
-
+from ml.platform import InferenceService
 
 tracer = trace.get_tracer(__name__)
 
@@ -34,7 +35,7 @@ class VehicleRiskPrediction:
     model_alias: str
 
 
-class VehicleRiskPredictor:
+class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]):
     """
     Production inference wrapper.
 
@@ -170,10 +171,18 @@ class VehicleRiskPredictor:
                     status="success",
                 ).inc()
 
+                # Backward-compatible Vehicle Risk metric.
                 ML_INFERENCE_PREDICTIONS_TOTAL.labels(
                     model_name=self.model_name,
                     model_alias=self.model_alias,
                     risk=str(risk),
+                ).inc()
+
+                # Generic classification metric shared across ML models.
+                ML_INFERENCE_CLASSIFICATIONS_TOTAL.labels(
+                    model_name=self.model_name,
+                    model_alias=self.model_alias,
+                    prediction_class=str(risk),
                 ).inc()
 
                 return VehicleRiskPrediction(

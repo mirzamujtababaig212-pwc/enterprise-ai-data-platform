@@ -10,10 +10,17 @@ from sklearn.model_selection import train_test_split
 
 from ai_platform.mlflow.client import MLflowManager
 
+from ml.platform import TrainingService
+
 from .schemas import TrainingConfig, TrainingResult
 
 
-class ModelTrainer:
+class ModelTrainer(
+    TrainingService[
+        tuple[Sequence[Sequence[float]], Sequence[int], BaseEstimator],
+        TrainingResult,
+    ]
+):
     """
     Production training service.
 

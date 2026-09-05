@@ -42,17 +42,17 @@ class Settings(BaseSettings):
 
     POSTGRES_DB: str = os.getenv(
         "POSTGRES_DB",
-        "enterprise_ai",
+        "vehicle_platform",
     )
 
     POSTGRES_USER: str = os.getenv(
         "POSTGRES_USER",
-        "enterprise_ai",
+        "postgres",
     )
 
     POSTGRES_PASSWORD: str = os.getenv(
         "POSTGRES_PASSWORD",
-        "enterprise_ai",
+        "postgres",
     )
 
     POSTGRES_HOST: str = os.getenv(
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
 
     DEFAULT_PROVIDER: str = "openai"
-    DEFAULT_CHAT_MODEL: str = "openai-gpt"
+    DEFAULT_CHAT_MODEL: str = "gpt-4.1-mini"
     DEFAULT_EMBEDDING_MODEL: str = "openai-embedding"
 
     REQUEST_TIMEOUT: int = 60

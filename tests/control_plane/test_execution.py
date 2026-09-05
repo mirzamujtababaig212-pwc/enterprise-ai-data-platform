@@ -12,7 +12,7 @@ client = TestClient(app)
 AUTH_HEADERS = {"x-api-key": "super-secret-key"}
 
 
-def test_control_plane_chat_executes_mock_provider() -> None:
+def test_control_plane_chat_executes_mock_provider(usage_store) -> None:
     response = client.post(
         "/api/v1/llm/chat",
         json={
@@ -33,7 +33,7 @@ def test_control_plane_chat_executes_mock_provider() -> None:
     assert payload["metrics"]["tokens_out"] > 0
 
 
-def test_control_plane_embeddings_executes_mock_provider() -> None:
+def test_control_plane_embeddings_executes_mock_provider(usage_store) -> None:
     response = client.post(
         "/api/v1/llm/embeddings",
         json={

@@ -6,6 +6,7 @@ from typing import Any
 import os
 import mlflow
 from mlflow import MlflowClient
+from ml.platform import ModelRegistry
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class RegisteredModelResult:
     alias: str
 
 
-class ModelRegistryManager:
+class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
     """
     Production wrapper around the MLflow Model Registry.
 
@@ -61,6 +62,7 @@ class ModelRegistryManager:
         model_name: str,
         run_id: str,
         evaluation_passed: bool,
+        metadata: Any | None = None,
     ) -> RegisteredModelResult:
         """
         Register a validated model version.
@@ -84,6 +86,11 @@ class ModelRegistryManager:
             version=version,
         )
 
+        model_type = getattr(metadata, "model_type", None) or "vehicle_risk_classifier"
+        framework = getattr(metadata, "framework", None) or "scikit-learn"
+        task_type = getattr(metadata, "task_type", None)
+        target_column = getattr(metadata, "target_column", None)
+
         # Version-level metadata.
         self.client.set_model_version_tag(
             name=model_name,
@@ -103,8 +110,31 @@ class ModelRegistryManager:
             name=model_name,
             version=version,
             key="model_type",
-            value="vehicle_risk_classifier",
+            value=model_type,
         )
+
+        self.client.set_model_version_tag(
+            name=model_name,
+            version=version,
+            key="framework",
+            value=framework,
+        )
+
+        if task_type:
+            self.client.set_model_version_tag(
+                name=model_name,
+                version=version,
+                key="task_type",
+                value=task_type,
+            )
+
+        if target_column:
+            self.client.set_model_version_tag(
+                name=model_name,
+                version=version,
+                key="target_column",
+                value=target_column,
+            )
 
         self.client.set_model_version_tag(
             name=model_name,
@@ -117,14 +147,28 @@ class ModelRegistryManager:
         self.client.set_registered_model_tag(
             name=model_name,
             key="model_type",
-            value="vehicle_risk_classifier",
+            value=model_type,
         )
 
         self.client.set_registered_model_tag(
             name=model_name,
             key="framework",
-            value="scikit-learn",
+            value=framework,
         )
+
+        if task_type:
+            self.client.set_registered_model_tag(
+                name=model_name,
+                key="task_type",
+                value=task_type,
+            )
+
+        if target_column:
+            self.client.set_registered_model_tag(
+                name=model_name,
+                key="target_column",
+                value=target_column,
+            )
 
         self.client.set_registered_model_tag(
             name=model_name,
