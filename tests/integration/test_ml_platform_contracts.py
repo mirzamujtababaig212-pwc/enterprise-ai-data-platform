@@ -133,3 +133,56 @@ def test_model_registry_supports_framework_agnostic_version_output() -> None:
         )["version"]
         == "1"
     )
+
+
+def test_training_result_supports_model_metadata():
+    from ml.platform import ModelMetadata
+    from ml.training.schemas import TrainingResult
+
+    metadata = ModelMetadata(
+        model_name="VehicleRiskModel",
+        model_type="RandomForestClassifier",
+        framework="scikit-learn",
+        task_type="binary_classification",
+        target_column="risk",
+        feature_names=("max_speed", "max_engine_temperature"),
+    )
+
+    result = TrainingResult(
+        run_id="run-123",
+        experiment_id="exp-123",
+        model_uri="runs:/run-123/model",
+        metrics={"validation_accuracy": 0.95},
+        parameters={"n_estimators": 100},
+        training_samples=80,
+        validation_samples=20,
+        metadata=metadata,
+    )
+
+    assert result.metadata == metadata
+    assert result.metadata.framework == "scikit-learn"
+
+
+def test_training_result_metadata_supports_pytorch():
+    from ml.platform import ModelMetadata
+    from ml.training.schemas import TrainingResult
+
+    metadata = ModelMetadata(
+        model_name="DeepRiskModel",
+        model_type="NeuralNetwork",
+        framework="PyTorch",
+        task_type="binary_classification",
+    )
+
+    result = TrainingResult(
+        run_id="run-pytorch",
+        experiment_id="exp-pytorch",
+        model_uri="runs:/run-pytorch/model",
+        metrics={"validation_accuracy": 0.91},
+        parameters={"epochs": 20},
+        training_samples=80,
+        validation_samples=20,
+        metadata=metadata,
+    )
+
+    assert result.metadata.framework == "PyTorch"

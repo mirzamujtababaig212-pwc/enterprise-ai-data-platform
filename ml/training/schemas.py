@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ml.platform import ModelMetadata
+
 
 @dataclass(frozen=True)
 class TrainingConfig:
@@ -50,6 +52,8 @@ class TrainingResult:
     training_samples: int
 
     validation_samples: int
+
+    metadata: ModelMetadata | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:

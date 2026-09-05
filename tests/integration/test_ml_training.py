@@ -5,6 +5,11 @@ import pandas as pd
 import pytest
 
 from ai_platform.mlflow.client import MLflowManager
+from ml.models.vehicle_risk import (
+    FEATURE_COLUMNS,
+    MODEL_NAME,
+    TARGET_COLUMN,
+)
 from ml.training import (
     TrainingConfig,
     VehicleRiskTrainer,
@@ -171,6 +176,17 @@ def test_vehicle_risk_training_end_to_end() -> None:
     assert result.experiment_id
     assert result.model_uri.startswith("runs:/")
 
+    assert result.metadata is not None
+    assert result.metadata.model_name == MODEL_NAME
+    assert result.metadata.model_type == "RandomForestClassifier"
+    assert result.metadata.framework == "scikit-learn"
+    assert result.metadata.task_type == "binary_classification"
+    assert result.metadata.target_column == TARGET_COLUMN
+    assert result.metadata.feature_names == tuple(FEATURE_COLUMNS)
+    assert result.metadata.training_run_id == result.run_id
+    assert result.metadata.experiment_id == result.experiment_id
+    assert result.metadata.model_uri == result.model_uri
+
     assert "training_accuracy" in result.metrics
     assert "validation_accuracy" in result.metrics
 
@@ -184,8 +200,6 @@ def test_vehicle_risk_training_end_to_end() -> None:
     model = mlflow.sklearn.load_model(result.model_uri)
 
     dataframe = _vehicle_dataframe()
-
-    from ml.models.vehicle_risk import FEATURE_COLUMNS
 
     predictions = model.predict(dataframe[list(FEATURE_COLUMNS)])
 

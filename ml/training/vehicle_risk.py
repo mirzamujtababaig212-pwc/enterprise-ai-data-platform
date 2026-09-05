@@ -22,7 +22,7 @@ from .schemas import (
     TrainingConfig,
     TrainingResult,
 )
-from ml.platform import TrainingService
+from ml.platform import ModelMetadata, TrainingService
 
 
 class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
@@ -172,6 +172,26 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
                 model_name="model",
             )
 
+        metadata = ModelMetadata(
+            model_name=MODEL_NAME,
+            model_type="RandomForestClassifier",
+            framework="scikit-learn",
+            task_type="binary_classification",
+            target_column=TARGET_COLUMN,
+            feature_names=tuple(FEATURE_COLUMNS),
+            training_run_id=run_id,
+            experiment_id=experiment_id,
+            model_uri=model_uri,
+            metrics=metrics,
+            parameters=model_params,
+            tags={
+                "evaluation_type": "holdout",
+                "model_name": MODEL_NAME,
+                "model_type": "RandomForestClassifier",
+                "target_column": TARGET_COLUMN,
+            },
+        )
+
         return TrainingResult(
             run_id=run_id,
             experiment_id=experiment_id,
@@ -180,6 +200,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
             parameters=model_params,
             training_samples=len(X_train),
             validation_samples=len(X_test),
+            metadata=metadata,
         )
 
     @staticmethod
