@@ -241,3 +241,17 @@ def test_vehicle_risk_training_rejects_single_class() -> None:
         match="only one target class",
     ):
         trainer.train(dataframe)
+
+
+def test_vehicle_risk_training_rejects_invalid_feature_range() -> None:
+    dataframe = _vehicle_dataframe()
+
+    dataframe["avg_fuel_level"] = 150.0
+
+    trainer = VehicleRiskTrainer()
+
+    with pytest.raises(
+        ValueError,
+        match="avg_fuel_level.*above maximum",
+    ):
+        trainer.train(dataframe)

@@ -7,6 +7,9 @@ import pandas as pd
 import torch
 from torch import nn
 
+from ml.platform import FeatureValidator
+from .loan_default_features import LOAN_DEFAULT_FEATURE_CONTRACT
+
 
 MODEL_NAME: Final[str] = "LoanDefaultModel"
 
@@ -130,3 +133,21 @@ def validate_feature_columns(
 
     if missing:
         raise ValueError(f"missing required loan-default columns: {missing}")
+
+
+def validate_feature_dataframe(
+    dataframe: pd.DataFrame,
+) -> None:
+    """
+    Validate loan-default data using the platform feature contract.
+    """
+
+    result = FeatureValidator.validate(
+        dataframe,
+        LOAN_DEFAULT_FEATURE_CONTRACT,
+    )
+
+    if not result.valid:
+        raise ValueError(
+            "Loan Default feature contract validation failed: " + "; ".join(result.errors)
+        )
