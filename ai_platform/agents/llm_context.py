@@ -475,6 +475,7 @@ class AgentLLMContext:
         temperature: float | None = None,
         max_tokens: int | None = None,
         user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AgentLLMResult:
         if not prompt.strip():
             raise ValueError("LLM prompt must not be empty.")
@@ -522,6 +523,12 @@ class AgentLLMContext:
                 raise ValueError("LLM user_id must not be empty when provided.")
 
             request["user_id"] = user_id
+
+        if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise TypeError("LLM metadata must be a dictionary when provided.")
+
+            request["metadata"] = dict(metadata)
 
         response = await self._gateway.route_chat(request)
 

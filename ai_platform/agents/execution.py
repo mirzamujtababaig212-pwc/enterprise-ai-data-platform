@@ -90,6 +90,11 @@ class AgentExecutionContext:
     def user_id(self) -> str | None:
         return self.request.user_id
 
+    @property
+    def metadata(self) -> dict[str, object]:
+        """Return request metadata available during agent execution."""
+        return dict(self.request.metadata)
+
     async def execute_tool_calls(
         self,
         tool_calls: tuple[AgentToolCall, ...],

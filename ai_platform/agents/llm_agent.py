@@ -179,6 +179,7 @@ class LLMAgent:
             messages=tuple(messages),
             tools=tuple(tools),
             user_id=context.user_id,
+            metadata=context.metadata,
         )
 
         tool_rounds = 0
@@ -233,6 +234,7 @@ class LLMAgent:
                 messages=tuple(messages),
                 tools=tuple(tools),
                 user_id=context.user_id,
+                metadata=context.metadata,
             )
 
         return AgentResponse(

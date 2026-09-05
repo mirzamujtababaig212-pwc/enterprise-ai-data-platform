@@ -54,6 +54,7 @@ class LLMUsingAgent:
         result = await context.llm.generate(
             prompt=context.request.input,
             user_id=context.user_id,
+            metadata=context.metadata,
         )
 
         return AgentResponse(
@@ -122,6 +123,7 @@ async def test_runtime_exposes_llm_gateway_to_agent() -> None:
             "max_tokens": 1024,
             "stream": False,
             "user_id": "user-123",
+            "metadata": {},
         }
     ]
 
@@ -261,5 +263,46 @@ async def test_runtime_passes_agent_generation_configuration_to_gateway() -> Non
             "temperature": 0.15,
             "max_tokens": 768,
             "stream": False,
+            "metadata": {},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_passes_request_metadata_to_llm_gateway() -> None:
+    gateway = FakeGateway()
+
+    definition = AgentDefinition(
+        name="metadata-agent",
+        description="Metadata propagation test agent",
+        system_prompt="You are a metadata test agent.",
+        model="mock-gpt",
+    )
+
+    agent = LLMUsingAgent(definition)
+
+    registry = InMemoryAgentRegistry()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+        llm_gateway=gateway,
+    )
+
+    await runtime.run(
+        "metadata-agent",
+        AgentRequest(
+            input="Search enterprise knowledge.",
+            user_id="user-123",
+            session_id="session-123",
+            metadata={
+                "mock_tool_call": "rag.search",
+                "trace_id": "test-trace-001",
+            },
+        ),
+    )
+
+    assert gateway.requests[0]["metadata"] == {
+        "mock_tool_call": "rag.search",
+        "trace_id": "test-trace-001",
+    }
