@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
 from ml.inference import VehicleRiskPredictor
@@ -8,12 +13,12 @@ from rag.chunking.recursive import RecursiveChunker
 from rag.query import RAGQueryService
 from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.in_memory import InMemoryVectorStore
-from app.control_plane.persistence.database import SessionLocal
+
+from app.control_plane.persistence.database import get_db
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
 
+
 _llm_router = Router()
-_usage_session = SessionLocal()
-_usage_store = PostgreSQLUsageRepository(_usage_session)
 
 _vehicle_risk_predictor = VehicleRiskPredictor(
     model_alias="champion",
@@ -75,5 +80,7 @@ def get_rag_indexer() -> RAGIndexer:
     return _rag_indexer
 
 
-def get_usage_store() -> PostgreSQLUsageRepository:
-    return _usage_store
+def get_usage_store(
+    db: Session = Depends(get_db),
+) -> PostgreSQLUsageRepository:
+    return PostgreSQLUsageRepository(db)
