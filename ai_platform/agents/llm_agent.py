@@ -161,94 +161,99 @@ class LLMAgent:
             )
         )
 
-        messages = list(context.build_llm_messages())
+        try:
+            messages = list(context.build_llm_messages())
+            tools = await context.tools.list_tools()
+            tool_rounds = 0
 
-        tools = await context.tools.list_tools()
+            while True:
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.LLM_REQUESTED,
+                        agent_name=self.definition.name,
+                        session_id=context.session_id,
+                        tool_round=tool_rounds,
+                    )
+                )
 
-        await self._emit(
-            AgentExecutionEvent(
-                event_type=AgentExecutionEventType.LLM_REQUESTED,
-                agent_name=self.definition.name,
-                session_id=context.session_id,
-                tool_round=0,
-            )
-        )
+                result = await context.llm.generate(
+                    prompt=context.request.input,
+                    messages=tuple(messages),
+                    tools=tuple(tools),
+                    user_id=context.user_id,
+                    metadata=context.metadata,
+                )
 
-        result = await context.llm.generate(
-            prompt=context.request.input,
-            messages=tuple(messages),
-            tools=tuple(tools),
-            user_id=context.user_id,
-            metadata=context.metadata,
-        )
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.LLM_COMPLETED,
+                        agent_name=self.definition.name,
+                        session_id=context.session_id,
+                        tool_round=tool_rounds,
+                        provider=result.provider,
+                        model=result.model,
+                        metadata={
+                            "prompt_tokens": result.usage.prompt_tokens,
+                            "completion_tokens": result.usage.completion_tokens,
+                            "total_tokens": result.usage.total_tokens,
+                        },
+                    )
+                )
 
-        tool_rounds = 0
+                if not result.tool_calls:
+                    await self._emit(
+                        AgentExecutionEvent(
+                            event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                            agent_name=self.definition.name,
+                            session_id=context.session_id,
+                            tool_round=tool_rounds,
+                            provider=result.provider,
+                            model=result.model,
+                        )
+                    )
 
-        if not result.tool_calls:
+                    return AgentResponse(
+                        agent_name=self.definition.name,
+                        output=result.text,
+                        session_id=context.session_id,
+                        metadata={
+                            "provider": result.provider,
+                            "model": result.model,
+                            "usage": {
+                                "prompt_tokens": result.usage.prompt_tokens,
+                                "completion_tokens": result.usage.completion_tokens,
+                                "total_tokens": result.usage.total_tokens,
+                            },
+                            "tool_rounds": tool_rounds,
+                        },
+                    )
+
+                if tool_rounds >= self.MAX_TOOL_ROUNDS:
+                    raise AgentToolLoopLimitError(
+                        self.definition.name,
+                        self.MAX_TOOL_ROUNDS,
+                    )
+
+                tool_rounds += 1
+
+                await self._accumulate_tool_call_messages(
+                    messages,
+                    context,
+                    result.tool_calls,
+                    tool_round=tool_rounds,
+                    assistant_content=result.text,
+                )
+
+        except Exception as exc:
             await self._emit(
                 AgentExecutionEvent(
-                    event_type=AgentExecutionEventType.LLM_COMPLETED,
+                    event_type=AgentExecutionEventType.AGENT_FAILED,
                     agent_name=self.definition.name,
                     session_id=context.session_id,
                     tool_round=tool_rounds,
-                    provider=result.provider,
-                    model=result.model,
                     metadata={
-                        "prompt_tokens": result.usage.prompt_tokens,
-                        "completion_tokens": result.usage.completion_tokens,
-                        "total_tokens": result.usage.total_tokens,
+                        "error_type": type(exc).__name__,
                     },
                 )
             )
-
-            await self._emit(
-                AgentExecutionEvent(
-                    event_type=AgentExecutionEventType.AGENT_COMPLETED,
-                    agent_name=self.definition.name,
-                    session_id=context.session_id,
-                    tool_round=tool_rounds,
-                    provider=result.provider,
-                    model=result.model,
-                )
-            )
-
-        while result.tool_calls:
-            if tool_rounds >= self.MAX_TOOL_ROUNDS:
-                raise AgentToolLoopLimitError(
-                    self.definition.name,
-                    self.MAX_TOOL_ROUNDS,
-                )
-
-            tool_rounds += 1
-
-            await self._accumulate_tool_call_messages(
-                messages,
-                context,
-                result.tool_calls,
-                tool_round=tool_rounds,
-                assistant_content=result.text,
-            )
-
-            result = await context.llm.generate(
-                prompt=context.request.input,
-                messages=tuple(messages),
-                tools=tuple(tools),
-                user_id=context.user_id,
-                metadata=context.metadata,
-            )
-
-        return AgentResponse(
-            agent_name=self.definition.name,
-            output=result.text,
-            session_id=context.session_id,
-            metadata={
-                "provider": result.provider,
-                "model": result.model,
-                "usage": {
-                    "prompt_tokens": result.usage.prompt_tokens,
-                    "completion_tokens": result.usage.completion_tokens,
-                    "total_tokens": result.usage.total_tokens,
-                },
-                "tool_rounds": tool_rounds,
-            },
-        )
+            raise
