@@ -5,7 +5,6 @@ import pytest
 import os
 from ml.registry import ModelRegistryManager
 
-
 MODEL_NAME = "VehicleRiskModel"
 
 
@@ -95,3 +94,72 @@ def test_champion_uri(
     uri = registry.get_champion_uri(MODEL_NAME)
 
     assert uri == (f"models:/{MODEL_NAME}@champion")
+
+
+def test_customer_churn_model_registration_and_promotion() -> None:
+    import pandas as pd
+
+    from ml.models.customer_churn import (
+        MODEL_NAME as CUSTOMER_CHURN_MODEL_NAME,
+        TARGET_COLUMN as CUSTOMER_CHURN_TARGET_COLUMN,
+    )
+    from ml.training.customer_churn import CustomerChurnTrainer
+    from ml.training.schemas import TrainingConfig
+
+    dataframe = pd.DataFrame(
+        [
+            {
+                "tenure_months": 6 + (index % 30),
+                "monthly_charges": 50.0 + (index % 8) * 8.0,
+                "total_charges": 300.0 + index * 75.0,
+                "support_tickets": index % 7,
+                "usage_hours": 20.0 + (index % 10) * 5.0,
+                "payment_failures": index % 4,
+                "churn": int(index % 3 == 0),
+            }
+            for index in range(40)
+        ]
+    )
+
+    training_result = CustomerChurnTrainer().train(
+        dataframe,
+        TrainingConfig(
+            experiment_name="customer-churn-registry-test",
+            run_name="customer-churn-registry-test",
+        ),
+    )
+
+    assert training_result.metadata is not None
+
+    registry = ModelRegistryManager()
+
+    registered = registry.register_model(
+        model_uri=training_result.model_uri,
+        model_name=CUSTOMER_CHURN_MODEL_NAME,
+        run_id=training_result.run_id,
+        evaluation_passed=True,
+        metadata=training_result.metadata,
+    )
+
+    assert registered.model_name == CUSTOMER_CHURN_MODEL_NAME
+    assert registered.alias == "candidate"
+
+    candidate = registry.get_candidate(CUSTOMER_CHURN_MODEL_NAME)
+
+    assert str(candidate.version) == registered.version
+    assert candidate.tags.get("validation_status") == "PASSED"
+    assert candidate.tags.get("model_type") == "LogisticRegression"
+    assert candidate.tags.get("framework") == "scikit-learn"
+    assert candidate.tags.get("task_type") == "binary_classification"
+    assert candidate.tags.get("target_column") == CUSTOMER_CHURN_TARGET_COLUMN
+
+    registry.promote_to_champion(
+        model_name=CUSTOMER_CHURN_MODEL_NAME,
+        version=registered.version,
+    )
+
+    champion = registry.get_champion(CUSTOMER_CHURN_MODEL_NAME)
+
+    assert str(champion.version) == registered.version
+    assert champion.tags.get("validation_status") == "PASSED"
+    assert champion.tags.get("deployment_status") == "CHAMPION"

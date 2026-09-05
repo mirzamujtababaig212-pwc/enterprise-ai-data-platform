@@ -28,8 +28,20 @@ ML_INFERENCE_DURATION_SECONDS = Histogram(
 
 ML_INFERENCE_PREDICTIONS_TOTAL = Counter(
     "ml_inference_predictions_total",
-    "Total ML inference predictions by risk category.",
+    "Total Vehicle Risk inference predictions by risk category.",
     ["model_name", "model_alias", "risk"],
+)
+
+# Generic classification metric used by all classification models.
+#
+# Unlike the legacy Vehicle Risk metric above, this metric is intentionally
+# domain-agnostic so that models such as Customer Churn, Fraud Detection,
+# Credit Risk, and future PyTorch classifiers can share the same observability
+# contract.
+ML_INFERENCE_CLASSIFICATIONS_TOTAL = Counter(
+    "ml_inference_classifications_total",
+    "Total ML classification predictions by predicted class.",
+    ["model_name", "model_alias", "prediction_class"],
 )
 
 ML_INFERENCE_ERRORS_TOTAL = Counter(

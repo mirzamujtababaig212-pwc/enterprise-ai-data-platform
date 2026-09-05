@@ -8,7 +8,6 @@ from prometheus_client import REGISTRY
 
 from ml.inference.vehicle_risk import VehicleRiskPredictor
 
-
 MODEL_NAME = "VehicleRiskModel"
 MODEL_ALIAS = "champion"
 

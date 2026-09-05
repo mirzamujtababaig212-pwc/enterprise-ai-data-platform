@@ -13,3 +13,19 @@ __all__ = [
     "TARGET_COLUMN",
     "validate_feature_columns",
 ]
+
+from .customer_churn import (
+    DEFAULT_MODEL_PARAMS as CUSTOMER_CHURN_DEFAULT_MODEL_PARAMS,
+    FEATURE_COLUMNS as CUSTOMER_CHURN_FEATURE_COLUMNS,
+    MODEL_NAME as CUSTOMER_CHURN_MODEL_NAME,
+    TARGET_COLUMN as CUSTOMER_CHURN_TARGET_COLUMN,
+    validate_feature_columns as validate_customer_churn_feature_columns,
+)
+
+__all__ += [
+    "CUSTOMER_CHURN_DEFAULT_MODEL_PARAMS",
+    "CUSTOMER_CHURN_FEATURE_COLUMNS",
+    "CUSTOMER_CHURN_MODEL_NAME",
+    "CUSTOMER_CHURN_TARGET_COLUMN",
+    "validate_customer_churn_feature_columns",
+]
