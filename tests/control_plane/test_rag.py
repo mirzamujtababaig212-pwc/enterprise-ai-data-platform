@@ -6,6 +6,7 @@ from app.control_plane.app import app
 from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
+    get_rag_state_repository,
 )
 from rag import RAGIndexer
 from rag.chunking import RecursiveChunker
@@ -21,6 +22,28 @@ class FakeEmbeddingService:
             float(checksum),
             float(len(text)),
         ]
+
+
+class FakeRAGStateRepository:
+    def __init__(self) -> None:
+        self.saved = []
+
+    def save_document(
+        self,
+        document,
+        chunks,
+        *,
+        embedding_model=None,
+        embedding_dimension=None,
+    ) -> None:
+        self.saved.append(
+            {
+                "document": document,
+                "chunks": list(chunks),
+                "embedding_model": embedding_model,
+                "embedding_dimension": embedding_dimension,
+            }
+        )
 
 
 class FakeChatService:
@@ -91,8 +114,10 @@ def teardown_function() -> None:
 
 def test_control_plane_rag_index_executes() -> None:
     indexer = build_test_indexer()
+    state_repository = FakeRAGStateRepository()
 
     app.dependency_overrides[get_rag_indexer] = lambda: indexer
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
 
     response = client.post(
         "/api/v1/rag/index",
@@ -112,6 +137,17 @@ def test_control_plane_rag_index_executes() -> None:
 
     assert payload["document_id"] == "doc-control-plane"
     assert payload["chunks_indexed"] == 1
+
+    assert len(state_repository.saved) == 1
+
+    saved = state_repository.saved[0]
+
+    assert saved["document"].id == "doc-control-plane"
+    assert saved["document"].metadata["source"] == "architecture.md"
+    assert len(saved["chunks"]) == 1
+    assert saved["chunks"][0].id == "doc-control-plane:chunk:0"
+    assert saved["embedding_model"]
+    assert saved["embedding_dimension"] == 2
 
 
 def test_control_plane_rag_index_rejects_empty_content() -> None:

@@ -15,8 +15,8 @@ from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.in_memory import InMemoryVectorStore
 
 from app.control_plane.persistence.database import get_db
+from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
-
 
 _llm_router = Router()
 
@@ -78,6 +78,12 @@ def get_rag_query_service() -> RAGQueryService:
 
 def get_rag_indexer() -> RAGIndexer:
     return _rag_indexer
+
+
+def get_rag_state_repository(
+    db: Session = Depends(get_db),
+) -> PostgreSQLRAGStateRepository:
+    return PostgreSQLRAGStateRepository(db)
 
 
 def get_usage_store(

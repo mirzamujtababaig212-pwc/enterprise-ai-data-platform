@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ai_platform.llm_gateway.config.settings import settings
+
 from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
+    get_rag_state_repository,
 )
 from app.control_plane.schemas.rag import (
     RAGIndexRequest,
@@ -16,6 +19,7 @@ from app.control_plane.schemas.rag import (
 from rag.indexing import RAGIndexer
 from rag.models import Document
 from rag.query import RAGQueryService
+from app.control_plane.rag_state_repository import RAGStateRepository
 
 router = APIRouter(
     prefix="/api/v1/rag",
@@ -30,6 +34,7 @@ router = APIRouter(
 async def index_document(
     request: RAGIndexRequest,
     indexer: RAGIndexer = Depends(get_rag_indexer),
+    state_repository: RAGStateRepository = Depends(get_rag_state_repository),
 ) -> RAGIndexResponse:
     try:
         document = Document(
@@ -39,6 +44,17 @@ async def index_document(
         )
 
         embedded_chunks = await indexer.index(document)
+
+        chunks = [embedded_chunk.chunk for embedded_chunk in embedded_chunks]
+
+        embedding_dimension = len(embedded_chunks[0].embedding) if embedded_chunks else None
+
+        state_repository.save_document(
+            document,
+            chunks,
+            embedding_model=settings.DEFAULT_EMBEDDING_MODEL,
+            embedding_dimension=embedding_dimension,
+        )
 
         return RAGIndexResponse(
             document_id=document.id,

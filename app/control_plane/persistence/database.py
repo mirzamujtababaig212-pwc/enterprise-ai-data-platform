@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ai_platform.llm_gateway.config.settings import settings
 
-
 DATABASE_URL = (
     "postgresql+psycopg2://"
     f"{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"

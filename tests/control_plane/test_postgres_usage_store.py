@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
+from unittest.mock import Mock
 from app.control_plane.persistence.models import Base
 from app.control_plane.usage.models import UsageEvent
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
@@ -145,3 +145,48 @@ def test_implements_usage_repository_contract(repository):
     contract: UsageRepository = repository
 
     assert contract is not None
+
+
+def test_record_commits_successfully(repository):
+    repository._session.commit = Mock()
+    repository._session.rollback = Mock()
+
+    event = make_event()
+
+    result = repository.record(event)
+
+    assert result == event
+    repository._session.commit.assert_called_once()
+    repository._session.rollback.assert_not_called()
+
+
+def test_record_rolls_back_when_commit_fails(repository):
+    repository._session.commit = Mock(side_effect=RuntimeError("database commit failed"))
+    repository._session.rollback = Mock()
+
+    event = make_event()
+
+    with pytest.raises(RuntimeError, match="database commit failed"):
+        repository.record(event)
+
+    repository._session.rollback.assert_called_once()
+
+
+def test_clear_commits_successfully(repository):
+    repository._session.commit = Mock()
+    repository._session.rollback = Mock()
+
+    repository.clear()
+
+    repository._session.commit.assert_called_once()
+    repository._session.rollback.assert_not_called()
+
+
+def test_clear_rolls_back_when_commit_fails(repository):
+    repository._session.commit = Mock(side_effect=RuntimeError("database commit failed"))
+    repository._session.rollback = Mock()
+
+    with pytest.raises(RuntimeError, match="database commit failed"):
+        repository.clear()
+
+    repository._session.rollback.assert_called_once()

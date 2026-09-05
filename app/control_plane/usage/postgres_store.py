@@ -26,8 +26,12 @@ class PostgreSQLUsageRepository:
             status=event.status,
         )
 
-        self._session.add(record)
-        self._session.commit()
+        try:
+            self._session.add(record)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
 
         return event
 
@@ -68,8 +72,12 @@ class PostgreSQLUsageRepository:
         return self._to_domain(record)
 
     def clear(self) -> None:
-        self._session.query(UsageEventRecord).delete()
-        self._session.commit()
+        try:
+            self._session.query(UsageEventRecord).delete()
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
 
     @staticmethod
     def _to_domain(record: UsageEventRecord) -> UsageEvent:

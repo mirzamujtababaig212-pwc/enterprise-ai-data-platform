@@ -24,7 +24,6 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderRateLimitError,
 )
 
-
 router = APIRouter(
     prefix="/api/v1/llm",
     tags=["llm"],
