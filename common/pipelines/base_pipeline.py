@@ -21,6 +21,7 @@ class BasePipeline(ABC):
         transformer,
         metrics=None,
         dlq=None,
+        config=None,
     ):
         self.spark = spark
         self.reader = reader
@@ -29,7 +30,7 @@ class BasePipeline(ABC):
         self.transformer = transformer
         self.metrics = metrics
         self.dlq = dlq
-        self.config = self.CONFIG
+        self.config = config if config is not None else self.CONFIG
 
     # ================================================================
     # PUBLIC EXECUTION METHODS

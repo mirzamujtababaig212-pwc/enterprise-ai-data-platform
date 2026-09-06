@@ -24,4 +24,5 @@ class PipelineFactory:
             validator=ValidatorFactory.create(config),
             metrics=MetricsFactory.create(config),
             dlq=DLQFactory.create(config),
+            config=pipeline_cls.CONFIG,
         )
