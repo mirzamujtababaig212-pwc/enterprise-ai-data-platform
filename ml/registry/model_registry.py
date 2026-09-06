@@ -327,6 +327,55 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         if validation_status != "PASSED":
             raise ValueError("Only validated model versions can become champion")
 
+        lineage = self.get_model_version_lineage(
+            model_name=model_name,
+            version=str(version),
+        )
+
+        expected_model_uri = f"models:/{model_name}/{version}"
+
+        if lineage.model_name != model_name:
+            raise ValueError(
+                f"Model version '{version}' has lineage model name "
+                f"'{lineage.model_name}', expected '{model_name}'"
+            )
+
+        if str(lineage.model_version) != str(version):
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage model version "
+                f"'{lineage.model_version}'"
+            )
+
+        if lineage.model_uri != expected_model_uri:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage model URI "
+                f"'{lineage.model_uri}', expected '{expected_model_uri}'"
+            )
+
+        source_run_id = target.tags.get("source_run_id")
+
+        if not source_run_id:
+            raise ValueError(f"Model '{model_name}' version '{version}' has no source run ID")
+
+        if lineage.source_run_id != source_run_id:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage source run ID "
+                f"'{lineage.source_run_id}', expected '{source_run_id}'"
+            )
+
+        expected_policy = get_evaluation_policy_for_model(model_name)
+
+        if lineage.evaluation_policy_name != expected_policy.name:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage evaluation policy "
+                f"'{lineage.evaluation_policy_name}', expected '{expected_policy.name}'"
+            )
+
+        self._verify_evaluation_quality_gate(
+            model_name=model_name,
+            run_id=lineage.source_run_id,
+        )
+
         current_champion = self._get_current_champion(model_name)
 
         # If the requested version is already champion,
