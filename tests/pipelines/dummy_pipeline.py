@@ -1,5 +1,5 @@
 from common.pipelines.base_pipeline import BasePipeline
-from common.pipelines.pipeline_config import PipelineConfig
+from common.pipelines.pipeline_runtime_config import PipelineRuntimeConfig
 
 
 class DummyConfig:
@@ -12,9 +12,8 @@ class DummyConfig:
 
 
 class DummyPipeline(BasePipeline):
-    CONFIG = PipelineConfig(
+    CONFIG = PipelineRuntimeConfig(
         pipeline_name="Dummy",
-        source="dummy",
         retries=3,
         retry_delay=0,
         enable_validation=True,

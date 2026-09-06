@@ -1,6 +1,17 @@
 from unittest.mock import Mock, patch
 
 from tests.pipelines.dummy_pipeline import DummyPipeline
+from common.pipelines.pipeline_runtime_config import PipelineRuntimeConfig
+
+
+TEST_CONFIG = PipelineRuntimeConfig(
+    pipeline_name="Dummy",
+    retries=3,
+    retry_delay=0,
+    enable_validation=True,
+    enable_metrics=True,
+    enable_dlq=True,
+)
 
 
 def test_pipeline_creation(
@@ -20,6 +31,7 @@ def test_pipeline_creation(
         transformer=mock_transformer,
         metrics=mock_metrics,
         dlq=mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
 
     assert pipeline.spark is spark
@@ -48,6 +60,7 @@ def test_run(
         transformer=mock_transformer,
         metrics=mock_metrics,
         dlq=mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     df = Mock()
     mock_reader.read.return_value = df
@@ -80,6 +93,7 @@ def test_validate(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     valid = Mock()
     invalid = Mock()
@@ -106,6 +120,7 @@ def test_collect_metrics(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     df = Mock()
     pipeline.collect_metrics("bronze", 1, df, None)
@@ -129,6 +144,7 @@ def test_handle_invalid_records(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     invalid = Mock()
     pipeline.handle_invalid_records(invalid)
@@ -152,6 +168,7 @@ def test_write_valid_records(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
 
     df = Mock()
@@ -181,6 +198,7 @@ def test_process_batch(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     batch = Mock()
     valid = Mock()
@@ -213,6 +231,7 @@ def test_retry(
         mock_transformer,
         mock_metrics,
         mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
     batch = Mock()
     valid = Mock()

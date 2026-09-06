@@ -1,16 +1,14 @@
 import time
 from abc import ABC
-from typing import ClassVar
 
 from common.logging.logger import get_logger
-from common.pipelines.pipeline_config import PipelineConfig
+from common.pipelines.pipeline_runtime_config import PipelineRuntimeConfig
+
 
 logger = get_logger(__name__)
 
 
 class BasePipeline(ABC):
-
-    CONFIG: ClassVar[PipelineConfig]
 
     def __init__(
         self,
@@ -21,7 +19,7 @@ class BasePipeline(ABC):
         transformer,
         metrics=None,
         dlq=None,
-        config=None,
+        config: PipelineRuntimeConfig | None = None,
     ):
         self.spark = spark
         self.reader = reader
@@ -30,7 +28,10 @@ class BasePipeline(ABC):
         self.transformer = transformer
         self.metrics = metrics
         self.dlq = dlq
-        self.config = config if config is not None else self.CONFIG
+        if config is None:
+            raise ValueError("PipelineRuntimeConfig is required.")
+
+        self.config = config
 
     # ================================================================
     # PUBLIC EXECUTION METHODS

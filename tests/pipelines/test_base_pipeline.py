@@ -22,6 +22,7 @@ def make_pipeline(
         transformer=mock_transformer,
         metrics=mock_metrics,
         dlq=mock_dlq,
+        config=DummyPipeline.CONFIG,
     )
 
 
