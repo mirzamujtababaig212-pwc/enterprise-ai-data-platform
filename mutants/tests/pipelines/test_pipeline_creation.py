@@ -3,6 +3,26 @@ from unittest.mock import Mock, patch
 from tests.pipelines.dummy_pipeline import DummyPipeline
 
 
+def make_pipeline(
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
+):
+    return DummyPipeline(
+        spark=spark,
+        reader=mock_reader,
+        validator=mock_validator,
+        writer=mock_writer,
+        transformer=mock_transformer,
+        metrics=mock_metrics,
+        dlq=mock_dlq,
+    )
+
+
 def test_pipeline_creation(
     spark,
     mock_reader,
@@ -12,14 +32,14 @@ def test_pipeline_creation(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
-        spark=spark,
-        reader=mock_reader,
-        validator=mock_validator,
-        writer=mock_writer,
-        transformer=mock_transformer,
-        metrics=mock_metrics,
-        dlq=mock_dlq,
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
     )
 
     assert pipeline.spark is spark
@@ -29,9 +49,10 @@ def test_pipeline_creation(
     assert pipeline.transformer is mock_transformer
     assert pipeline.metrics is mock_metrics
     assert pipeline.dlq is mock_dlq
+    assert pipeline.config is DummyPipeline.CONFIG
 
 
-def test_run(
+def test_run_stream(
     spark,
     mock_reader,
     mock_writer,
@@ -40,24 +61,32 @@ def test_run(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
-        spark=spark,
-        reader=mock_reader,
-        validator=mock_validator,
-        writer=mock_writer,
-        transformer=mock_transformer,
-        metrics=mock_metrics,
-        dlq=mock_dlq,
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
     )
+
     df = Mock()
-    transformed = Mock()
+    query = Mock()
+
     mock_reader.read.return_value = df
-    mock_transformer.transform.return_value = transformed
-    with patch.object(pipeline, "write_stream") as mock_write_stream:
-        pipeline.run()
-        mock_reader.read.assert_called_once()
-        mock_transformer.transform.assert_called_once_with(df)
-        mock_write_stream.assert_called_once_with(transformed)
+    mock_writer.write_stream.return_value = query
+
+    with patch.object(
+        pipeline,
+        "write_stream",
+        return_value=query,
+    ) as mock_write_stream:
+        pipeline.run(mode="stream")
+
+    mock_reader.read.assert_called_once_with(spark)
+    mock_write_stream.assert_called_once_with(df)
+    mock_transformer.transform.assert_not_called()
 
 
 def test_validate(
@@ -69,21 +98,30 @@ def test_validate(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
+    pipeline = make_pipeline(
         spark,
         mock_reader,
-        mock_validator,
         mock_writer,
+        mock_validator,
         mock_transformer,
         mock_metrics,
         mock_dlq,
     )
+
     valid = Mock()
     invalid = Mock()
-    mock_validator.validate.return_value = (valid, invalid)
-    v, i = pipeline.validate(Mock())
-    assert v is valid
-    assert i is invalid
+
+    mock_validator.validate.return_value = (
+        valid,
+        invalid,
+    )
+
+    result_valid, result_invalid = pipeline.validate(Mock())
+
+    assert result_valid is valid
+    assert result_invalid is invalid
+
+    mock_validator.validate.assert_called_once()
 
 
 def test_collect_metrics(
@@ -95,17 +133,25 @@ def test_collect_metrics(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
+    pipeline = make_pipeline(
         spark,
         mock_reader,
-        mock_validator,
         mock_writer,
+        mock_validator,
         mock_transformer,
         mock_metrics,
         mock_dlq,
     )
+
     df = Mock()
-    pipeline.collect_metrics("bronze", 1, df, None)
+
+    pipeline.collect_metrics(
+        "bronze",
+        1,
+        df,
+        None,
+    )
+
     mock_metrics.record_batch.assert_called_once()
 
 
@@ -118,41 +164,21 @@ def test_handle_invalid_records(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
+    pipeline = make_pipeline(
         spark,
         mock_reader,
-        mock_validator,
         mock_writer,
+        mock_validator,
         mock_transformer,
         mock_metrics,
         mock_dlq,
     )
+
     invalid = Mock()
+
     pipeline.handle_invalid_records(invalid)
+
     mock_dlq.write.assert_called_once_with(invalid)
-
-
-def test_write(
-    spark,
-    mock_reader,
-    mock_writer,
-    mock_validator,
-    mock_transformer,
-    mock_metrics,
-    mock_dlq,
-):
-    pipeline = DummyPipeline(
-        spark,
-        mock_reader,
-        mock_validator,
-        mock_writer,
-        mock_transformer,
-        mock_metrics,
-        mock_dlq,
-    )
-    df = Mock()
-    pipeline.write(df)
-    mock_writer.write_batch.assert_called_once_with(df)
 
 
 def test_process_batch(
@@ -164,30 +190,73 @@ def test_process_batch(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
+    pipeline = make_pipeline(
         spark,
         mock_reader,
-        mock_validator,
         mock_writer,
+        mock_validator,
         mock_transformer,
         mock_metrics,
         mock_dlq,
     )
+
     batch = Mock()
+    transformed = Mock()
     valid = Mock()
     invalid = Mock()
-    output = Mock()
-    mock_validator.validate.return_value = (valid, invalid)
-    mock_transformer.transform.return_value = output
-    pipeline.process_batch(batch, 10)
-    assert mock_validator.validate.call_count == 1
-    mock_validator.validate.assert_called_with(mock_transformer.transform.return_value)
-    assert mock_transformer.transform.call_count == 2
-    mock_transformer.transform.assert_any_call(batch)
-    mock_transformer.transform.assert_any_call(valid)
-    mock_writer.write.assert_called_once_with(output)
+
+    mock_transformer.transform.return_value = transformed
+    mock_validator.validate.return_value = (
+        valid,
+        invalid,
+    )
+
+    pipeline.process_batch(
+        batch,
+        10,
+    )
+
+    mock_transformer.transform.assert_called_once_with(batch)
+    mock_validator.validate.assert_called_once_with(transformed)
+    mock_writer.write.assert_called_once_with(valid)
     mock_dlq.write.assert_called_once_with(invalid)
     mock_metrics.record_batch.assert_called_once()
+
+
+def test_process_batch_does_not_write_none(
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
+):
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
+    )
+
+    batch = Mock()
+    transformed = Mock()
+
+    mock_transformer.transform.return_value = transformed
+    mock_validator.validate.return_value = (
+        None,
+        None,
+    )
+
+    pipeline.process_batch(
+        batch,
+        10,
+    )
+
+    mock_writer.write.assert_not_called()
 
 
 def test_retry(
@@ -199,21 +268,36 @@ def test_retry(
     mock_metrics,
     mock_dlq,
 ):
-    pipeline = DummyPipeline(
+    pipeline = make_pipeline(
         spark,
         mock_reader,
-        mock_validator,
         mock_writer,
+        mock_validator,
         mock_transformer,
         mock_metrics,
         mock_dlq,
     )
+
     batch = Mock()
     valid = Mock()
     invalid = Mock()
-    output = Mock()
-    mock_validator.validate.return_value = (valid, invalid)
-    mock_transformer.transform.return_value = output
-    mock_writer.write.side_effect = [RuntimeError("temporary"), None]
-    pipeline.process_batch(batch, 1)
+    transformed = Mock()
+
+    mock_validator.validate.return_value = (
+        valid,
+        invalid,
+    )
+
+    mock_transformer.transform.return_value = transformed
+
+    mock_writer.write.side_effect = [
+        RuntimeError("temporary"),
+        None,
+    ]
+
+    pipeline.process_batch(
+        batch,
+        1,
+    )
+
     assert mock_writer.write.call_count == 2
