@@ -9,13 +9,23 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 from ai_platform.mlflow.client import MLflowManager
-from ml.evaluation import ModelEvaluator
+from ml.evaluation import (
+    EvaluationQualityGate,
+    ModelEvaluator,
+    VEHICLE_RISK_POLICY,
+    EvaluationLineage,
+    persist_evaluation_lineage,
+    persist_quality_gate,
+)
 from ml.models.vehicle_risk import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
     MODEL_NAME,
     TARGET_COLUMN,
-    validate_feature_columns,
+    validate_feature_dataframe,
+)
+from ml.models.vehicle_risk_features import (
+    VEHICLE_RISK_FEATURE_CONTRACT,
 )
 
 from .schemas import (
@@ -115,6 +125,34 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
                 y_test=y_test,
             )
 
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                VEHICLE_RISK_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=VEHICLE_RISK_FEATURE_CONTRACT.name,
+                feature_contract_version=VEHICLE_RISK_FEATURE_CONTRACT.version,
+                evaluation_policy_name=VEHICLE_RISK_POLICY.name or "vehicle-risk-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
+                raise ValueError(
+                    "Vehicle risk model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
+
             metrics = {
                 "training_accuracy": training_accuracy,
                 **evaluation.as_dict(),
@@ -190,6 +228,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
                 "model_type": "RandomForestClassifier",
                 "target_column": TARGET_COLUMN,
             },
+            lineage=lineage.as_dict(),
         )
 
         return TrainingResult(
@@ -211,7 +250,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
         if dataframe.empty:
             raise ValueError("Training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
     @staticmethod
     def _create_bootstrap_labels(

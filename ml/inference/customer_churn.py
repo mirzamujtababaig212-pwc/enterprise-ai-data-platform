@@ -11,7 +11,7 @@ from opentelemetry import trace
 from ml.models.customer_churn import (
     FEATURE_COLUMNS,
     MODEL_NAME,
-    validate_feature_columns,
+    validate_feature_dataframe,
 )
 from ml.observability.metrics import (
     ML_INFERENCE_CLASSIFICATIONS_TOTAL,
@@ -210,7 +210,4 @@ class CustomerChurnPredictor(InferenceService[pd.DataFrame, CustomerChurnPredict
         if features.empty:
             raise ValueError("features must not be empty")
 
-        validate_feature_columns(list(features.columns))
-
-        if features[list(FEATURE_COLUMNS)].isnull().any().any():
-            raise ValueError("features must not contain null values")
+        validate_feature_dataframe(features)

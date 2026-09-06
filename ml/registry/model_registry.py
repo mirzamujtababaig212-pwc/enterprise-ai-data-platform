@@ -7,6 +7,8 @@ import os
 import mlflow
 from mlflow import MlflowClient
 from ml.platform import ModelRegistry
+from ml.evaluation import get_evaluation_policy_for_model
+from ml.registry.lineage import ModelVersionLineage
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,6 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         model_uri: str,
         model_name: str,
         run_id: str,
-        evaluation_passed: bool,
         metadata: Any | None = None,
     ) -> RegisteredModelResult:
         """
@@ -71,8 +72,29 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         They do not automatically become champion here.
         """
 
-        if not evaluation_passed:
-            raise ValueError("Model cannot be registered because evaluation failed")
+        self._verify_evaluation_quality_gate(
+            model_name=model_name,
+            run_id=run_id,
+        )
+
+        lineage_data = getattr(metadata, "lineage", None) or {}
+
+        required_lineage_fields = (
+            "dataset_name",
+            "dataset_version",
+            "feature_contract_name",
+            "feature_contract_version",
+            "evaluation_policy_name",
+        )
+
+        missing_lineage = [
+            field for field in required_lineage_fields if not lineage_data.get(field)
+        ]
+
+        if missing_lineage:
+            raise ValueError(
+                "Model metadata is missing required lineage fields: " + ", ".join(missing_lineage)
+            )
 
         model_version = mlflow.register_model(
             model_uri=model_uri,
@@ -80,6 +102,18 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         )
 
         version = str(model_version.version)
+
+        model_version_lineage = ModelVersionLineage(
+            model_name=model_name,
+            model_version=version,
+            source_run_id=run_id,
+            model_uri=f"models:/{model_name}/{version}",
+            dataset_name=lineage_data["dataset_name"],
+            dataset_version=lineage_data["dataset_version"],
+            feature_contract_name=lineage_data["feature_contract_name"],
+            feature_contract_version=lineage_data["feature_contract_version"],
+            evaluation_policy_name=lineage_data["evaluation_policy_name"],
+        )
 
         self._wait_for_model_version(
             model_name=model_name,
@@ -105,6 +139,26 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             key="source_run_id",
             value=run_id,
         )
+
+        lineage_tags = {
+            "lineage_model_name": model_version_lineage.model_name,
+            "lineage_model_version": model_version_lineage.model_version,
+            "lineage_source_run_id": model_version_lineage.source_run_id,
+            "lineage_model_uri": model_version_lineage.model_uri,
+            "lineage_dataset_name": model_version_lineage.dataset_name,
+            "lineage_dataset_version": model_version_lineage.dataset_version,
+            "lineage_feature_contract_name": model_version_lineage.feature_contract_name,
+            "lineage_feature_contract_version": model_version_lineage.feature_contract_version,
+            "lineage_evaluation_policy_name": model_version_lineage.evaluation_policy_name,
+        }
+
+        for key, value in lineage_tags.items():
+            self.client.set_model_version_tag(
+                name=model_name,
+                version=version,
+                key=key,
+                value=value,
+            )
 
         self.client.set_model_version_tag(
             name=model_name,
@@ -191,6 +245,56 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             alias="candidate",
         )
 
+    def _verify_evaluation_quality_gate(
+        self,
+        model_name: str,
+        run_id: str,
+    ) -> None:
+        """
+        Verify the persisted MLflow quality-gate decision for a model run.
+
+        The registry does not trust a caller-supplied evaluation result.
+        MLflow is the governance source of truth.
+        """
+
+        run = self.client.get_run(run_id)
+        tags = run.data.tags
+
+        quality_gate_passed = tags.get("quality_gate_passed")
+        quality_gate_policy = tags.get("quality_gate_policy")
+
+        if quality_gate_passed is None:
+            raise ValueError(f"Run '{run_id}' has no persisted quality-gate decision")
+
+        if quality_gate_passed not in {"true", "false"}:
+            raise ValueError(
+                f"Run '{run_id}' has invalid quality_gate_passed value: " f"{quality_gate_passed!r}"
+            )
+
+        if quality_gate_passed != "true":
+            errors = tags.get("quality_gate_errors", "")
+            message = (
+                f"Model '{model_name}' cannot be registered because "
+                f"evaluation quality gate failed"
+            )
+
+            if errors:
+                message += f": {errors}"
+
+            raise ValueError(message)
+
+        expected_policy = get_evaluation_policy_for_model(model_name)
+
+        if not quality_gate_policy:
+            raise ValueError(f"Run '{run_id}' has no persisted quality-gate policy")
+
+        if quality_gate_policy != expected_policy.name:
+            raise ValueError(
+                f"Run '{run_id}' used quality-gate policy "
+                f"'{quality_gate_policy}', but model '{model_name}' "
+                f"requires policy '{expected_policy.name}'"
+            )
+
     # ------------------------------------------------------------------
     # CHAMPION MANAGEMENT
     # ------------------------------------------------------------------
@@ -222,6 +326,55 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
 
         if validation_status != "PASSED":
             raise ValueError("Only validated model versions can become champion")
+
+        lineage = self.get_model_version_lineage(
+            model_name=model_name,
+            version=str(version),
+        )
+
+        expected_model_uri = f"models:/{model_name}/{version}"
+
+        if lineage.model_name != model_name:
+            raise ValueError(
+                f"Model version '{version}' has lineage model name "
+                f"'{lineage.model_name}', expected '{model_name}'"
+            )
+
+        if str(lineage.model_version) != str(version):
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage model version "
+                f"'{lineage.model_version}'"
+            )
+
+        if lineage.model_uri != expected_model_uri:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage model URI "
+                f"'{lineage.model_uri}', expected '{expected_model_uri}'"
+            )
+
+        source_run_id = target.tags.get("source_run_id")
+
+        if not source_run_id:
+            raise ValueError(f"Model '{model_name}' version '{version}' has no source run ID")
+
+        if lineage.source_run_id != source_run_id:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage source run ID "
+                f"'{lineage.source_run_id}', expected '{source_run_id}'"
+            )
+
+        expected_policy = get_evaluation_policy_for_model(model_name)
+
+        if lineage.evaluation_policy_name != expected_policy.name:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has lineage evaluation policy "
+                f"'{lineage.evaluation_policy_name}', expected '{expected_policy.name}'"
+            )
+
+        self._verify_evaluation_quality_gate(
+            model_name=model_name,
+            run_id=lineage.source_run_id,
+        )
 
         current_champion = self._get_current_champion(model_name)
 
@@ -386,6 +539,54 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         """
 
         return list(self.client.search_model_versions(filter_string=(f"name='{model_name}'")))
+
+    def get_model_version_lineage(
+        self,
+        model_name: str,
+        version: str,
+    ) -> ModelVersionLineage:
+        """
+        Return persisted lineage for a registered model version.
+        """
+
+        model_version = self.client.get_model_version(
+            name=model_name,
+            version=version,
+        )
+
+        tags = model_version.tags
+
+        required_tags = {
+            "lineage_model_name": "model name",
+            "lineage_model_version": "model version",
+            "lineage_source_run_id": "source run ID",
+            "lineage_model_uri": "model URI",
+            "lineage_dataset_name": "dataset name",
+            "lineage_dataset_version": "dataset version",
+            "lineage_feature_contract_name": "feature contract name",
+            "lineage_feature_contract_version": "feature contract version",
+            "lineage_evaluation_policy_name": "evaluation policy name",
+        }
+
+        missing = [description for key, description in required_tags.items() if not tags.get(key)]
+
+        if missing:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has incomplete lineage: "
+                + ", ".join(missing)
+            )
+
+        return ModelVersionLineage(
+            model_name=tags["lineage_model_name"],
+            model_version=tags["lineage_model_version"],
+            source_run_id=tags["lineage_source_run_id"],
+            model_uri=tags["lineage_model_uri"],
+            dataset_name=tags["lineage_dataset_name"],
+            dataset_version=tags["lineage_dataset_version"],
+            feature_contract_name=tags["lineage_feature_contract_name"],
+            feature_contract_version=tags["lineage_feature_contract_version"],
+            evaluation_policy_name=tags["lineage_evaluation_policy_name"],
+        )
 
     # ------------------------------------------------------------------
     # RECONCILIATION

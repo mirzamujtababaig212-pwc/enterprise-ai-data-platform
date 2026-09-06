@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ml.evaluation import (
+    EvaluationQualityGate,
+    EvaluationResult,
+    VEHICLE_RISK_POLICY,
+)
 from ml.models.vehicle_risk import MODEL_NAME
 from ml.registry import ModelRegistryManager
 from ml.training import (
@@ -206,26 +211,30 @@ def main() -> None:
 
     metrics = training_result.metrics
 
-    validation_f1 = metrics.get(
-        "validation_f1",
-        0.0,
+    evaluation = EvaluationResult(
+        accuracy=metrics.get("validation_accuracy", 0.0),
+        precision=metrics.get("validation_precision", 0.0),
+        recall=metrics.get("validation_recall", 0.0),
+        f1=metrics.get("validation_f1", 0.0),
+        roc_auc=metrics.get("validation_roc_auc"),
     )
 
-    validation_roc_auc = metrics.get(
-        "validation_roc_auc",
-        0.0,
-    )
+    policy = VEHICLE_RISK_POLICY
 
-    evaluation_passed = validation_f1 >= 0.80 and validation_roc_auc >= 0.80
+    quality_gate = EvaluationQualityGate.evaluate(
+        result=evaluation,
+        policy=policy,
+    )
 
     print()
-    print(
-        "EVALUATION PASSED:",
-        evaluation_passed,
-    )
+    print("EVALUATION PASSED:", quality_gate.passed)
 
-    if not evaluation_passed:
-        raise RuntimeError("Model failed evaluation gates; " "registration aborted.")
+    if not quality_gate.passed:
+        print("QUALITY GATE FAILURES:")
+        for error in quality_gate.errors:
+            print("-", error)
+
+        raise RuntimeError("Model failed evaluation quality gates; registration aborted.")
 
     registry = ModelRegistryManager()
 
@@ -233,7 +242,6 @@ def main() -> None:
         model_uri=training_result.model_uri,
         model_name=MODEL_NAME,
         run_id=training_result.run_id,
-        evaluation_passed=True,
     )
 
     print()

@@ -22,6 +22,12 @@ class TrainingConfig:
 
     random_state: int = 42
 
+    dataset_name: str = "unspecified"
+
+    dataset_version: str = "unspecified"
+
+    enforce_quality_gate: bool = True
+
     def __post_init__(self) -> None:
         if not self.experiment_name.strip():
             raise ValueError("experiment_name must not be empty")
@@ -31,6 +37,12 @@ class TrainingConfig:
 
         if not 0.0 < self.test_size < 1.0:
             raise ValueError("test_size must be between 0 and 1")
+
+        if not self.dataset_name.strip():
+            raise ValueError("dataset_name must not be empty")
+
+        if not self.dataset_version.strip():
+            raise ValueError("dataset_version must not be empty")
 
 
 @dataclass(frozen=True)

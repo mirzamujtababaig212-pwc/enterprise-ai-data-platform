@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from ml.platform import FeatureContract, FeatureDefinition
+
+VEHICLE_RISK_FEATURE_CONTRACT = FeatureContract(
+    name="vehicle-risk",
+    version="v1",
+    features=(
+        FeatureDefinition(
+            name="event_count",
+            dtype="int",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="avg_speed",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="max_speed",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="speed_stddev",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="avg_rpm",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="max_rpm",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="avg_fuel_level",
+            dtype="float",
+            min_value=0,
+            max_value=100,
+        ),
+        FeatureDefinition(
+            name="min_fuel_level",
+            dtype="float",
+            min_value=0,
+            max_value=100,
+        ),
+        FeatureDefinition(
+            name="avg_battery",
+            dtype="float",
+            min_value=0,
+        ),
+        FeatureDefinition(
+            name="avg_engine_temperature",
+            dtype="float",
+        ),
+        FeatureDefinition(
+            name="max_engine_temperature",
+            dtype="float",
+        ),
+    ),
+)

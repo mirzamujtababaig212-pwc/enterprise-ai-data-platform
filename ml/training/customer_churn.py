@@ -8,13 +8,23 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
-from ml.evaluation.evaluator import ModelEvaluator
+from ml.evaluation import (
+    CUSTOMER_CHURN_POLICY,
+    EvaluationQualityGate,
+    ModelEvaluator,
+    EvaluationLineage,
+    persist_evaluation_lineage,
+    persist_quality_gate,
+)
 from ml.models.customer_churn import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
     MODEL_NAME,
     TARGET_COLUMN,
-    validate_feature_columns,
+    validate_feature_dataframe,
+)
+from ml.models.customer_churn_features import (
+    CUSTOMER_CHURN_FEATURE_CONTRACT,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -33,7 +43,7 @@ class CustomerChurnTrainer(
         if dataframe is None or dataframe.empty:
             raise ValueError("Customer churn training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
         config = config or TrainingConfig()
 
@@ -71,23 +81,47 @@ class CustomerChurnTrainer(
             **config.model_params,
         }
 
-        model = LogisticRegression(**model_params)
-        model.fit(X_train, y_train)
-
-        evaluation = ModelEvaluator.evaluate(
-            model,
-            X_test,
-            y_test,
-        )
-
-        metrics = evaluation.as_dict()
-
         mlflow.set_experiment(config.experiment_name)
 
         with mlflow.start_run(run_name=config.run_name) as run:
-            mlflow.log_params(model_params)
+            model = LogisticRegression(**model_params)
+            model.fit(X_train, y_train)
 
-            mlflow.log_metrics(metrics)
+            evaluation = ModelEvaluator.evaluate(
+                model,
+                X_test,
+                y_test,
+            )
+
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                CUSTOMER_CHURN_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=CUSTOMER_CHURN_FEATURE_CONTRACT.name,
+                feature_contract_version=CUSTOMER_CHURN_FEATURE_CONTRACT.version,
+                evaluation_policy_name=CUSTOMER_CHURN_POLICY.name or "customer-churn-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
+                raise ValueError(
+                    "Customer churn model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
+
+            metrics = evaluation.as_dict()
 
             mlflow.log_metrics(
                 {
@@ -133,6 +167,7 @@ class CustomerChurnTrainer(
                     "target_column": TARGET_COLUMN,
                     "evaluation_type": "holdout",
                 },
+                lineage=lineage.as_dict(),
             )
 
             return TrainingResult(

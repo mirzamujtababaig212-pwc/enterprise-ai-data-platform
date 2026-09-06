@@ -10,6 +10,7 @@ from opentelemetry import trace
 from ml.models.vehicle_risk import (
     FEATURE_COLUMNS,
     MODEL_NAME,
+    validate_feature_dataframe,
 )
 from ml.observability.metrics import (
     ML_INFERENCE_DURATION_SECONDS,
@@ -286,14 +287,4 @@ class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]
 
             raise ValueError("Inference features must not be empty")
 
-        missing = [column for column in FEATURE_COLUMNS if column not in features.columns]
-
-        if missing:
-
-            raise ValueError("Missing required inference features: " + ", ".join(missing))
-
-        selected = features[list(FEATURE_COLUMNS)]
-
-        if selected.isnull().any().any():
-
-            raise ValueError("Inference features must not contain null values")
+        validate_feature_dataframe(features)

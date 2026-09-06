@@ -11,7 +11,14 @@ from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ml.evaluation.evaluator import ModelEvaluator
+from ml.evaluation import (
+    EvaluationQualityGate,
+    LOAN_DEFAULT_POLICY,
+    ModelEvaluator,
+    EvaluationLineage,
+    persist_evaluation_lineage,
+    persist_quality_gate,
+)
 from ml.models.loan_default import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
@@ -19,7 +26,10 @@ from ml.models.loan_default import (
     TARGET_COLUMN,
     LoanDefaultEvaluationAdapter,
     LoanDefaultMLP,
-    validate_feature_columns,
+    validate_feature_dataframe,
+)
+from ml.models.loan_default_features import (
+    LOAN_DEFAULT_FEATURE_CONTRACT,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -39,7 +49,7 @@ class LoanDefaultTrainer(
         if dataframe is None or dataframe.empty:
             raise ValueError("Loan default training dataframe must not be empty")
 
-        validate_feature_columns(list(dataframe.columns))
+        validate_feature_dataframe(dataframe)
 
         config = config or TrainingConfig()
 
@@ -184,6 +194,34 @@ class LoanDefaultTrainer(
 
             mlflow.log_metrics(metrics)
 
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                LOAN_DEFAULT_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=LOAN_DEFAULT_FEATURE_CONTRACT.name,
+                feature_contract_version=LOAN_DEFAULT_FEATURE_CONTRACT.version,
+                evaluation_policy_name=LOAN_DEFAULT_POLICY.name or "loan-default-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
+                raise ValueError(
+                    "Loan default model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
+
             mlflow.log_metrics(
                 {
                     "feature_count": float(len(FEATURE_COLUMNS)),
@@ -231,6 +269,7 @@ class LoanDefaultTrainer(
                     "evaluation_type": "holdout",
                     "preprocessing": "standardization",
                 },
+                lineage=lineage.as_dict(),
             )
 
             return TrainingResult(

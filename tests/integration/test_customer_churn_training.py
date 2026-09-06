@@ -33,6 +33,7 @@ def test_customer_churn_training_returns_metadata() -> None:
         TrainingConfig(
             experiment_name="customer-churn-test",
             run_name="customer-churn-training-test",
+            enforce_quality_gate=False,
         ),
     )
 
@@ -61,6 +62,7 @@ def test_customer_churn_training_supports_model_parameters() -> None:
                 "C": 0.5,
                 "max_iter": 500,
             },
+            enforce_quality_gate=False,
         ),
     )
 

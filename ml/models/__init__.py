@@ -21,6 +21,10 @@ from .vehicle_risk import (
     TARGET_COLUMN,
     validate_feature_columns,
 )
+from .customer_churn_features import CUSTOMER_CHURN_FEATURE_CONTRACT
+from .loan_default_features import LOAN_DEFAULT_FEATURE_CONTRACT
+from .vehicle_risk_features import VEHICLE_RISK_FEATURE_CONTRACT
+
 
 __all__ = [
     "DEFAULT_MODEL_PARAMS",
@@ -40,4 +44,7 @@ __all__ = [
     "LoanDefaultEvaluationAdapter",
     "LoanDefaultMLP",
     "validate_loan_default_feature_columns",
+    "CUSTOMER_CHURN_FEATURE_CONTRACT",
+    "LOAN_DEFAULT_FEATURE_CONTRACT",
+    "VEHICLE_RISK_FEATURE_CONTRACT",
 ]

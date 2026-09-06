@@ -103,7 +103,7 @@ def test_model_registry_supports_framework_agnostic_version_output() -> None:
             model_uri,
             model_name,
             run_id,
-            evaluation_passed,
+            metadata=None,
         ):
             return {
                 "model_name": model_name,

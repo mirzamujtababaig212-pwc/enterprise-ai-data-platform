@@ -18,9 +18,8 @@ def _loan_default_dataframe() -> pd.DataFrame:
                 "loan_amount": 10000.0 + (index % 12) * 5000.0,
                 "employment_years": 1 + (index % 15),
                 "debt_to_income": 0.20 + (index % 8) * 0.05,
-                "default": int(index % 4 == 0 or index % 7 == 0),
             }
-            for index in range(60)
+            for index in range(500)
         ]
     )
 
@@ -32,12 +31,11 @@ def test_loan_default_registration_and_promotion() -> None:
             experiment_name="loan-default-registry-tests",
             run_name="loan-default-registry-test",
             model_params={
-                "epochs": 5,
-                "batch_size": 16,
                 "random_state": 42,
             },
             test_size=0.3,
             random_state=42,
+            enforce_quality_gate=False,
         ),
     )
 
@@ -49,7 +47,6 @@ def test_loan_default_registration_and_promotion() -> None:
         model_uri=training_result.model_uri,
         model_name="LoanDefaultModel",
         run_id=training_result.run_id,
-        evaluation_passed=True,
         metadata=training_result.metadata,
     )
 
