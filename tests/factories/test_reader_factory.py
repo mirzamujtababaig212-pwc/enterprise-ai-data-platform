@@ -3,6 +3,7 @@ from common.readers.csv_reader import CSVReader
 from common.readers.delta_reader import DeltaReader
 from common.readers.kafka_reader import KafkaReader
 from common.readers.parquet_reader import ParquetReader
+from common.registry.reader_registry import READER_REGISTRY
 
 
 def test_create_kafka():
@@ -35,3 +36,9 @@ def test_invalid_reader():
 
     with pytest.raises(ValueError):
         ReaderFactory.create(config)
+
+
+def test_factory_uses_canonical_reader_registry():
+    import common.factories.reader_factory as reader_factory
+
+    assert reader_factory.READER_REGISTRY is READER_REGISTRY
