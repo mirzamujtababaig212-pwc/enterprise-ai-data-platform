@@ -15,6 +15,6 @@ class ReaderFactory:
 
         reader_cls = READER_REGISTRY[reader_type]
 
-        kwargs = {key: value for key, value in reader_cfg.items() if key not in {"type", "table"}}
+        kwargs = {key: value for key, value in reader_cfg.items() if key != "type"}
 
         return reader_cls(**kwargs)
