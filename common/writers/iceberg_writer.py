@@ -1,4 +1,5 @@
 from common.writers.base_writer import BaseWriter
+from common.writers.streaming import apply_stream_options
 
 
 class IcebergWriter(BaseWriter):
@@ -17,7 +18,17 @@ class IcebergWriter(BaseWriter):
         query_name=None,
         trigger=None,
     ):
-        return df.writeStream.foreachBatch(foreach_batch).start()
+        writer = df.writeStream.foreachBatch(foreach_batch)
+
+        writer = apply_stream_options(
+            writer=writer,
+            checkpoint=checkpoint,
+            output_mode=output_mode,
+            query_name=query_name,
+            trigger=trigger,
+        )
+
+        return writer.start()
 
     def write(self, df):
         self.write_batch(df)

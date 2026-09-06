@@ -1,4 +1,5 @@
 from common.writers.base_writer import BaseWriter
+from common.writers.streaming import apply_stream_options
 
 
 class ConsoleWriter(BaseWriter):
@@ -14,13 +15,17 @@ class ConsoleWriter(BaseWriter):
         query_name=None,
         trigger=None,
     ):
-        return (
-            df.writeStream.outputMode("append")
-            .format("console")
-            .option("truncate", False)
-            .option("numRows", 20)
-            .start()
+        writer = df.writeStream.format("console").option("truncate", False).option("numRows", 20)
+
+        writer = apply_stream_options(
+            writer=writer,
+            checkpoint=checkpoint,
+            output_mode=output_mode or "append",
+            query_name=query_name,
+            trigger=trigger,
         )
+
+        return writer.start()
 
     def write(self, df):
         self.write_batch(df)

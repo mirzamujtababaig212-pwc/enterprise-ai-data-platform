@@ -38,9 +38,7 @@ class FabricWriter(BaseWriter):
         effective_checkpoint = checkpoint or self.checkpoint
         effective_output_mode = output_mode or self.output_mode or "append"
 
-        writer = df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).outputMode(
-            effective_output_mode
-        )
+        writer = df.writeStream.foreachBatch(foreach_batch).outputMode(effective_output_mode)
 
         if effective_checkpoint:
             writer = writer.option(
