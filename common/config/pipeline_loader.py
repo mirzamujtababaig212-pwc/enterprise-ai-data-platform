@@ -55,28 +55,45 @@ class PipelineLoader:
         Load the typed runtime configuration for a pipeline.
 
         Runtime configuration is derived from the canonical pipeline YAML.
-        Fields not yet represented in YAML use PipelineRuntimeConfig defaults.
+        Fields not explicitly configured use PipelineRuntimeConfig defaults.
         """
 
         config = PipelineLoader.load(name)
 
         pipeline = config.get("pipeline", {})
-        writer = config.get("writer", {})
+        runtime = config.get("runtime", {})
 
         if not isinstance(pipeline, dict):
             raise ValueError("Pipeline configuration 'pipeline' must be a mapping.")
 
-        if not isinstance(writer, dict):
-            raise ValueError("Pipeline configuration 'writer' must be a mapping.")
+        if not isinstance(runtime, dict):
+            raise ValueError("Pipeline configuration 'runtime' must be a mapping.")
 
         pipeline_name = pipeline.get("class")
+
         if not pipeline_name:
             raise ValueError("Pipeline configuration requires 'pipeline.class'.")
 
         return PipelineRuntimeConfig(
             pipeline_name=pipeline_name,
-            checkpoint=writer.get("checkpoint", ""),
-            output_mode=writer.get("output_mode", "append"),
+            checkpoint=runtime.get("checkpoint", ""),
+            output_mode=runtime.get("output_mode", "append"),
+            query_name=runtime.get("query_name"),
+            trigger=runtime.get("trigger"),
+            retries=runtime.get("retries", 3),
+            retry_delay=runtime.get("retry_delay", 2),
+            enable_validation=runtime.get(
+                "enable_validation",
+                True,
+            ),
+            enable_metrics=runtime.get(
+                "enable_metrics",
+                True,
+            ),
+            enable_dlq=runtime.get(
+                "enable_dlq",
+                True,
+            ),
         )
 
     @staticmethod

@@ -9,9 +9,16 @@ writer:
   type: delta
   table: SILVER_TABLE
   path: SILVER_PATH
-  checkpoint: SILVER_CHECKPOINT
   mode: append
+
+runtime:
+  checkpoint: SILVER_CHECKPOINT
   output_mode: append
+  retries: 3
+  retry_delay: 2
+  enable_validation: true
+  enable_metrics: true
+  enable_dlq: true
 
 transformer:
   type: silver

@@ -11,7 +11,14 @@ writer:
   table: GOLD_TABLE
   path: GOLD_PATH
   mode: overwrite
+
+runtime:
   output_mode: append
+  retries: 3
+  retry_delay: 2
+  enable_validation: false
+  enable_metrics: true
+  enable_dlq: false
 
 transformer:
   type: gold

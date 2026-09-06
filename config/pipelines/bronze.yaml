@@ -9,9 +9,16 @@ writer:
   type: delta
   table: BRONZE_TABLE
   path: BRONZE_PATH
-  checkpoint: BRONZE_CHECKPOINT
   mode: append
+
+runtime:
+  checkpoint: BRONZE_CHECKPOINT
   output_mode: append
+  retries: 3
+  retry_delay: 2
+  enable_validation: true
+  enable_metrics: true
+  enable_dlq: true
 
 transformer:
   type: bronze
