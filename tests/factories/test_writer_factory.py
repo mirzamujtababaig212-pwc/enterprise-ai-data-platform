@@ -85,7 +85,7 @@ def test_invalid_writer():
         }
     }
 
-    with pytest.raises(ValueError, match="Unknown writer"):
+    with pytest.raises(ValueError, match="Unsupported writer type"):
         WriterFactory.create(config)
 
 

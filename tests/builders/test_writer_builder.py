@@ -18,10 +18,7 @@ def test_build_delta():
         }
     }
 
-    writer = WriterBuilder.build(
-        DeltaWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -41,10 +38,7 @@ def test_build_delta_with_explicit_values():
         }
     }
 
-    writer = WriterBuilder.build(
-        DeltaWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -69,10 +63,7 @@ def test_build_fabric():
         }
     }
 
-    writer = WriterBuilder.build(
-        FabricWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -93,10 +84,7 @@ def test_build_parquet():
         }
     }
 
-    writer = WriterBuilder.build(
-        ParquetWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -118,10 +106,7 @@ def test_build_postgres():
         }
     }
 
-    writer = WriterBuilder.build(
-        PostgresWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -147,10 +132,7 @@ def test_build_snowflake():
         }
     }
 
-    writer = WriterBuilder.build(
-        SnowflakeWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -170,10 +152,7 @@ def test_build_s3():
         }
     }
 
-    writer = WriterBuilder.build(
-        S3Writer,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -191,10 +170,7 @@ def test_build_iceberg():
         }
     }
 
-    writer = WriterBuilder.build(
-        IcebergWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -211,10 +187,7 @@ def test_build_console():
         }
     }
 
-    writer = WriterBuilder.build(
-        ConsoleWriter,
-        config,
-    )
+    writer = WriterBuilder.build(config)
 
     assert isinstance(
         writer,
@@ -227,10 +200,7 @@ def test_empty_config():
         ValueError,
         match="cannot be empty",
     ):
-        WriterBuilder.build(
-            ConsoleWriter,
-            {},
-        )
+        WriterBuilder.build({})
 
 
 def test_missing_writer_type():
@@ -240,27 +210,19 @@ def test_missing_writer_type():
         ValueError,
         match="Writer type is required",
     ):
-        WriterBuilder.build(
-            ConsoleWriter,
-            config,
-        )
+        WriterBuilder.build(config)
 
 
-def test_missing_writer_class():
+def test_build_resolves_writer_class_from_registry():
     config = {
         "writer": {
-            "type": "delta",
+            "type": "console",
         }
     }
 
-    with pytest.raises(
-        ValueError,
-        match="Writer class is required",
-    ):
-        WriterBuilder.build(
-            None,
-            config,
-        )
+    writer = WriterBuilder.build(config)
+
+    assert isinstance(writer, ConsoleWriter)
 
 
 def test_invalid_writer_type():
@@ -274,7 +236,4 @@ def test_invalid_writer_type():
         ValueError,
         match="Unsupported writer type",
     ):
-        WriterBuilder.build(
-            ConsoleWriter,
-            config,
-        )
+        WriterBuilder.build(config)

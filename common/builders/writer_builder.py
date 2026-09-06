@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from common.config.settings import Settings
+from common.registry.writer_registry import WRITER_REGISTRY
 
 
 class WriterBuilder:
@@ -41,7 +42,7 @@ class WriterBuilder:
         return value
 
     @staticmethod
-    def build(writer_cls, config):
+    def build(config):
         """
         Construct a writer using the canonical writer configuration.
 
@@ -75,8 +76,10 @@ class WriterBuilder:
 
         writer_type = str(writer_type).lower().strip()
 
-        if writer_cls is None:
-            raise ValueError(f"Writer class is required for writer type: {writer_type}")
+        if writer_type not in WRITER_REGISTRY:
+            raise ValueError(f"Unsupported writer type: {writer_type}")
+
+        writer_cls = WRITER_REGISTRY[writer_type]
 
         # ==========================================================
         # DELTA
