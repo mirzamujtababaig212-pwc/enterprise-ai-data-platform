@@ -23,12 +23,15 @@ class SparkReader:
 
     @staticmethod
     def read_postgres(spark, table):
-        return PostgresReader.read_table(spark, table)
+        reader = PostgresReader(table)
+        return reader.read(spark)
 
     @staticmethod
     def read_snowflake(spark, table):
-        return SnowflakeReader.read_table(spark, table)
+        reader = SnowflakeReader(table)
+        return reader.read(spark)
 
     @staticmethod
     def read_fabric(spark, table):
-        return FabricReader.read_table(spark, table)
+        reader = FabricReader(table)
+        return reader.read(spark)

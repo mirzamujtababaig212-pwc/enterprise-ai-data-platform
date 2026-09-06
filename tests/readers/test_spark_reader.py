@@ -78,17 +78,16 @@ def test_read_postgres(mock_reader):
 
     spark = MagicMock()
 
-    mock_reader.read_table.return_value = "df"
+    reader_instance = mock_reader.return_value
+    reader_instance.read.return_value = "df"
 
     result = SparkReader.read_postgres(
         spark,
         "employees",
     )
 
-    mock_reader.read_table.assert_called_once_with(
-        spark,
-        "employees",
-    )
+    mock_reader.assert_called_once_with("employees")
+    reader_instance.read.assert_called_once_with(spark)
 
     assert result == "df"
 
@@ -98,17 +97,16 @@ def test_read_snowflake(mock_reader):
 
     spark = MagicMock()
 
-    mock_reader.read_table.return_value = "df"
+    reader_instance = mock_reader.return_value
+    reader_instance.read.return_value = "df"
 
     result = SparkReader.read_snowflake(
         spark,
         "vehicles",
     )
 
-    mock_reader.read_table.assert_called_once_with(
-        spark,
-        "vehicles",
-    )
+    mock_reader.assert_called_once_with("vehicles")
+    reader_instance.read.assert_called_once_with(spark)
 
     assert result == "df"
 
@@ -118,16 +116,15 @@ def test_read_fabric(mock_reader):
 
     spark = MagicMock()
 
-    mock_reader.read_table.return_value = "df"
+    reader_instance = mock_reader.return_value
+    reader_instance.read.return_value = "df"
 
     result = SparkReader.read_fabric(
         spark,
         "sales",
     )
 
-    mock_reader.read_table.assert_called_once_with(
-        spark,
-        "sales",
-    )
+    mock_reader.assert_called_once_with("sales")
+    reader_instance.read.assert_called_once_with(spark)
 
     assert result == "df"
