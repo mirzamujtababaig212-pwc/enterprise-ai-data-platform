@@ -46,13 +46,39 @@ class DeltaWriter(BaseWriter):
 
         self.table = table.strip()
 
-        self.path = Path(path).resolve() if path else self._resolve_default_path(self.table)
+        self.path = self._normalize_path(path) if path else self._resolve_default_path(self.table)
 
         self.mode = mode
 
-        self.checkpoint = Path(checkpoint).resolve() if checkpoint else None
+        self.checkpoint = self._normalize_path(checkpoint) if checkpoint else None
 
         self.output_mode = output_mode
+
+    # ==============================================================
+    # PATH NORMALIZATION
+    # ==============================================================
+
+    @staticmethod
+    def _is_cloud_uri(value: str) -> bool:
+        value = str(value)
+        return "://" in value or value.startswith("dbfs:/")
+
+    @classmethod
+    def _normalize_path(cls, value: str):
+        value = str(value)
+
+        if cls._is_cloud_uri(value):
+            return value
+
+        return Path(value).resolve()
+
+    @staticmethod
+    def _ensure_local_parent(path) -> None:
+        if isinstance(path, Path):
+            path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
     # ==============================================================
     # DEFAULT PATH RESOLUTION
@@ -84,7 +110,7 @@ class DeltaWriter(BaseWriter):
                 "Provide path= explicitly."
             )
 
-        return Path(mapping[table]).resolve()
+        return DeltaWriter._normalize_path(mapping[table])
 
     # ==============================================================
     # BATCH
@@ -100,10 +126,7 @@ class DeltaWriter(BaseWriter):
 
         start = time.time()
 
-        self.path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        self._ensure_local_parent(self.path)
 
         logger.info(
             "Writing Delta table=%s",
@@ -165,17 +188,10 @@ class DeltaWriter(BaseWriter):
 
         effective_output_mode = output_mode or self.output_mode or "append"
 
-        checkpoint_path = Path(effective_checkpoint).resolve()
+        checkpoint_path = self._normalize_path(effective_checkpoint)
 
-        checkpoint_path.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        self.path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        self._ensure_local_parent(checkpoint_path)
+        self._ensure_local_parent(self.path)
 
         logger.info("Starting streaming Delta write")
 

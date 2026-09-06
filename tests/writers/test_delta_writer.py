@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -165,3 +166,65 @@ def test_empty_table():
             table="",
             path="/tmp/delta",
         )
+
+
+@pytest.mark.parametrize(
+    "cloud_path",
+    [
+        "s3://bucket/delta/bronze",
+        "abfss://container@account.dfs.core.windows.net/delta/bronze",
+        "dbfs:/mnt/delta/bronze",
+    ],
+)
+def test_cloud_paths_are_preserved(cloud_path):
+    writer = DeltaWriter(
+        table="bronze",
+        path=cloud_path,
+        checkpoint=cloud_path + "/_checkpoint",
+    )
+
+    assert writer.path == cloud_path
+    assert writer.checkpoint == cloud_path + "/_checkpoint"
+
+
+def test_local_paths_are_resolved():
+    writer = DeltaWriter(
+        table="bronze",
+        path="./tmp/delta",
+        checkpoint="./tmp/checkpoint",
+    )
+
+    assert writer.path == Path("./tmp/delta").resolve()
+    assert writer.checkpoint == Path("./tmp/checkpoint").resolve()
+
+
+@patch("common.writers.delta_writer.Path.mkdir")
+def test_cloud_stream_paths_do_not_create_local_directories(mock_mkdir):
+    cloud_path = "s3://bucket/delta/bronze"
+    checkpoint = "s3://bucket/checkpoints/bronze"
+
+    writer = DeltaWriter(
+        table="bronze",
+        path=cloud_path,
+        checkpoint=checkpoint,
+    )
+
+    df = Mock()
+
+    stream = df.writeStream
+    stream.outputMode.return_value = stream
+    stream.option.return_value = stream
+    stream.foreachBatch.return_value = stream
+    stream.start.return_value = Mock()
+
+    writer.write_stream(
+        df,
+        Mock(),
+    )
+
+    mock_mkdir.assert_not_called()
+
+    stream.option.assert_called_once_with(
+        "checkpointLocation",
+        checkpoint,
+    )
