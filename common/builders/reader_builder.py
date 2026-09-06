@@ -1,4 +1,5 @@
 from common.config.settings import Settings
+from common.registry.reader_registry import READER_REGISTRY
 from spark.schemas.bronze_schema import bronze_schema
 from spark.schemas.silver_schema import silver_schema
 
@@ -31,7 +32,7 @@ class ReaderBuilder:
         return value
 
     @staticmethod
-    def build(reader_cls, config):
+    def build(config):
 
         if not config:
             raise ValueError("Reader configuration cannot be empty.")
@@ -48,6 +49,11 @@ class ReaderBuilder:
 
         reader_type = reader_type.lower()
 
+        if reader_type not in READER_REGISTRY:
+            raise ValueError(f"Unsupported reader type: {reader_type}")
+
+        reader_cls = READER_REGISTRY[reader_type]
+
         # ----------------------------------------------------------
         # Kafka
         # ----------------------------------------------------------
@@ -55,6 +61,25 @@ class ReaderBuilder:
         if reader_type == "kafka":
 
             return reader_cls(Settings.kafka.options)
+
+        # ----------------------------------------------------------
+        # Table readers
+        # ----------------------------------------------------------
+
+        if reader_type in {
+            "postgres",
+            "snowflake",
+            "fabric",
+        }:
+
+            table = cfg.get("table")
+
+            if not table:
+                raise ValueError(f"Table is required for reader type: {reader_type}")
+
+            table = ReaderBuilder._resolve_storage_value(table)
+
+            return reader_cls(table=table)
 
         # ----------------------------------------------------------
         # File / Delta readers
@@ -78,7 +103,9 @@ class ReaderBuilder:
 
                 path = defaults[reader_type]
 
-            kwargs = {"path": path}
+            kwargs = {
+                "path": path,
+            }
 
             schema_name = cfg.get("schema")
 
@@ -94,6 +121,11 @@ class ReaderBuilder:
             if cfg.get("table"):
 
                 kwargs["table"] = ReaderBuilder._resolve_storage_value(cfg["table"])
+
+            # CSV supports an optional header setting.
+            if reader_type == "csv" and "header" in cfg:
+
+                kwargs["header"] = cfg["header"]
 
             return reader_cls(**kwargs)
 
