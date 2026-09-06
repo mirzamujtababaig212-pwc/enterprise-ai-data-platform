@@ -19,7 +19,15 @@ class S3Writer(BaseWriter):
 
         logger.info("Write Duration=%.2f sec", duration)
 
-    def write_stream(self, df, foreach_batch):
+    def write_stream(
+        self,
+        df,
+        foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
+    ):
         return df.writeStream.foreachBatch(foreach_batch).start()
 
     def write(self, df):

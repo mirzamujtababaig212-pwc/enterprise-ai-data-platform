@@ -50,6 +50,10 @@ class PostgresWriter(BaseWriter):
         self,
         df,
         foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
     ):
 
         return (

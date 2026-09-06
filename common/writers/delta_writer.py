@@ -5,11 +5,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from common.logging.logger import get_logger
+from common.writers.base_writer import BaseWriter
 
 logger = get_logger(__name__)
 
 
-class DeltaWriter:
+class DeltaWriter(BaseWriter):
     """
     Canonical Delta Lake writer.
 

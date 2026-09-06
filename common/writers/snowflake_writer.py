@@ -30,7 +30,15 @@ class SnowflakeWriter(BaseWriter):
         logger.info("Rows Written=%s", df.count())
         logger.info("Write Duration=%.2f sec", duration)
 
-    def write_stream(self, df, foreach_batch):
+    def write_stream(
+        self,
+        df,
+        foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
+    ):
         return df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).start()
 
     def write(self, df):

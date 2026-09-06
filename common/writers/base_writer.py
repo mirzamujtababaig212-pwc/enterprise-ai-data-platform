@@ -13,5 +13,13 @@ class BaseWriter(ABC):
         pass
 
     @abstractmethod
-    def write_stream(self, df: DataFrame, foreach_batch):
+    def write_stream(
+        self,
+        df: DataFrame,
+        foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
+    ):
         pass

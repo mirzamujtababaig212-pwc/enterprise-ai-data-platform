@@ -26,13 +26,39 @@ class FabricWriter(BaseWriter):
         logger.info("Rows Written=%s", df.count())
         logger.info("Write Duration=%.2f sec", duration)
 
-    def write_stream(self, df, foreach_batch):
-        writer = df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).start()
-        if self.checkpoint:
+    def write_stream(
+        self,
+        df,
+        foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
+    ):
+        effective_checkpoint = checkpoint or self.checkpoint
+        effective_output_mode = output_mode or self.output_mode or "append"
+
+        writer = df.writeStream.foreachBatch(lambda batch, _: self.write_batch(batch)).outputMode(
+            effective_output_mode
+        )
+
+        if effective_checkpoint:
             writer = writer.option(
                 "checkpointLocation",
-                self.checkpoint,
+                effective_checkpoint,
             )
+
+        if query_name:
+            writer = writer.queryName(query_name)
+
+        if trigger:
+            if trigger.get("processingTime"):
+                writer = writer.trigger(processingTime=trigger["processingTime"])
+            elif trigger.get("availableNow"):
+                writer = writer.trigger(availableNow=True)
+            elif trigger.get("once"):
+                writer = writer.trigger(once=True)
+
         return writer.start()
 
     def write(self, df):

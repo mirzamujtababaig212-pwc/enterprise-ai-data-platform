@@ -5,7 +5,15 @@ class ConsoleWriter(BaseWriter):
     def write_batch(self, df):
         df.show(truncate=False)
 
-    def write_stream(self, df, foreach_batch):
+    def write_stream(
+        self,
+        df,
+        foreach_batch,
+        checkpoint=None,
+        output_mode=None,
+        query_name=None,
+        trigger=None,
+    ):
         return (
             df.writeStream.outputMode("append")
             .format("console")
