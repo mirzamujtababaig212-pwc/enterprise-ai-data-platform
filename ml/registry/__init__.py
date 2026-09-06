@@ -1,3 +1,4 @@
+from .lineage import ModelVersionLineage
 from .model_registry import (
     ModelRegistryManager,
     RegisteredModelResult,
@@ -5,5 +6,6 @@ from .model_registry import (
 
 __all__ = [
     "ModelRegistryManager",
+    "ModelVersionLineage",
     "RegisteredModelResult",
 ]

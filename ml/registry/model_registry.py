@@ -8,6 +8,7 @@ import mlflow
 from mlflow import MlflowClient
 from ml.platform import ModelRegistry
 from ml.evaluation import get_evaluation_policy_for_model
+from ml.registry.lineage import ModelVersionLineage
 
 
 @dataclass(frozen=True)
@@ -76,12 +77,43 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             run_id=run_id,
         )
 
+        lineage_data = getattr(metadata, "lineage", None) or {}
+
+        required_lineage_fields = (
+            "dataset_name",
+            "dataset_version",
+            "feature_contract_name",
+            "feature_contract_version",
+            "evaluation_policy_name",
+        )
+
+        missing_lineage = [
+            field for field in required_lineage_fields if not lineage_data.get(field)
+        ]
+
+        if missing_lineage:
+            raise ValueError(
+                "Model metadata is missing required lineage fields: " + ", ".join(missing_lineage)
+            )
+
         model_version = mlflow.register_model(
             model_uri=model_uri,
             name=model_name,
         )
 
         version = str(model_version.version)
+
+        model_version_lineage = ModelVersionLineage(
+            model_name=model_name,
+            model_version=version,
+            source_run_id=run_id,
+            model_uri=f"models:/{model_name}/{version}",
+            dataset_name=lineage_data["dataset_name"],
+            dataset_version=lineage_data["dataset_version"],
+            feature_contract_name=lineage_data["feature_contract_name"],
+            feature_contract_version=lineage_data["feature_contract_version"],
+            evaluation_policy_name=lineage_data["evaluation_policy_name"],
+        )
 
         self._wait_for_model_version(
             model_name=model_name,
@@ -107,6 +139,26 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             key="source_run_id",
             value=run_id,
         )
+
+        lineage_tags = {
+            "lineage_model_name": model_version_lineage.model_name,
+            "lineage_model_version": model_version_lineage.model_version,
+            "lineage_source_run_id": model_version_lineage.source_run_id,
+            "lineage_model_uri": model_version_lineage.model_uri,
+            "lineage_dataset_name": model_version_lineage.dataset_name,
+            "lineage_dataset_version": model_version_lineage.dataset_version,
+            "lineage_feature_contract_name": model_version_lineage.feature_contract_name,
+            "lineage_feature_contract_version": model_version_lineage.feature_contract_version,
+            "lineage_evaluation_policy_name": model_version_lineage.evaluation_policy_name,
+        }
+
+        for key, value in lineage_tags.items():
+            self.client.set_model_version_tag(
+                name=model_name,
+                version=version,
+                key=key,
+                value=value,
+            )
 
         self.client.set_model_version_tag(
             name=model_name,
@@ -438,6 +490,54 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         """
 
         return list(self.client.search_model_versions(filter_string=(f"name='{model_name}'")))
+
+    def get_model_version_lineage(
+        self,
+        model_name: str,
+        version: str,
+    ) -> ModelVersionLineage:
+        """
+        Return persisted lineage for a registered model version.
+        """
+
+        model_version = self.client.get_model_version(
+            name=model_name,
+            version=version,
+        )
+
+        tags = model_version.tags
+
+        required_tags = {
+            "lineage_model_name": "model name",
+            "lineage_model_version": "model version",
+            "lineage_source_run_id": "source run ID",
+            "lineage_model_uri": "model URI",
+            "lineage_dataset_name": "dataset name",
+            "lineage_dataset_version": "dataset version",
+            "lineage_feature_contract_name": "feature contract name",
+            "lineage_feature_contract_version": "feature contract version",
+            "lineage_evaluation_policy_name": "evaluation policy name",
+        }
+
+        missing = [description for key, description in required_tags.items() if not tags.get(key)]
+
+        if missing:
+            raise ValueError(
+                f"Model '{model_name}' version '{version}' has incomplete lineage: "
+                + ", ".join(missing)
+            )
+
+        return ModelVersionLineage(
+            model_name=tags["lineage_model_name"],
+            model_version=tags["lineage_model_version"],
+            source_run_id=tags["lineage_source_run_id"],
+            model_uri=tags["lineage_model_uri"],
+            dataset_name=tags["lineage_dataset_name"],
+            dataset_version=tags["lineage_dataset_version"],
+            feature_contract_name=tags["lineage_feature_contract_name"],
+            feature_contract_version=tags["lineage_feature_contract_version"],
+            evaluation_policy_name=tags["lineage_evaluation_policy_name"],
+        )
 
     # ------------------------------------------------------------------
     # RECONCILIATION
