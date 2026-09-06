@@ -421,3 +421,201 @@ def test_failed_promotion_does_not_retire_existing_champion(
 
     registry.client.set_model_version_tag.assert_not_called()
     registry.client.set_registered_model_alias.assert_not_called()
+
+
+def test_rollback_rejected_when_model_version_lineage_is_incomplete(
+    registry: ModelRegistryManager,
+) -> None:
+    target = MagicMock()
+    target.version = "5"
+    target.tags = {
+        "validation_status": "PASSED",
+    }
+
+    registry.client.get_model_version = MagicMock(return_value=target)
+
+    with pytest.raises(ValueError, match="incomplete lineage"):
+        registry.rollback_to_version(
+            model_name=MODEL_NAME,
+            version="5",
+        )
+
+
+def test_rollback_rejected_when_source_quality_gate_fails(
+    registry: ModelRegistryManager,
+) -> None:
+    target = MagicMock()
+    target.version = "5"
+    target.tags = {
+        "validation_status": "PASSED",
+        "source_run_id": "run-rollback-123",
+        "lineage_model_name": MODEL_NAME,
+        "lineage_model_version": "5",
+        "lineage_source_run_id": "run-rollback-123",
+        "lineage_model_uri": f"models:/{MODEL_NAME}/5",
+        "lineage_dataset_name": "vehicle-risk-integration",
+        "lineage_dataset_version": "v1",
+        "lineage_feature_contract_name": "vehicle-risk",
+        "lineage_feature_contract_version": "v1",
+        "lineage_evaluation_policy_name": "vehicle-risk-v1",
+    }
+
+    registry.client.get_model_version = MagicMock(return_value=target)
+
+    run = MagicMock()
+    run.data.tags = {
+        "quality_gate_passed": "false",
+        "quality_gate_policy": "vehicle-risk-v1",
+        "quality_gate_errors": "validation_f1 below threshold",
+    }
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    with pytest.raises(ValueError, match="quality gate failed"):
+        registry.rollback_to_version(
+            model_name=MODEL_NAME,
+            version="5",
+        )
+
+
+def test_rollback_rejected_when_lineage_policy_mismatches(
+    registry: ModelRegistryManager,
+) -> None:
+    target = MagicMock()
+    target.version = "5"
+    target.tags = {
+        "validation_status": "PASSED",
+        "source_run_id": "run-rollback-123",
+        "lineage_model_name": MODEL_NAME,
+        "lineage_model_version": "5",
+        "lineage_source_run_id": "run-rollback-123",
+        "lineage_model_uri": f"models:/{MODEL_NAME}/5",
+        "lineage_dataset_name": "vehicle-risk-integration",
+        "lineage_dataset_version": "v1",
+        "lineage_feature_contract_name": "vehicle-risk",
+        "lineage_feature_contract_version": "v1",
+        "lineage_evaluation_policy_name": "customer-churn-v1",
+    }
+
+    registry.client.get_model_version = MagicMock(return_value=target)
+
+    with pytest.raises(ValueError, match="lineage evaluation policy"):
+        registry.rollback_to_version(
+            model_name=MODEL_NAME,
+            version="5",
+        )
+
+
+def test_failed_rollback_does_not_retire_existing_champion(
+    registry: ModelRegistryManager,
+) -> None:
+    current_champion = MagicMock()
+    current_champion.version = "7"
+    current_champion.tags = {
+        "deployment_status": "CHAMPION",
+        "validation_status": "PASSED",
+    }
+
+    target = MagicMock()
+    target.version = "5"
+    target.tags = {
+        "validation_status": "PASSED",
+        "source_run_id": "run-rollback-123",
+        "lineage_model_name": MODEL_NAME,
+        "lineage_model_version": "5",
+        "lineage_source_run_id": "run-rollback-123",
+        "lineage_model_uri": f"models:/{MODEL_NAME}/5",
+        "lineage_dataset_name": "vehicle-risk-integration",
+        "lineage_dataset_version": "v1",
+        "lineage_feature_contract_name": "vehicle-risk",
+        "lineage_feature_contract_version": "v1",
+        "lineage_evaluation_policy_name": "customer-churn-v1",
+    }
+
+    registry.client.get_model_version = MagicMock(return_value=target)
+    registry.client.set_model_version_tag = MagicMock()
+    registry.client.set_registered_model_alias = MagicMock()
+
+    registry._get_current_champion = MagicMock(
+        return_value=current_champion,
+    )
+
+    with pytest.raises(ValueError, match="lineage evaluation policy"):
+        registry.rollback_to_version(
+            model_name=MODEL_NAME,
+            version="5",
+        )
+
+    assert current_champion.tags["deployment_status"] == "CHAMPION"
+
+    registry.client.set_model_version_tag.assert_not_called()
+    registry.client.set_registered_model_alias.assert_not_called()
+
+
+def test_valid_historical_version_can_be_rolled_back_to_champion(
+    registry: ModelRegistryManager,
+) -> None:
+    current_champion = MagicMock()
+    current_champion.version = "7"
+    current_champion.tags = {
+        "deployment_status": "CHAMPION",
+        "validation_status": "PASSED",
+    }
+
+    target = MagicMock()
+    target.version = "5"
+    target.tags = {
+        "validation_status": "PASSED",
+        "source_run_id": "run-rollback-123",
+        "lineage_model_name": MODEL_NAME,
+        "lineage_model_version": "5",
+        "lineage_source_run_id": "run-rollback-123",
+        "lineage_model_uri": f"models:/{MODEL_NAME}/5",
+        "lineage_dataset_name": "vehicle-risk-integration",
+        "lineage_dataset_version": "v1",
+        "lineage_feature_contract_name": "vehicle-risk",
+        "lineage_feature_contract_version": "v1",
+        "lineage_evaluation_policy_name": "vehicle-risk-v1",
+    }
+
+    registry.client.get_model_version = MagicMock(return_value=target)
+
+    run = MagicMock()
+    run.data.tags = {
+        "quality_gate_passed": "true",
+        "quality_gate_policy": "vehicle-risk-v1",
+    }
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    registry._get_current_champion = MagicMock(
+        return_value=current_champion,
+    )
+
+    registry.client.set_model_version_tag = MagicMock()
+    registry.client.set_registered_model_alias = MagicMock()
+
+    registry.rollback_to_version(
+        model_name=MODEL_NAME,
+        version="5",
+    )
+
+    registry.client.set_model_version_tag.assert_any_call(
+        name=MODEL_NAME,
+        version="7",
+        key="deployment_status",
+        value="RETIRED",
+    )
+
+    registry.client.set_model_version_tag.assert_any_call(
+        name=MODEL_NAME,
+        version="5",
+        key="deployment_status",
+        value="CHAMPION",
+    )
+
+    registry.client.set_registered_model_alias.assert_called_once_with(
+        name=MODEL_NAME,
+        alias="champion",
+        version="5",
+    )
