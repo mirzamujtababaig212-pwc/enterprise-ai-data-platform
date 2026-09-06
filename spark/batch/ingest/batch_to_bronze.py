@@ -2,6 +2,9 @@ from common.config.settings import Settings
 from common.pipelines.base_pipeline import (
     BasePipeline,
 )
+from common.pipelines.pipeline_runtime_config import (
+    PipelineRuntimeConfig,
+)
 from common.readers.parquet_reader import (
     ParquetReader,
 )
@@ -24,28 +27,6 @@ from common.writers.delta_writer import (
 
 class BatchToBronzePipeline(BasePipeline):
 
-    CONFIG = type(
-        "Config",
-        (),
-        {
-            "pipeline_name": "BatchToBronze",
-            "source": "parquet",
-            "path": Settings.storage.BATCH_INPUT_PATH,
-            "target": "delta",
-            "table": Settings.storage.BRONZE_TABLE,
-            "checkpoint": "",
-            "query_name": None,
-            "output_mode": "append",
-            "trigger": None,
-            "retries": 3,
-            "retry_delay": 2,
-            "enable_validation": True,
-            "enable_metrics": False,
-            "enable_dlq": False,
-            "execution_mode": "batch",
-        },
-    )()
-
     def __init__(self, spark):
 
         reader = ParquetReader(path=Settings.storage.BATCH_INPUT_PATH)
@@ -57,7 +38,7 @@ class BatchToBronzePipeline(BasePipeline):
                 DuplicateValidator(
                     keys=[
                         "vehicle_id",
-                        "event_timestamp",
+                        "event_time",
                     ]
                 ),
                 BusinessRuleValidator(),
@@ -70,6 +51,16 @@ class BatchToBronzePipeline(BasePipeline):
             mode="append",
         )
 
+        config = PipelineRuntimeConfig(
+            pipeline_name="BatchToBronze",
+            output_mode="append",
+            retries=3,
+            retry_delay=2,
+            enable_validation=True,
+            enable_metrics=False,
+            enable_dlq=False,
+        )
+
         super().__init__(
             spark=spark,
             reader=reader,
@@ -78,6 +69,7 @@ class BatchToBronzePipeline(BasePipeline):
             transformer=transformer,
             metrics=None,
             dlq=None,
+            config=config,
         )
 
 

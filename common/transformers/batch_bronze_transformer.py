@@ -13,7 +13,7 @@ class BatchBronzeTransformer(BaseTransformer):
     REQUIRED_COLUMNS = [
         "vehicle_id",
         "status",
-        "event_timestamp",
+        "event_time",
     ]
 
     @staticmethod
