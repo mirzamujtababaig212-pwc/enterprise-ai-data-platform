@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final
 
-
 SUPPORTED_DTYPES: Final[frozenset[str]] = frozenset(
     {
         "int",
@@ -54,10 +53,14 @@ class FeatureContract:
 
     name: str
     features: tuple[FeatureDefinition, ...] = ()
+    version: str = "v1"
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("feature contract name must not be empty")
+
+        if not self.version.strip():
+            raise ValueError("feature contract version must not be empty")
 
         definitions = tuple(self.features)
 

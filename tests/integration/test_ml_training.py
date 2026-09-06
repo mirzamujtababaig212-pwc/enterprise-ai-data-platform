@@ -163,6 +163,8 @@ def test_vehicle_risk_training_end_to_end() -> None:
         config=TrainingConfig(
             experiment_name="enterprise-ai-platform",
             run_name="integration-training-test",
+            dataset_name="vehicle-risk-integration",
+            dataset_version="v1",
             model_params={
                 "n_estimators": 25,
                 "random_state": 42,
@@ -186,6 +188,13 @@ def test_vehicle_risk_training_end_to_end() -> None:
     assert result.metadata.training_run_id == result.run_id
     assert result.metadata.experiment_id == result.experiment_id
     assert result.metadata.model_uri == result.model_uri
+    assert result.metadata.lineage == {
+        "dataset_name": "vehicle-risk-integration",
+        "dataset_version": "v1",
+        "feature_contract_name": "vehicle-risk",
+        "feature_contract_version": "v1",
+        "evaluation_policy_name": "vehicle-risk-v1",
+    }
 
     assert "training_accuracy" in result.metrics
     assert "validation_accuracy" in result.metrics
@@ -209,6 +218,11 @@ def test_vehicle_risk_training_end_to_end() -> None:
 
     run = manager.get_run(result.run_id)
 
+    assert run.data.tags["evaluation_dataset_name"] == "vehicle-risk-integration"
+    assert run.data.tags["evaluation_dataset_version"] == "v1"
+    assert run.data.tags["feature_contract_name"] == "vehicle-risk"
+    assert run.data.tags["feature_contract_version"] == "v1"
+    assert run.data.tags["evaluation_policy_name"] == "vehicle-risk-v1"
     assert run.info.status == "FINISHED"
 
     assert run.data.metrics["validation_accuracy"] == result.metrics["validation_accuracy"]

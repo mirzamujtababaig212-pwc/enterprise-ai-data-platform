@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from ml.platform import FeatureContract, FeatureDefinition
 
-
 VEHICLE_RISK_FEATURE_CONTRACT = FeatureContract(
     name="vehicle-risk",
+    version="v1",
     features=(
         FeatureDefinition(
             name="event_count",

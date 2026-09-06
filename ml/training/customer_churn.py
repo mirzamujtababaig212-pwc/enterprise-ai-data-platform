@@ -12,6 +12,8 @@ from ml.evaluation import (
     CUSTOMER_CHURN_POLICY,
     EvaluationQualityGate,
     ModelEvaluator,
+    EvaluationLineage,
+    persist_evaluation_lineage,
     persist_quality_gate,
 )
 from ml.models.customer_churn import (
@@ -20,6 +22,9 @@ from ml.models.customer_churn import (
     MODEL_NAME,
     TARGET_COLUMN,
     validate_feature_dataframe,
+)
+from ml.models.customer_churn_features import (
+    CUSTOMER_CHURN_FEATURE_CONTRACT,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -95,7 +100,22 @@ class CustomerChurnTrainer(
 
             persist_quality_gate(quality_gate)
 
-            if not quality_gate.passed:
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=CUSTOMER_CHURN_FEATURE_CONTRACT.name,
+                feature_contract_version=CUSTOMER_CHURN_FEATURE_CONTRACT.version,
+                evaluation_policy_name=CUSTOMER_CHURN_POLICY.name or "customer-churn-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
                 raise ValueError(
                     "Customer churn model failed evaluation quality gate: "
                     + "; ".join(quality_gate.errors)
@@ -147,6 +167,7 @@ class CustomerChurnTrainer(
                     "target_column": TARGET_COLUMN,
                     "evaluation_type": "holdout",
                 },
+                lineage=lineage.as_dict(),
             )
 
             return TrainingResult(

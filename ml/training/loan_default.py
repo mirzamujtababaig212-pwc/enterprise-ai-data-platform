@@ -15,6 +15,8 @@ from ml.evaluation import (
     EvaluationQualityGate,
     LOAN_DEFAULT_POLICY,
     ModelEvaluator,
+    EvaluationLineage,
+    persist_evaluation_lineage,
     persist_quality_gate,
 )
 from ml.models.loan_default import (
@@ -25,6 +27,9 @@ from ml.models.loan_default import (
     LoanDefaultEvaluationAdapter,
     LoanDefaultMLP,
     validate_feature_dataframe,
+)
+from ml.models.loan_default_features import (
+    LOAN_DEFAULT_FEATURE_CONTRACT,
 )
 from ml.platform import ModelMetadata, TrainingService
 from ml.training.schemas import TrainingConfig, TrainingResult
@@ -196,7 +201,22 @@ class LoanDefaultTrainer(
 
             persist_quality_gate(quality_gate)
 
-            if not quality_gate.passed:
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=LOAN_DEFAULT_FEATURE_CONTRACT.name,
+                feature_contract_version=LOAN_DEFAULT_FEATURE_CONTRACT.version,
+                evaluation_policy_name=LOAN_DEFAULT_POLICY.name or "loan-default-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
                 raise ValueError(
                     "Loan default model failed evaluation quality gate: "
                     + "; ".join(quality_gate.errors)
@@ -249,6 +269,7 @@ class LoanDefaultTrainer(
                     "evaluation_type": "holdout",
                     "preprocessing": "standardization",
                 },
+                lineage=lineage.as_dict(),
             )
 
             return TrainingResult(

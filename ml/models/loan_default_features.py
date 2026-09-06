@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from ml.platform import FeatureContract, FeatureDefinition
 
-
 LOAN_DEFAULT_FEATURE_CONTRACT = FeatureContract(
     name="loan-default",
+    version="v1",
     features=(
         FeatureDefinition(
             name="income",

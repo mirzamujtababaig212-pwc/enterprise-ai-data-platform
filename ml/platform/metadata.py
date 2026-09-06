@@ -28,6 +28,7 @@ class ModelMetadata:
     metrics: dict[str, float] = field(default_factory=dict)
     parameters: dict[str, Any] = field(default_factory=dict)
     tags: dict[str, str] = field(default_factory=dict)
+    lineage: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.model_name.strip():
@@ -49,3 +50,4 @@ class ModelMetadata:
         object.__setattr__(self, "metrics", dict(self.metrics))
         object.__setattr__(self, "parameters", dict(self.parameters))
         object.__setattr__(self, "tags", dict(self.tags))
+        object.__setattr__(self, "lineage", dict(self.lineage))

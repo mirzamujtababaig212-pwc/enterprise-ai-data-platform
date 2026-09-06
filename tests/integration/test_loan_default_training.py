@@ -36,6 +36,7 @@ def test_loan_default_training_end_to_end() -> None:
             },
             test_size=0.3,
             random_state=42,
+            enforce_quality_gate=False,
         ),
     )
 

@@ -8,7 +8,8 @@ from .policies import (
 )
 from .policy import EvaluationPolicy, EvaluationQualityGate, QualityGateResult
 from .persistence import persist_quality_gate
-
+from .lineage import EvaluationLineage
+from .lineage_persistence import persist_evaluation_lineage
 
 __all__ = [
     "CUSTOMER_CHURN_POLICY",
@@ -22,4 +23,6 @@ __all__ = [
     "persist_quality_gate",
     "MODEL_EVALUATION_POLICIES",
     "get_evaluation_policy_for_model",
+    "EvaluationLineage",
+    "persist_evaluation_lineage",
 ]

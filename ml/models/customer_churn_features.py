@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from ml.platform import FeatureContract, FeatureDefinition
 
-
 CUSTOMER_CHURN_FEATURE_CONTRACT = FeatureContract(
     name="customer-churn",
+    version="v1",
     features=(
         FeatureDefinition(
             name="tenure_months",

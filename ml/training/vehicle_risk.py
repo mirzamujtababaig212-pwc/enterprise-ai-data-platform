@@ -13,6 +13,8 @@ from ml.evaluation import (
     EvaluationQualityGate,
     ModelEvaluator,
     VEHICLE_RISK_POLICY,
+    EvaluationLineage,
+    persist_evaluation_lineage,
     persist_quality_gate,
 )
 from ml.models.vehicle_risk import (
@@ -21,6 +23,9 @@ from ml.models.vehicle_risk import (
     MODEL_NAME,
     TARGET_COLUMN,
     validate_feature_dataframe,
+)
+from ml.models.vehicle_risk_features import (
+    VEHICLE_RISK_FEATURE_CONTRACT,
 )
 
 from .schemas import (
@@ -127,7 +132,22 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
 
             persist_quality_gate(quality_gate)
 
-            if not quality_gate.passed:
+            lineage = EvaluationLineage(
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                feature_contract_name=VEHICLE_RISK_FEATURE_CONTRACT.name,
+                feature_contract_version=VEHICLE_RISK_FEATURE_CONTRACT.version,
+                evaluation_policy_name=VEHICLE_RISK_POLICY.name or "vehicle-risk-policy",
+            )
+
+            persist_evaluation_lineage(lineage)
+
+            mlflow.set_tag(
+                "quality_gate_enforced",
+                str(config.enforce_quality_gate).lower(),
+            )
+
+            if config.enforce_quality_gate and not quality_gate.passed:
                 raise ValueError(
                     "Vehicle risk model failed evaluation quality gate: "
                     + "; ".join(quality_gate.errors)
@@ -208,6 +228,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
                 "model_type": "RandomForestClassifier",
                 "target_column": TARGET_COLUMN,
             },
+            lineage=lineage.as_dict(),
         )
 
         return TrainingResult(
