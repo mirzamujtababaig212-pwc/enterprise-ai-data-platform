@@ -9,7 +9,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 from ai_platform.mlflow.client import MLflowManager
-from ml.evaluation import ModelEvaluator
+from ml.evaluation import (
+    EvaluationQualityGate,
+    ModelEvaluator,
+    VEHICLE_RISK_POLICY,
+    persist_quality_gate,
+)
 from ml.models.vehicle_risk import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
@@ -114,6 +119,19 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
                 X_test=X_test,
                 y_test=y_test,
             )
+
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                VEHICLE_RISK_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            if not quality_gate.passed:
+                raise ValueError(
+                    "Vehicle risk model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
 
             metrics = {
                 "training_accuracy": training_accuracy,

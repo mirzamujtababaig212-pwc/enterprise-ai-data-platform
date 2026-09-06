@@ -8,7 +8,12 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
-from ml.evaluation.evaluator import ModelEvaluator
+from ml.evaluation import (
+    CUSTOMER_CHURN_POLICY,
+    EvaluationQualityGate,
+    ModelEvaluator,
+    persist_quality_gate,
+)
 from ml.models.customer_churn import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
@@ -71,23 +76,32 @@ class CustomerChurnTrainer(
             **config.model_params,
         }
 
-        model = LogisticRegression(**model_params)
-        model.fit(X_train, y_train)
-
-        evaluation = ModelEvaluator.evaluate(
-            model,
-            X_test,
-            y_test,
-        )
-
-        metrics = evaluation.as_dict()
-
         mlflow.set_experiment(config.experiment_name)
 
         with mlflow.start_run(run_name=config.run_name) as run:
-            mlflow.log_params(model_params)
+            model = LogisticRegression(**model_params)
+            model.fit(X_train, y_train)
 
-            mlflow.log_metrics(metrics)
+            evaluation = ModelEvaluator.evaluate(
+                model,
+                X_test,
+                y_test,
+            )
+
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                CUSTOMER_CHURN_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            if not quality_gate.passed:
+                raise ValueError(
+                    "Customer churn model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
+
+            metrics = evaluation.as_dict()
 
             mlflow.log_metrics(
                 {

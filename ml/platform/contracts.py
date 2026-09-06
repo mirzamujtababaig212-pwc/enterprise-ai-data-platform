@@ -75,7 +75,7 @@ class ModelRegistry(ABC, Generic[RegistryVersionT]):
         model_uri: str,
         model_name: str,
         run_id: str,
-        evaluation_passed: bool,
+        metadata: Any | None = None,
     ) -> RegistryVersionT:
         raise NotImplementedError
 

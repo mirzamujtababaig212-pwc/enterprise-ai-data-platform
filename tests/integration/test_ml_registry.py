@@ -4,6 +4,8 @@ import mlflow
 import pytest
 import os
 from ml.registry import ModelRegistryManager
+from unittest.mock import MagicMock
+
 
 MODEL_NAME = "VehicleRiskModel"
 
@@ -13,15 +15,78 @@ def registry() -> ModelRegistryManager:
     return ModelRegistryManager()
 
 
-def test_registration_rejected_when_evaluation_fails(
+def test_registration_rejected_when_persisted_evaluation_fails(
     registry: ModelRegistryManager,
 ) -> None:
-    with pytest.raises(ValueError, match="evaluation"):
+    run = MagicMock()
+    run.data.tags = {
+        "quality_gate_passed": "false",
+        "quality_gate_policy": "vehicle-risk-v1",
+        "quality_gate_errors": ('["validation_f1=0.7000 is below required minimum 0.9000"]'),
+    }
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    with pytest.raises(ValueError, match="quality gate failed"):
         registry.register_model(
             model_uri="runs:/fake-run/model",
-            model_name="RejectedModel",
+            model_name="VehicleRiskModel",
             run_id="fake-run",
-            evaluation_passed=False,
+        )
+
+
+def test_registration_rejected_when_quality_gate_is_missing(
+    registry: ModelRegistryManager,
+) -> None:
+    run = MagicMock()
+    run.data.tags = {}
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    with pytest.raises(ValueError, match="no persisted quality-gate decision"):
+        registry.register_model(
+            model_uri="runs:/fake-run/model",
+            model_name="VehicleRiskModel",
+            run_id="fake-run",
+        )
+
+
+def test_registration_rejected_when_quality_gate_policy_mismatches(
+    registry: ModelRegistryManager,
+) -> None:
+    run = MagicMock()
+    run.data.tags = {
+        "quality_gate_passed": "true",
+        "quality_gate_policy": "customer-churn-v1",
+        "quality_gate_errors": "[]",
+    }
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    with pytest.raises(ValueError, match="requires policy"):
+        registry.register_model(
+            model_uri="runs:/fake-run/model",
+            model_name="VehicleRiskModel",
+            run_id="fake-run",
+        )
+
+
+def test_registration_rejected_when_quality_gate_is_malformed(
+    registry: ModelRegistryManager,
+) -> None:
+    run = MagicMock()
+    run.data.tags = {
+        "quality_gate_passed": "yes",
+        "quality_gate_policy": "vehicle-risk-v1",
+    }
+
+    registry.client.get_run = MagicMock(return_value=run)
+
+    with pytest.raises(ValueError, match="invalid quality_gate_passed"):
+        registry.register_model(
+            model_uri="runs:/fake-run/model",
+            model_name="VehicleRiskModel",
+            run_id="fake-run",
         )
 
 
@@ -127,7 +192,6 @@ def test_customer_churn_model_registration_and_promotion() -> None:
                 "support_tickets": index % 7,
                 "usage_hours": 20.0 + (index % 10) * 5.0,
                 "payment_failures": index % 4,
-                "churn": int(index % 3 == 0),
             }
             for index in range(40)
         ]
@@ -149,7 +213,6 @@ def test_customer_churn_model_registration_and_promotion() -> None:
         model_uri=training_result.model_uri,
         model_name=CUSTOMER_CHURN_MODEL_NAME,
         run_id=training_result.run_id,
-        evaluation_passed=True,
         metadata=training_result.metadata,
     )
 

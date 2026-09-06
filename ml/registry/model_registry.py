@@ -7,6 +7,7 @@ import os
 import mlflow
 from mlflow import MlflowClient
 from ml.platform import ModelRegistry
+from ml.evaluation import get_evaluation_policy_for_model
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,6 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         model_uri: str,
         model_name: str,
         run_id: str,
-        evaluation_passed: bool,
         metadata: Any | None = None,
     ) -> RegisteredModelResult:
         """
@@ -71,8 +71,10 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
         They do not automatically become champion here.
         """
 
-        if not evaluation_passed:
-            raise ValueError("Model cannot be registered because evaluation failed")
+        self._verify_evaluation_quality_gate(
+            model_name=model_name,
+            run_id=run_id,
+        )
 
         model_version = mlflow.register_model(
             model_uri=model_uri,
@@ -190,6 +192,56 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             model_uri=(f"models:/{model_name}/{version}"),
             alias="candidate",
         )
+
+    def _verify_evaluation_quality_gate(
+        self,
+        model_name: str,
+        run_id: str,
+    ) -> None:
+        """
+        Verify the persisted MLflow quality-gate decision for a model run.
+
+        The registry does not trust a caller-supplied evaluation result.
+        MLflow is the governance source of truth.
+        """
+
+        run = self.client.get_run(run_id)
+        tags = run.data.tags
+
+        quality_gate_passed = tags.get("quality_gate_passed")
+        quality_gate_policy = tags.get("quality_gate_policy")
+
+        if quality_gate_passed is None:
+            raise ValueError(f"Run '{run_id}' has no persisted quality-gate decision")
+
+        if quality_gate_passed not in {"true", "false"}:
+            raise ValueError(
+                f"Run '{run_id}' has invalid quality_gate_passed value: " f"{quality_gate_passed!r}"
+            )
+
+        if quality_gate_passed != "true":
+            errors = tags.get("quality_gate_errors", "")
+            message = (
+                f"Model '{model_name}' cannot be registered because "
+                f"evaluation quality gate failed"
+            )
+
+            if errors:
+                message += f": {errors}"
+
+            raise ValueError(message)
+
+        expected_policy = get_evaluation_policy_for_model(model_name)
+
+        if not quality_gate_policy:
+            raise ValueError(f"Run '{run_id}' has no persisted quality-gate policy")
+
+        if quality_gate_policy != expected_policy.name:
+            raise ValueError(
+                f"Run '{run_id}' used quality-gate policy "
+                f"'{quality_gate_policy}', but model '{model_name}' "
+                f"requires policy '{expected_policy.name}'"
+            )
 
     # ------------------------------------------------------------------
     # CHAMPION MANAGEMENT

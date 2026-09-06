@@ -25,9 +25,9 @@ FEATURE_COLUMNS: Final[tuple[str, ...]] = (
 TARGET_COLUMN: Final[str] = "default"
 
 DEFAULT_MODEL_PARAMS: Final[dict[str, int | float]] = {
-    "hidden_dim": 16,
-    "learning_rate": 0.001,
-    "epochs": 50,
+    "hidden_dim": 32,
+    "learning_rate": 0.005,
+    "epochs": 250,
     "batch_size": 32,
     "random_state": 42,
 }

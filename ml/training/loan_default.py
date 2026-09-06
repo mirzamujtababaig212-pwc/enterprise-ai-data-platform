@@ -11,7 +11,12 @@ from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ml.evaluation.evaluator import ModelEvaluator
+from ml.evaluation import (
+    EvaluationQualityGate,
+    LOAN_DEFAULT_POLICY,
+    ModelEvaluator,
+    persist_quality_gate,
+)
 from ml.models.loan_default import (
     DEFAULT_MODEL_PARAMS,
     FEATURE_COLUMNS,
@@ -183,6 +188,19 @@ class LoanDefaultTrainer(
             )
 
             mlflow.log_metrics(metrics)
+
+            quality_gate = EvaluationQualityGate.evaluate(
+                evaluation,
+                LOAN_DEFAULT_POLICY,
+            )
+
+            persist_quality_gate(quality_gate)
+
+            if not quality_gate.passed:
+                raise ValueError(
+                    "Loan default model failed evaluation quality gate: "
+                    + "; ".join(quality_gate.errors)
+                )
 
             mlflow.log_metrics(
                 {

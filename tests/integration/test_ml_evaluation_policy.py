@@ -107,3 +107,58 @@ def test_policy_rejects_invalid_threshold(field: str) -> None:
 
     with pytest.raises(ValueError):
         EvaluationPolicy(**{field: -0.01})
+
+
+def test_named_policy_retains_identity() -> None:
+    policy = EvaluationPolicy(
+        name="customer-churn-v1",
+        min_f1=0.85,
+    )
+
+    assert policy.name == "customer-churn-v1"
+
+
+def test_policy_rejects_blank_name() -> None:
+    with pytest.raises(ValueError, match="name"):
+        EvaluationPolicy(name="   ")
+
+
+def test_quality_gate_result_retains_policy() -> None:
+    policy = EvaluationPolicy(
+        name="vehicle-risk-v1",
+        min_f1=0.90,
+    )
+    result = EvaluationResult(
+        accuracy=0.95,
+        precision=0.94,
+        recall=0.93,
+        f1=0.92,
+        roc_auc=0.96,
+    )
+
+    gate = EvaluationQualityGate.evaluate(result, policy)
+
+    assert gate.passed is True
+    assert gate.policy == policy
+    assert gate.policy.name == "vehicle-risk-v1"
+
+
+def test_quality_gate_as_dict_contains_policy_identity() -> None:
+    policy = EvaluationPolicy(
+        name="loan-default-v1",
+        min_f1=0.90,
+    )
+    result = EvaluationResult(
+        accuracy=0.95,
+        precision=0.94,
+        recall=0.93,
+        f1=0.92,
+        roc_auc=0.96,
+    )
+
+    gate = EvaluationQualityGate.evaluate(result, policy)
+
+    data = gate.as_dict()
+
+    assert data["quality_gate_passed"] is True
+    assert data["quality_gate_policy"] == "loan-default-v1"
