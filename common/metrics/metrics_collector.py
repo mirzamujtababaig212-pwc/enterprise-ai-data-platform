@@ -1,5 +1,3 @@
-import time
-
 from common.logging.logger import get_logger
 from common.metrics.base_metrics import BaseMetrics
 
@@ -29,12 +27,12 @@ class MetricsCollector(BaseMetrics):
         dlq_duration=0,
         pipeline_duration=0,
     ):
-        start = time.time()
-        processed = batch_df.cache().count()
-        rejected = rejected_df.cache().count() if rejected_df is not None else 0
-        duplicates = duplicate_df.cache().count() if duplicate_df is not None else 0
+        processed = batch_df.count()
+        rejected = rejected_df.count() if rejected_df is not None else 0
+        duplicates = duplicate_df.count() if duplicate_df is not None else 0
+
         status = calculate_status(processed, rejected)
-        pipeline_duration = round(time.time() - start, 2)
+
         throughput = processed / pipeline_duration if pipeline_duration > 0 else processed
         success_rate = (
             ((processed - rejected) / processed * 100) if (processed + rejected) > 0 else 0.0

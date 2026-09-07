@@ -144,21 +144,29 @@ def test_large_batch(spark):
     assert batch.count() == 10000
 
 
-@patch("common.metrics.metrics_collector.time")
-def test_duration(mock_time, spark):
-    mock_time.time.side_effect = [
-        100,
-        103,
-    ]
+def test_duration(spark):
     collector = MetricsCollector()
+
     batch = spark.createDataFrame(
         [(1, "A")],
         ["id", "name"],
     )
     rejected = spark.createDataFrame([], batch.schema)
-    collector.record_batch(
+
+    metrics = collector.record_batch(
         pipeline="bronze",
         batch_id=1,
         batch_df=batch,
         rejected_df=rejected,
+        transform_duration=1.0,
+        validation_duration=2.0,
+        write_duration=3.0,
+        dlq_duration=4.0,
+        pipeline_duration=10.0,
     )
+
+    assert metrics["transform_duration"] == 1.0
+    assert metrics["validation_duration"] == 2.0
+    assert metrics["write_duration"] == 3.0
+    assert metrics["dlq_duration"] == 4.0
+    assert metrics["pipeline_duration"] == 10.0
