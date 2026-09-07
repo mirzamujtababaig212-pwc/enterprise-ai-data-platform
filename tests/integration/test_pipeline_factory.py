@@ -17,7 +17,7 @@ def test_create_bronze_pipeline(spark):
 
 def test_create_silver_pipeline(spark):
     pipeline = PipelineFactory.get_pipeline("silver", spark)
-    assert pipeline.reader.__class__.__name__ == "ParquetReader"
+    assert pipeline.reader.__class__.__name__ == "DeltaReader"
     assert pipeline.writer.__class__.__name__ == "DeltaWriter"
     assert pipeline.transformer.__class__.__name__ == "SilverTransformer"
     assert pipeline.validator.__class__.__name__ == "CompositeValidator"
