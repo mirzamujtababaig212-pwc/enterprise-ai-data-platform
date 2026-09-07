@@ -516,7 +516,7 @@ def validate_idempotency(
     # ------------------------------------------------------------------
 
     run_pipeline(
-        PROJECT_ROOT / "spark" / "pipelines" / "bronze_to_silver_pipeline.py",
+        PROJECT_ROOT / "spark" / "batch" / "bronze_to_silver.py",
         "Bronze → Silver Pipeline (Idempotency Run)",
     )
 
@@ -560,9 +560,7 @@ def main() -> None:
     # Pipeline paths
     # ------------------------------------------------------------------
 
-    bronze_to_silver_pipeline = (
-        PROJECT_ROOT / "spark" / "pipelines" / "bronze_to_silver_pipeline.py"
-    )
+    bronze_to_silver_pipeline = PROJECT_ROOT / "spark" / "batch" / "bronze_to_silver.py"
 
     silver_to_gold_pipeline = PROJECT_ROOT / "spark" / "pipelines" / "silver_to_gold_pipeline.py"
 

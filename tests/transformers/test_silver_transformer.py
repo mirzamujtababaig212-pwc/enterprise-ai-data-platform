@@ -226,7 +226,7 @@ class TestSilverTransformer:
             ["status"],
         )
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError):
             transformer.transform(df)
 
     def test_trim_vehicle_id(self, spark):

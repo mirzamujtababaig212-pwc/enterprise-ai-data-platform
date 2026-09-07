@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import mlflow
 import mlflow.pytorch
 import pandas as pd
@@ -76,7 +77,7 @@ def test_loan_default_registration_and_promotion() -> None:
 
     assert uri == "models:/LoanDefaultModel@champion"
 
-    mlflow.set_tracking_uri("http://127.0.0.1:5051")
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 
     model = mlflow.pytorch.load_model(uri)
 
