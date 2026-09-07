@@ -201,15 +201,22 @@ class WriterBuilder:
         # ==========================================================
 
         if writer_type == "snowflake":
-            options = cfg.get(
-                "options",
-                {},
+            options = dict(Settings.snowflake.options())
+
+            options.update(
+                cfg.get(
+                    "options",
+                    {},
+                )
             )
 
             table = cfg.get(
                 "table",
                 "",
             )
+
+            if not table:
+                raise ValueError("Snowflake writer requires a table.")
 
             mode = cfg.get(
                 "mode",

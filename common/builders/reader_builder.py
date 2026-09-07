@@ -3,6 +3,7 @@ from common.registry.reader_registry import READER_REGISTRY
 from spark.schemas.bronze_schema import bronze_schema
 from spark.schemas.silver_schema import silver_schema
 
+
 SCHEMAS = {
     "bronze_schema": bronze_schema,
     "silver_schema": silver_schema,
@@ -63,19 +64,40 @@ class ReaderBuilder:
             return reader_cls(Settings.kafka.options)
 
         # ----------------------------------------------------------
-        # Table readers
+        # Snowflake
+        # ----------------------------------------------------------
+
+        if reader_type == "snowflake":
+
+            table = cfg.get("table")
+
+            if not table:
+                raise ValueError("Table is required for Snowflake reader.")
+
+            table = ReaderBuilder._resolve_storage_value(table)
+
+            options = dict(Settings.snowflake.options())
+
+            options.update(cfg.get("options", {}))
+
+            return reader_cls(
+                options=options,
+                table=table,
+            )
+
+        # ----------------------------------------------------------
+        # PostgreSQL / Fabric
         # ----------------------------------------------------------
 
         if reader_type in {
             "postgres",
-            "snowflake",
             "fabric",
         }:
 
             table = cfg.get("table")
 
             if not table:
-                raise ValueError(f"Table is required for reader type: {reader_type}")
+                raise ValueError(f"Table is required for reader type: " f"{reader_type}")
 
             table = ReaderBuilder._resolve_storage_value(table)
 
@@ -116,13 +138,10 @@ class ReaderBuilder:
 
                 kwargs["schema"] = SCHEMAS[schema_name]
 
-            # Delta readers may optionally receive
-            # a table name for catalog-based reads.
             if cfg.get("table"):
 
                 kwargs["table"] = ReaderBuilder._resolve_storage_value(cfg["table"])
 
-            # CSV supports an optional header setting.
             if reader_type == "csv" and "header" in cfg:
 
                 kwargs["header"] = cfg["header"]
