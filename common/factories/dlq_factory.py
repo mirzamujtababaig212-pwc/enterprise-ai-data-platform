@@ -1,3 +1,4 @@
+from common.config.settings import Settings
 from common.registry.dlq_registry import DLQ_REGISTRY
 
 
@@ -11,14 +12,23 @@ class DLQFactory:
 
         pipeline = config.get("pipeline", {}).get("class")
 
-        # ---------------------------------------------------------
-        # Explicit DLQ configuration
-        # ---------------------------------------------------------
-
         if dlq_type == "delta":
             dlq_cls = DLQ_REGISTRY["delta"]
 
-            return dlq_cls(table=dlq_cfg.get("table", f"{pipeline}.dlq"))
+            table = dlq_cfg.get("table")
+
+            if not table:
+                table_map = {
+                    "bronze": Settings.storage.BRONZE_DLQ_TABLE,
+                    "silver": Settings.storage.SILVER_DLQ_TABLE,
+                }
+
+                table = table_map.get(
+                    pipeline,
+                    f"{pipeline}.dlq",
+                )
+
+            return dlq_cls(table=table)
 
         if dlq_type == "noop":
             return DLQ_REGISTRY["noop"]()
@@ -26,14 +36,10 @@ class DLQFactory:
         if dlq_type != "default":
             raise ValueError(f"Unknown DLQ type: {dlq_type}")
 
-        # ---------------------------------------------------------
-        # Pipeline-specific default DLQ
-        # ---------------------------------------------------------
+        if pipeline == "bronze":
+            return DLQ_REGISTRY["delta"](table=Settings.storage.BRONZE_DLQ_TABLE)
 
-        if pipeline in {"bronze", "silver"}:
-            return DLQ_REGISTRY["delta"](table=dlq_cfg.get("table", f"{pipeline}.dlq"))
-
-        if pipeline == "gold":
-            return DLQ_REGISTRY["noop"]()
+        if pipeline == "silver":
+            return DLQ_REGISTRY["delta"](table=Settings.storage.SILVER_DLQ_TABLE)
 
         return DLQ_REGISTRY["noop"]()

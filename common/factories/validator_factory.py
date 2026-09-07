@@ -63,6 +63,12 @@ class ValidatorFactory:
                 [
                     SchemaValidator(
                         [
+                            "kafka_key",
+                            "kafka_topic",
+                            "kafka_partition",
+                            "kafka_offset",
+                            "kafka_timestamp",
+                            "raw_value",
                             "vehicle_id",
                             "event_time",
                             "latitude",
@@ -73,16 +79,25 @@ class ValidatorFactory:
                             "battery",
                             "engine_temperature",
                             "gear",
-                            "topic",
-                            "partition",
-                            "offset",
-                            "timestamp",
-                            "ingestion_timestamp",
                             "ingestion_time",
                         ]
                     ),
-                    NullValidator(["vehicle_id"]),
-                    DuplicateValidator(["vehicle_id", "event_time"]),
+                    NullValidator(
+                        [
+                            "vehicle_id",
+                            "event_time",
+                        ]
+                    ),
+                    DuplicateValidator(
+                        [
+                            "kafka_topic",
+                            "kafka_partition",
+                            "kafka_offset",
+                        ],
+                        order_columns=[
+                            "kafka_timestamp",
+                        ],
+                    ),
                 ]
             )
 
@@ -92,12 +107,22 @@ class ValidatorFactory:
                     SchemaValidator(
                         [
                             "vehicle_id",
-                            "status",
                             "event_time",
+                            "latitude",
+                            "longitude",
                             "speed",
+                            "rpm",
                             "fuel_level",
                             "battery",
                             "engine_temperature",
+                            "gear",
+                            "kafka_key",
+                            "kafka_topic",
+                            "kafka_partition",
+                            "kafka_offset",
+                            "kafka_timestamp",
+                            "raw_value",
+                            "ingestion_time",
                             "speed_category",
                             "fuel_status",
                             "battery_status",
@@ -114,7 +139,11 @@ class ValidatorFactory:
                         [
                             "vehicle_id",
                             "event_time",
-                        ]
+                        ],
+                        order_columns=[
+                            "kafka_partition",
+                            "kafka_offset",
+                        ],
                     ),
                 ]
             )

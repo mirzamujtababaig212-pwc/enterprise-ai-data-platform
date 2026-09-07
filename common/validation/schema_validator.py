@@ -6,6 +6,9 @@ class SchemaValidator(BaseValidator):
         self.expected_columns = expected_columns
 
     def validate(self, df):
-        if list(df.columns) != list(self.expected_columns):
-            raise RuntimeError(f"Expected schema {self.expected_columns}, got {df.columns}")
+        missing_columns = [column for column in self.expected_columns if column not in df.columns]
+
+        if missing_columns:
+            raise RuntimeError("Missing required columns: " + ", ".join(missing_columns))
+
         return df, None
