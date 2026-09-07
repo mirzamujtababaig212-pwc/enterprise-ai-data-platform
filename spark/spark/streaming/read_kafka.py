@@ -1,6 +1,6 @@
-from pyspark.sql import SparkSession
+from common.spark.spark_builder import SparkSessionBuilder
 
-spark = SparkSession.builder.appName("VehicleTelemetryStreaming").getOrCreate()
+spark = SparkSessionBuilder.build("VehicleTelemetryStreaming")
 
 spark.sparkContext.setLogLevel("WARN")
 
