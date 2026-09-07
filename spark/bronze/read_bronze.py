@@ -1,9 +1,28 @@
-from pyspark.sql import SparkSession
+from common.config.settings import Settings
+from common.spark.spark_builder import SparkSessionBuilder
 
-spark = SparkSession.builder.appName("ReadBronze").getOrCreate()
 
-df = spark.read.parquet("data/bronze")
+def main():
+    spark = SparkSessionBuilder.build("ReadBronze")
 
-df.printSchema()
+    try:
+        df = spark.read.format("delta").load(Settings.storage.BRONZE_PATH)
 
-df.show(truncate=False)
+        print("BRONZE ROW COUNT:", df.count())
+
+        print("\nBRONZE COLUMNS:")
+        for column in df.columns:
+            print(column)
+
+        print("\nBRONZE SCHEMA:")
+        df.printSchema()
+
+        print("\nSAMPLE DATA:")
+        df.show(5, truncate=False)
+
+    finally:
+        spark.stop()
+
+
+if __name__ == "__main__":
+    main()
