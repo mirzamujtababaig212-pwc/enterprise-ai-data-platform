@@ -12,8 +12,15 @@ class BatchBronzeTransformer(BaseTransformer):
 
     REQUIRED_COLUMNS = [
         "vehicle_id",
-        "status",
         "event_time",
+        "latitude",
+        "longitude",
+        "speed",
+        "rpm",
+        "fuel_level",
+        "battery",
+        "engine_temperature",
+        "gear",
     ]
 
     @staticmethod
@@ -24,7 +31,6 @@ class BatchBronzeTransformer(BaseTransformer):
         ]
 
         if missing:
-
             raise RuntimeError("Batch input missing required columns: " + ", ".join(missing))
 
         result = (
@@ -33,15 +39,15 @@ class BatchBronzeTransformer(BaseTransformer):
                 lit(None).cast("string"),
             )
             .withColumn(
-                "topic",
+                "kafka_topic",
                 lit("batch"),
             )
             .withColumn(
-                "partition",
+                "kafka_partition",
                 lit(None).cast("integer"),
             )
             .withColumn(
-                "offset",
+                "kafka_offset",
                 lit(None).cast("long"),
             )
             .withColumn(

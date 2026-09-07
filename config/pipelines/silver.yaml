@@ -2,8 +2,9 @@ pipeline:
   class: silver
 
 reader:
-  type: parquet
-  path: BATCH_BRONZE_PATH
+  type: delta
+  table: BRONZE_TABLE
+  path: BRONZE_PATH
 
 writer:
   type: delta

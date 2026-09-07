@@ -53,6 +53,8 @@ class StorageConfig:
     # DELTA STORAGE
     # ==============================================================
 
+    RAW_VEHICLE_DATA_PATH = str(PROJECT_ROOT / "data" / "vehicle_events.csv")
+
     BRONZE_PATH = str(PROJECT_ROOT / "data" / "delta" / "bronze" / "vehicle_events")
 
     SILVER_PATH = str(PROJECT_ROOT / "data" / "delta" / "silver" / "vehicle_events")
