@@ -14,7 +14,7 @@ COMMANDS = [
     ],
     [
         sys.executable,
-        str(PROJECT_ROOT / "spark" / "pipelines" / "bronze_to_silver_pipeline.py"),
+        str(PROJECT_ROOT / "spark" / "batch" / "bronze_to_silver.py"),
     ],
     [
         sys.executable,

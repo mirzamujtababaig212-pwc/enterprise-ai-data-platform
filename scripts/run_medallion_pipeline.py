@@ -93,7 +93,7 @@ def build_stages(
     return [
         PipelineStage(
             name="bronze_to_silver",
-            script=(project_root / "spark" / "pipelines" / "bronze_to_silver_pipeline.py"),
+            script=(project_root / "spark" / "batch" / "bronze_to_silver.py"),
         ),
         PipelineStage(
             name="silver_to_gold",
