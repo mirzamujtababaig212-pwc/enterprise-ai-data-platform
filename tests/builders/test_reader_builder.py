@@ -114,3 +114,34 @@ def test_build_table_reader_requires_table():
 
     with pytest.raises(ValueError, match="Table is required"):
         ReaderBuilder.build(config)
+
+
+def test_reader_builder_creates_snowflake_reader():
+
+    from common.builders.reader_builder import (
+        ReaderBuilder,
+    )
+    from common.readers.snowflake_reader import (
+        SnowflakeReader,
+    )
+
+    config = {
+        "reader": {
+            "type": "snowflake",
+            "table": "TEST_TABLE",
+            "options": {
+                "sfURL": ("test.snowflakecomputing.com"),
+            },
+        }
+    }
+
+    reader = ReaderBuilder.build(config)
+
+    assert isinstance(
+        reader,
+        SnowflakeReader,
+    )
+
+    assert reader.table == "TEST_TABLE"
+
+    assert reader.options["sfURL"] == "test.snowflakecomputing.com"

@@ -237,3 +237,24 @@ def test_invalid_writer_type():
         match="Unsupported writer type",
     ):
         WriterBuilder.build(config)
+
+
+def test_snowflake_writer_requires_table():
+
+    import pytest
+
+    from common.builders.writer_builder import (
+        WriterBuilder,
+    )
+
+    config = {
+        "writer": {
+            "type": "snowflake",
+        }
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Snowflake writer requires a table",
+    ):
+        WriterBuilder.build(config)

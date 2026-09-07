@@ -6,20 +6,51 @@ from common.readers.postgres_reader import PostgresReader
 from common.readers.snowflake_reader import SnowflakeReader
 
 
-def test_snowflake_reader_read_delegates_to_read_table():
-    spark = MagicMock()
-    reader = SnowflakeReader("vehicles")
+def test_snowflake_reader_read_delegates_to_read_table(
+    monkeypatch,
+):
+
+    options = {
+        "sfURL": ("test.snowflakecomputing.com"),
+    }
+
+    reader = SnowflakeReader(
+        options=options,
+        table="vehicles",
+    )
+
+    expected = object()
+
+    captured = {}
+
+    def fake_read_table(
+        spark,
+        options,
+        table,
+    ):
+        captured["spark"] = spark
+        captured["options"] = options
+        captured["table"] = table
+
+        return expected
+
+    monkeypatch.setattr(
+        SnowflakeReader,
+        "read_table",
+        staticmethod(fake_read_table),
+    )
+
+    spark = object()
 
     result = reader.read(spark)
 
-    spark.read.format.assert_called_once_with("snowflake")
-    spark.read.format.return_value.option.assert_called_once_with(
-        "dbtable",
-        "vehicles",
-    )
-    spark.read.format.return_value.option.return_value.load.assert_called_once_with()
+    assert result is expected
 
-    assert result == (spark.read.format.return_value.option.return_value.load.return_value)
+    assert captured["spark"] is spark
+
+    assert captured["options"] == options
+
+    assert captured["table"] == "vehicles"
 
 
 def test_fabric_reader_read_delegates_to_read_table():
