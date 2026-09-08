@@ -12,6 +12,9 @@ class KafkaReader(BaseReader):
         self.options = options
 
     def read(self, spark):
+        raise NotImplementedError("KafkaReader supports streaming reads only; use read_stream().")
+
+    def read_stream(self, spark):
 
         start = time.time()
 
@@ -22,7 +25,7 @@ class KafkaReader(BaseReader):
         duration = time.time() - start
 
         logger.info(
-            "Kafka read initialized in %.2f sec",
+            "Kafka stream initialized in %.2f sec",
             duration,
         )
 

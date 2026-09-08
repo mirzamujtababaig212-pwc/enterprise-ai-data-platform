@@ -6,11 +6,11 @@ from common.factories.pipeline_factory import (
 class PipelineRunner:
 
     @staticmethod
-    def run(name, spark):
+    def run(name, spark, mode="stream"):
 
         pipeline = PipelineFactory.get_pipeline(
             name,
             spark,
         )
 
-        pipeline.run()
+        return pipeline.run(mode=mode)

@@ -18,5 +18,5 @@ def test_kafka_reader(spark, mocker):
         return_value=mock_read_stream,
     )
     mock_read_stream.format.return_value.options.return_value.load.return_value = dataframe
-    result = reader.read(spark)
+    result = reader.read_stream(spark)
     assert result == dataframe

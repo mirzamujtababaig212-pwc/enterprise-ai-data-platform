@@ -384,3 +384,38 @@ def test_cleanup_on_batch_failure(
             pipeline.run_batch()
 
         mock_cleanup.assert_called_once()
+
+
+def test_run_stream_uses_stream_reader(
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
+):
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
+    )
+
+    source_df = Mock()
+    query = Mock()
+
+    mock_reader.read_stream.return_value = source_df
+    mock_writer.write_stream.return_value = query
+    query.awaitTermination.return_value = "terminated"
+
+    result = pipeline.run_stream()
+
+    mock_reader.read_stream.assert_called_once_with(spark)
+    mock_reader.read.assert_not_called()
+    mock_writer.write_stream.assert_called_once()
+
+    assert result == "terminated"

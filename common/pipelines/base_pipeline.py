@@ -69,7 +69,7 @@ class BasePipeline(ABC):
         try:
             self.initialize()
 
-            source_df = self.read()
+            source_df = self.read_stream()
 
             return self.write_stream(source_df)
 
@@ -111,6 +111,10 @@ class BasePipeline(ABC):
     def read(self):
 
         return self.reader.read(self.spark)
+
+    def read_stream(self):
+
+        return self.reader.read_stream(self.spark)
 
     # ================================================================
     # VALIDATION
