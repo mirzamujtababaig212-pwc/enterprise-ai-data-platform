@@ -1,6 +1,7 @@
 """Tests for provider fallback execution."""
 
 import pytest
+from prometheus_client import REGISTRY
 
 from ai_platform.llm_gateway.routing.fallback_executor import (
     FallbackExecutor,
@@ -113,3 +114,58 @@ async def test_all_retryable_providers_fail() -> None:
             [first, second],
             call,
         )
+
+
+def _fallback_metric_value(
+    primary_provider: str,
+    fallback_provider: str,
+) -> float:
+    for metric in REGISTRY.collect():
+        if metric.name != "llm_gateway_fallback_requests":
+            continue
+
+        for sample in metric.samples:
+            if (
+                sample.name == "llm_gateway_fallback_requests_total"
+                and sample.labels.get("primary_provider") == primary_provider
+                and sample.labels.get("fallback_provider") == fallback_provider
+            ):
+                return sample.value
+
+    return 0.0
+
+
+@pytest.mark.asyncio
+async def test_fallback_metric_increases_when_second_provider_is_attempted():
+    executor = FallbackExecutor()
+
+    first = FakeProvider("metric-openai")
+    second = FakeProvider("metric-gemini")
+
+    before = _fallback_metric_value(
+        "metric-openai",
+        "metric-gemini",
+    )
+
+    async def call(provider: FakeProvider):
+        if provider.name == "metric-openai":
+            raise TimeoutError("provider timeout")
+
+        return {
+            "provider": provider.name,
+            "response": "success",
+        }
+
+    result = await executor.execute(
+        [first, second],
+        call,
+    )
+
+    assert result.provider_name == "metric-gemini"
+
+    after = _fallback_metric_value(
+        "metric-openai",
+        "metric-gemini",
+    )
+
+    assert after == before + 1

@@ -6,6 +6,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ai_platform.llm_gateway.metrics.prometheus import (
+    FALLBACK_REQUESTS_TOTAL,
+)
 from ai_platform.llm_gateway.reliability.failure_classifier import (
     FailureCategory,
     ProviderFailureClassifier,
@@ -58,8 +61,16 @@ class FallbackExecutor:
 
         last_error: Exception | None = None
 
-        for provider in providers:
+        primary_provider_name = self._provider_name(providers[0])
+
+        for index, provider in enumerate(providers):
             provider_name = self._provider_name(provider)
+
+            if index > 0:
+                FALLBACK_REQUESTS_TOTAL.labels(
+                    primary_provider=primary_provider_name,
+                    fallback_provider=provider_name,
+                ).inc()
 
             try:
                 response = await call(provider)

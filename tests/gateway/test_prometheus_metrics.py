@@ -6,6 +6,7 @@ EXPECTED_METRICS = {
     "llm_gateway_http_requests",
     "llm_gateway_http_request_duration_seconds",
     "llm_gateway_provider_requests",
+    "llm_gateway_fallback_requests",
     "llm_gateway_model_requests",
     "llm_gateway_input_tokens",
     "llm_gateway_output_tokens",
@@ -26,6 +27,7 @@ def test_canonical_prometheus_module_exports_metrics():
     assert prometheus.HTTP_REQUESTS_TOTAL is not None
     assert prometheus.HTTP_REQUEST_DURATION_SECONDS is not None
     assert prometheus.PROVIDER_REQUESTS_TOTAL is not None
+    assert prometheus.FALLBACK_REQUESTS_TOTAL is not None
     assert prometheus.MODEL_REQUESTS_TOTAL is not None
     assert prometheus.INPUT_TOKENS_TOTAL is not None
     assert prometheus.OUTPUT_TOKENS_TOTAL is not None
