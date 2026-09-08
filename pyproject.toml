@@ -48,7 +48,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.37",
     "opentelemetry-instrumentation-fastapi>=0.58b0",
     "structlog>=25.4",
-    "qdrant-client==1.19.0",
+    "qdrant-client==1.16.2",
 ]
 
 [project.optional-dependencies]
