@@ -35,6 +35,7 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
+from ai_platform.llm_gateway.gateway.cost import calculate_cost
 from ai_platform.llm_gateway.logging.logger import get_logger
 from ai_platform.llm_gateway.middleware.exception_logging import (
     ExceptionLoggingMiddleware,
@@ -292,7 +293,13 @@ async def chat_endpoint(
         latency_ms=int((time.time() - start) * 1000),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        estimated_cost=0.0,  # placeholder
+        estimated_cost=float(
+            calculate_cost(
+                model=request.model,
+                prompt_tokens=tokens_in,
+                completion_tokens=tokens_out,
+            )
+        ),
         status="success",
     )
     http_request.state.metrics = metrics.model_dump()

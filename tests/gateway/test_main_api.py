@@ -32,7 +32,7 @@ def test_chat_success(mock_chat):
         headers=HEADERS,
         json={
             "provider": "openai",
-            "model": "gpt-4",
+            "model": "gpt-4.1-mini",
             "prompt": "Hello",
         },
     )
@@ -44,6 +44,7 @@ def test_chat_success(mock_chat):
     assert body["reply"] == "hello"
     assert body["metrics"]["tokens_in"] == 5
     assert body["metrics"]["tokens_out"] == 3
+    assert body["metrics"]["estimated_cost"] == 0.0000068
 
 
 ###########################################################################
