@@ -25,3 +25,5 @@ opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-asgi
 structlog>=25.4
 openai
+
+qdrant-client==1.16.2
