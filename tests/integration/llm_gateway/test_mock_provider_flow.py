@@ -1,5 +1,7 @@
 """End-to-end tests for the deterministic mock provider."""
 
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.main import app
@@ -81,12 +83,16 @@ def test_mock_chat_success() -> None:
 def test_mock_models_are_exposed() -> None:
     """Mock models must appear in the model registry/API."""
 
-    response = client.get(
-        "/v1/models",
-        headers={
-            "x-api-key": API_KEY,
-        },
-    )
+    with patch(
+        "ai_platform.llm_gateway.routing.router.ProviderFactory.list_providers",
+        return_value=["mock"],
+    ):
+        response = client.get(
+            "/v1/models",
+            headers={
+                "x-api-key": API_KEY,
+            },
+        )
 
     assert response.status_code == 200
 
@@ -99,12 +105,16 @@ def test_mock_models_are_exposed() -> None:
 def test_mock_health() -> None:
     """Gateway health endpoint must remain operational."""
 
-    response = client.get(
-        "/v1/health",
-        headers={
-            "x-api-key": API_KEY,
-        },
-    )
+    with patch(
+        "ai_platform.llm_gateway.routing.router.ProviderFactory.list_providers",
+        return_value=["mock"],
+    ):
+        response = client.get(
+            "/v1/health",
+            headers={
+                "x-api-key": API_KEY,
+            },
+        )
 
     assert response.status_code == 200
 

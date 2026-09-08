@@ -14,6 +14,24 @@ Important:
 from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.main import app
+from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def mock_provider_registry():
+    """
+    Keep Prometheus behavioral tests independent from real external
+    provider availability.
+    """
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.ProviderFactory.list_providers",
+        return_value=["mock"],
+    ):
+        yield
+
 
 client = TestClient(app)
 
