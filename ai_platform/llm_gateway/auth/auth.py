@@ -7,7 +7,6 @@ from ai_platform.llm_gateway.config.settings import settings
 tracer = trace.get_tracer(__name__)
 
 API_KEY_NAME = "x-api-key"
-VALID_API_KEYS = {key.strip() for key in settings.API_KEY.split(",") if key.strip()}
 
 PUBLIC_PATHS = {
     "/health",
@@ -17,7 +16,12 @@ PUBLIC_PATHS = {
     "/favicon.ico",
     "/metrics",
     "/healthz",
+    "/v1/health",
 }
+
+
+def get_valid_api_keys() -> set[str]:
+    return {key.strip() for key in settings.API_KEY.split(",") if key.strip()}
 
 
 class APIKeyMiddleware:
@@ -39,7 +43,7 @@ class APIKeyMiddleware:
 
         api_key = request.headers.get(API_KEY_NAME)
 
-        if api_key not in VALID_API_KEYS:
+        if api_key not in get_valid_api_keys():
             response = JSONResponse(
                 status_code=401,
                 content={
