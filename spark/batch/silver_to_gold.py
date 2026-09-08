@@ -10,6 +10,7 @@ def main():
         PipelineRunner.run(
             "gold",
             spark,
+            mode="batch",
         )
 
     finally:
