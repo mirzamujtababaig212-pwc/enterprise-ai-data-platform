@@ -179,7 +179,3 @@ async def close_rag_vector_store() -> None:
 
     if close is not None:
         await close()
-
-
-async def close(self) -> None:
-    await self._client.close()
