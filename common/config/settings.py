@@ -6,6 +6,7 @@ from common.config.storage import StorageConfig
 from common.config.snowflake import SnowflakeConfig
 from common.config.fabric import FabricConfig
 from common.config.qdrant import QdrantConfig
+from common.config.vector_store import VectorStoreConfig
 
 
 class Settings:
@@ -17,3 +18,4 @@ class Settings:
     snowflake = SnowflakeConfig
     fabric = FabricConfig
     qdrant = QdrantConfig
+    vector_store = VectorStoreConfig
