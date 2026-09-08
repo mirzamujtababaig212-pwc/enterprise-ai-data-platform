@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from ai_platform.llm_gateway.api.main import app
@@ -67,7 +69,21 @@ def test_valid_api_key_is_accepted(monkeypatch):
 def test_health_endpoint_does_not_require_api_key():
     client = TestClient(app)
 
-    response = client.get("/v1/health")
+    with (
+        patch(
+            "ai_platform.llm_gateway.providers.provider_factory.ProviderFactory.list_providers",
+            return_value=["mock"],
+        ),
+        patch(
+            "ai_platform.llm_gateway.providers.mock_provider.MockProvider.health_check"
+        ) as mock_health,
+    ):
+        mock_health.return_value = {
+            "status": "ok",
+            "configured": True,
+        }
+
+        response = client.get("/v1/health")
 
     assert response.status_code == 200
 

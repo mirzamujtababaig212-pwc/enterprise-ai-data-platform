@@ -8,10 +8,15 @@ client = TestClient(app)
 
 
 def test_health():
-
-    with patch(
-        "ai_platform.llm_gateway.providers.openai_provider.OpenAIProvider.health_check"
-    ) as mock_health:
+    with (
+        patch(
+            "ai_platform.llm_gateway.providers.provider_factory.ProviderFactory.list_providers",
+            return_value=["openai"],
+        ),
+        patch(
+            "ai_platform.llm_gateway.providers.openai_provider.OpenAIProvider.health_check"
+        ) as mock_health,
+    ):
         mock_health.return_value = {
             "status": "ok",
             "configured": True,
