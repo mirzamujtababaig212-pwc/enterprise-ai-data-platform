@@ -11,6 +11,7 @@ API_KEY_NAME = "x-api-key"
 PUBLIC_PATHS = {
     "/api/v1/health",
     "/api/v1/platform/health",
+    "/metrics",
     "/docs",
     "/redoc",
     "/openapi.json",
