@@ -64,6 +64,13 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
       AWS_DEFAULT_REGION: us-east-1
       # --------------------------------------------------------
+      # Vector Store
+      # --------------------------------------------------------
+      VECTOR_STORE_BACKEND: ${VECTOR_STORE_BACKEND:-in_memory}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-enterprise_ai_knowledge}
+      QDRANT_TIMEOUT: ${QDRANT_TIMEOUT:-10.0}
+      # --------------------------------------------------------
       # Environment
       # --------------------------------------------------------
       ENVIRONMENT: ${ENVIRONMENT:-local}
@@ -269,6 +276,20 @@ services:
     restart: unless-stopped
 
   # ============================================================
+  # Qdrant Vector Store
+  # ============================================================
+  qdrant:
+    image: qdrant/qdrant:v1.15.5
+    container_name: enterprise-ai-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+
+  # ============================================================
   # OTEL
   # ============================================================
   otel-collector:
@@ -317,3 +338,4 @@ volumes:
   prometheus_data:
   grafana_data:
   mlflow_data:
+  qdrant_data:
