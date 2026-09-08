@@ -18,13 +18,14 @@ from rag.indexing import RAGIndexer
 from rag.chunking.recursive import RecursiveChunker
 from rag.query import RAGQueryService
 from rag.retrieval.retriever import SemanticRetriever
-from rag.stores.in_memory import InMemoryVectorStore
+from rag.contracts import VectorStore
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
 
 from app.control_plane.persistence.database import get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
+from rag.stores.factory import VectorStoreFactory
 
 _llm_router = Router()
 
@@ -44,7 +45,7 @@ _vehicle_risk_predictor = VehicleRiskPredictor(
     model_alias="champion",
 )
 
-_rag_vector_store = InMemoryVectorStore()
+_rag_vector_store = VectorStoreFactory.create()
 
 _rag_chunker = RecursiveChunker(
     chunk_size=1000,
@@ -149,7 +150,7 @@ def get_vehicle_risk_predictor() -> VehicleRiskPredictor:
     return _vehicle_risk_predictor
 
 
-def get_rag_vector_store() -> InMemoryVectorStore:
+def get_rag_vector_store() -> VectorStore:
     return _rag_vector_store
 
 
