@@ -33,9 +33,7 @@ PROVIDER_CAPABILITIES = {
         "chat": [
             "anthropic-chat",
         ],
-        "embeddings": [
-            "anthropic-embedding",
-        ],
+        "embeddings": [],
         "stream": [
             "anthropic-chat",
         ],
