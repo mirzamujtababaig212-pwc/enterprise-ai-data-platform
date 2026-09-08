@@ -376,3 +376,129 @@ async def test_retry_metric_increases_for_retry_attempt():
     )
 
     assert after == before + 1
+
+
+def _provider_latency_count(provider: str) -> float:
+    for metric in REGISTRY.collect():
+        if metric.name != "llm_gateway_provider_latency_seconds":
+            continue
+
+        for sample in metric.samples:
+            if (
+                sample.name == "llm_gateway_provider_latency_seconds_count"
+                and sample.labels.get("provider") == provider
+            ):
+                return sample.value
+
+    return 0.0
+
+
+def _provider_error_metric_value(
+    provider: str,
+    error_type: str,
+) -> float:
+    for metric in REGISTRY.collect():
+        if metric.name != "llm_gateway_provider_errors":
+            continue
+
+        for sample in metric.samples:
+            if (
+                sample.name == "llm_gateway_provider_errors_total"
+                and sample.labels.get("provider") == provider
+                and sample.labels.get("error_type") == error_type
+            ):
+                return sample.value
+
+    return 0.0
+
+
+@pytest.mark.asyncio
+async def test_provider_latency_metric_records_successful_attempt():
+    executor = FallbackExecutor(base_delay=0)
+
+    provider = FakeProvider("telemetry-success-openai")
+
+    before = _provider_latency_count(provider.name)
+
+    async def call(_provider: FakeProvider):
+        return {"response": "success"}
+
+    result = await executor.execute([provider], call)
+
+    assert result.provider_name == provider.name
+
+    after = _provider_latency_count(provider.name)
+
+    assert after == before + 1
+
+
+@pytest.mark.asyncio
+async def test_provider_error_metric_records_failed_attempt():
+    executor = FallbackExecutor(
+        max_retries=0,
+        base_delay=0,
+    )
+
+    provider = FakeProvider("telemetry-error-openai")
+
+    before_errors = _provider_error_metric_value(
+        provider.name,
+        "timeout",
+    )
+    before_latency = _provider_latency_count(provider.name)
+
+    async def call(_provider: FakeProvider):
+        raise TimeoutError("provider timeout")
+
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await executor.execute([provider], call)
+
+    after_errors = _provider_error_metric_value(
+        provider.name,
+        "timeout",
+    )
+    after_latency = _provider_latency_count(provider.name)
+
+    assert after_errors == before_errors + 1
+    assert after_latency == before_latency + 1
+
+
+@pytest.mark.asyncio
+async def test_provider_metrics_record_each_retry_attempt():
+    executor = FallbackExecutor(
+        max_retries=2,
+        base_delay=0,
+    )
+
+    provider = FakeProvider("telemetry-retry-openai")
+
+    before_errors = _provider_error_metric_value(
+        provider.name,
+        "timeout",
+    )
+    before_latency = _provider_latency_count(provider.name)
+
+    calls = 0
+
+    async def call(_provider: FakeProvider):
+        nonlocal calls
+        calls += 1
+
+        if calls <= 2:
+            raise TimeoutError("provider timeout")
+
+        return {"response": "success"}
+
+    result = await executor.execute([provider], call)
+
+    assert result.provider_name == provider.name
+    assert calls == 3
+
+    after_errors = _provider_error_metric_value(
+        provider.name,
+        "timeout",
+    )
+    after_latency = _provider_latency_count(provider.name)
+
+    assert after_errors == before_errors + 2
+    assert after_latency == before_latency + 3

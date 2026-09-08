@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from ai_platform.llm_gateway.metrics.prometheus import (
     FALLBACK_REQUESTS_TOTAL,
+    PROVIDER_ERRORS_TOTAL,
+    PROVIDER_LATENCY_SECONDS,
     PROVIDER_RETRIES_TOTAL,
 )
 from ai_platform.llm_gateway.reliability.failure_classifier import (
@@ -88,6 +91,8 @@ class FallbackExecutor:
                 ).inc()
 
             for attempt in range(self.max_retries + 1):
+                started_at = time.perf_counter()
+
                 try:
                     response = await call(provider)
 
@@ -107,6 +112,11 @@ class FallbackExecutor:
                 except Exception as error:
                     last_error = error
                     category = self.classifier.classify(error)
+
+                    PROVIDER_ERRORS_TOTAL.labels(
+                        provider=provider_name,
+                        error_type=category.value,
+                    ).inc()
 
                     if self.classifier.is_retryable(error):
                         status_code = getattr(error, "status_code", None)
@@ -160,6 +170,11 @@ class FallbackExecutor:
                         raise
 
                     break
+
+                finally:
+                    PROVIDER_LATENCY_SECONDS.labels(
+                        provider=provider_name,
+                    ).observe(time.perf_counter() - started_at)
 
         if last_error is not None:
             raise last_error
