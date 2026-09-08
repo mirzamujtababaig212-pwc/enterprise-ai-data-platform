@@ -30,6 +30,9 @@ class QdrantVectorStore:
         self._collection_name = collection_name
         self._embedding_dimension: int | None = None
 
+    async def close(self) -> None:
+        await self._client.close()
+
     async def upsert(
         self,
         chunks: Sequence[EmbeddedChunk],

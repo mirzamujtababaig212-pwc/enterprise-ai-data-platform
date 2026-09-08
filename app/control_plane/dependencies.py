@@ -172,3 +172,14 @@ def get_usage_store(
     db: Session = Depends(get_db),
 ) -> PostgreSQLUsageRepository:
     return PostgreSQLUsageRepository(db)
+
+
+async def close_rag_vector_store() -> None:
+    close = getattr(_rag_vector_store, "close", None)
+
+    if close is not None:
+        await close()
+
+
+async def close(self) -> None:
+    await self._client.close()

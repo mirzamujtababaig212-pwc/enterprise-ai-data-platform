@@ -32,10 +32,10 @@ def test_factory_creates_qdrant(monkeypatch) -> None:
         assert store._collection_name == Settings.qdrant.COLLECTION
     finally:
         # The client has no network connection at construction time.
-        # Close it explicitly to avoid leaving async resources open.
+        # Close the store explicitly to avoid leaving async resources open.
         import asyncio
 
-        asyncio.run(store._client.close())
+        asyncio.run(store.close())
 
 
 def test_factory_rejects_unknown_backend(monkeypatch) -> None:

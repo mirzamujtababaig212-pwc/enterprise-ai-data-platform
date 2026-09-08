@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from ai_platform.llm_gateway.api.main import app as llm_gateway_app
@@ -9,11 +11,20 @@ from app.control_plane.routes.llm import router as llm_router
 from app.control_plane.routes.ml import router as ml_router
 from app.control_plane.routes.platform import router as platform_router
 from app.control_plane.routes.rag import router as rag_router
+from app.control_plane.dependencies import close_rag_vector_store
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await close_rag_vector_store()
+
 
 app = FastAPI(
     title="Enterprise AI Platform Control Plane",
     version="1.0.0",
     description=("Unified API and orchestration boundary for the Enterprise AI Platform."),
+    lifespan=lifespan,
 )
 
 app.add_middleware(ControlPlaneAPIKeyMiddleware)

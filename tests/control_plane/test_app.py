@@ -39,3 +39,20 @@ def test_platform_capabilities() -> None:
     assert "llm.chat" in capability_names
     assert "llm.embeddings" in capability_names
     assert "ml.vehicle-risk" in capability_names
+
+
+def test_lifespan_closes_rag_vector_store(monkeypatch) -> None:
+    calls: list[bool] = []
+
+    async def fake_close() -> None:
+        calls.append(True)
+
+    monkeypatch.setattr(
+        "app.control_plane.app.close_rag_vector_store",
+        fake_close,
+    )
+
+    with TestClient(app):
+        pass
+
+    assert calls == [True]
