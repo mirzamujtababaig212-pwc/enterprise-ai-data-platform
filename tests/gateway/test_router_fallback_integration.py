@@ -210,7 +210,7 @@ async def test_chat_first_provider_fails_second_succeeds(
         },
     )
 
-    fallback_executor = FallbackExecutor()
+    fallback_executor = FallbackExecutor(max_retries=0)
 
     router, routing_resolver = build_router(
         [provider_a, provider_b],
@@ -257,7 +257,7 @@ async def test_chat_first_and_second_fail_third_succeeds(
         },
     )
 
-    fallback_executor = FallbackExecutor()
+    fallback_executor = FallbackExecutor(max_retries=0)
 
     router, routing_resolver = build_router(
         [provider_a, provider_b, provider_c],
@@ -302,7 +302,7 @@ async def test_chat_all_providers_fail_raises_final_classified_exception(
         chat_exception=ProviderConnectionError("provider-c failure"),
     )
 
-    fallback_executor = FallbackExecutor()
+    fallback_executor = FallbackExecutor(max_retries=0)
 
     router, routing_resolver = build_router(
         [provider_a, provider_b, provider_c],
@@ -395,7 +395,7 @@ async def test_embeddings_use_fallback_chain(
         embeddings_result=[0.9, 0.8, 0.7],
     )
 
-    fallback_executor = FallbackExecutor()
+    fallback_executor = FallbackExecutor(max_retries=0)
 
     router, routing_resolver = build_router(
         [provider_a, provider_b],

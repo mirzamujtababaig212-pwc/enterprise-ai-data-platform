@@ -85,6 +85,16 @@ PROVIDER_ERRORS_TOTAL = Counter(
 )
 
 
+PROVIDER_RETRIES_TOTAL = Counter(
+    "llm_gateway_provider_retries_total",
+    "Total retry attempts for LLM providers.",
+    [
+        "provider",
+        "failure_category",
+    ],
+)
+
+
 FALLBACK_REQUESTS_TOTAL = Counter(
     "llm_gateway_fallback_requests_total",
     "Total requests routed to a fallback provider.",
