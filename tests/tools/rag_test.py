@@ -8,14 +8,30 @@ from tools.rag.search import RAGSearchTool
 
 class FakeRetriever:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[
+            tuple[
+                str,
+                int,
+                float | None,
+                dict[str, object] | None,
+            ]
+        ] = []
 
     async def retrieve(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int,
+        min_score: float | None = None,
+        metadata_filter: dict[str, object] | None = None,
     ) -> list[RetrievalResult]:
-        self.calls.append((query, top_k))
+        self.calls.append(
+            (
+                query,
+                top_k,
+                min_score,
+                metadata_filter,
+            )
+        )
 
         return [
             RetrievalResult(
@@ -54,7 +70,7 @@ async def test_rag_search_returns_structured_results() -> None:
     )
 
     assert retriever.calls == [
-        ("How does enterprise RAG work?", 2),
+        ("How does enterprise RAG work?", 2, None, None),
     ]
 
     assert result["query"] == "How does enterprise RAG work?"
@@ -84,7 +100,7 @@ async def test_rag_search_defaults_top_k_to_five() -> None:
 
     await tool.execute({"query": "RAG"})
 
-    assert retriever.calls == [("RAG", 5)]
+    assert retriever.calls == [("RAG", 5, None, None)]
 
 
 @pytest.mark.asyncio
@@ -127,3 +143,64 @@ def test_rag_search_definition() -> None:
     assert definition.input_schema["required"] == ["query"]
     assert definition.input_schema["properties"]["top_k"]["default"] == 5
     assert definition.metadata["category"] == "retrieval"
+
+
+@pytest.mark.asyncio
+async def test_rag_search_passes_min_score_and_metadata_filter() -> None:
+    retriever = FakeRetriever()
+
+    tool = RAGSearchTool(retriever)
+
+    metadata_filter = {
+        "tenant_id": "tenant-a",
+        "source": "architecture.md",
+    }
+
+    result = await tool.execute(
+        {
+            "query": "enterprise architecture",
+            "top_k": 5,
+            "min_score": 0.75,
+            "metadata_filter": metadata_filter,
+        }
+    )
+
+    assert result["retrieved_count"] == 2
+
+    assert retriever.calls == [
+        (
+            "enterprise architecture",
+            5,
+            0.75,
+            metadata_filter,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rag_search_rejects_invalid_min_score():
+    tool = RAGSearchTool(FakeRetriever())
+
+    with pytest.raises(ValueError, match="between 0.0 and 1.0"):
+        await tool.execute(
+            {
+                "query": "RAG",
+                "min_score": 1.1,
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_rag_search_rejects_invalid_metadata_filter():
+    tool = RAGSearchTool(FakeRetriever())
+
+    with pytest.raises(
+        TypeError,
+        match="metadata_filter must be an object",
+    ):
+        await tool.execute(
+            {
+                "query": "RAG",
+                "metadata_filter": ["tenant-a"],
+            }
+        )

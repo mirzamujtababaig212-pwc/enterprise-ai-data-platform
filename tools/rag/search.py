@@ -34,6 +34,23 @@ class RAGSearchTool:
                         "default": 5,
                         "description": "Maximum number of sources to return.",
                     },
+                    "min_score": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": (
+                            "Optional minimum relevance score. Results below this "
+                            "threshold are excluded."
+                        ),
+                    },
+                    "metadata_filter": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "description": (
+                            "Optional equality-based metadata filters. Multiple fields "
+                            "are combined with AND semantics."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
@@ -55,9 +72,25 @@ class RAGSearchTool:
         if top_k < 1 or top_k > 10:
             raise ValueError("rag.search top_k must be between 1 and 10.")
 
+        min_score = arguments.get("min_score")
+
+        if min_score is not None:
+            if isinstance(min_score, bool) or not isinstance(min_score, (int, float)):
+                raise TypeError("rag.search min_score must be a number.")
+
+            if min_score < 0.0 or min_score > 1.0:
+                raise ValueError("rag.search min_score must be between 0.0 and 1.0.")
+
+        metadata_filter = arguments.get("metadata_filter")
+
+        if metadata_filter is not None and not isinstance(metadata_filter, dict):
+            raise TypeError("rag.search metadata_filter must be an object.")
+
         results = await self._retriever.retrieve(
             query=query.strip(),
             top_k=top_k,
+            min_score=min_score,
+            metadata_filter=metadata_filter,
         )
 
         return {
