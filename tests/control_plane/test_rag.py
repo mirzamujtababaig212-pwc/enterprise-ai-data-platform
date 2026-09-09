@@ -10,7 +10,9 @@ from app.control_plane.dependencies import (
 )
 from rag import RAGIndexer
 from rag.chunking import RecursiveChunker
+from rag.models import Document
 from rag.query import RAGQueryService
+from rag.retrieval import SemanticRetriever
 from rag.stores import InMemoryVectorStore
 
 
@@ -380,3 +382,83 @@ def test_control_plane_rag_query_rejects_invalid_metadata_filter() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_control_plane_rag_query_applies_metadata_filter_end_to_end() -> None:
+    vector_store = InMemoryVectorStore()
+    embedding_service = FakeEmbeddingService()
+
+    indexer = RAGIndexer(
+        chunker=RecursiveChunker(
+            chunk_size=100,
+            overlap=10,
+        ),
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+    )
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=FakeChatService(),
+    )
+
+    import asyncio
+
+    async def seed_documents() -> None:
+        await indexer.index(
+            Document(
+                id="doc-architecture",
+                content="The architecture uses Kafka, Spark, and Delta Lake.",
+                metadata={
+                    "tenant_id": "tenant-a",
+                    "document_type": "architecture",
+                },
+            )
+        )
+
+        await indexer.index(
+            Document(
+                id="doc-policy",
+                content="The enterprise policy requires approved model usage.",
+                metadata={
+                    "tenant_id": "tenant-b",
+                    "document_type": "policy",
+                },
+            )
+        )
+
+    asyncio.run(seed_documents())
+
+    app.dependency_overrides[get_rag_query_service] = lambda: service
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "query": "enterprise platform architecture",
+            "top_k": 5,
+            "metadata_filter": {
+                "tenant_id": "tenant-a",
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["retrieved_count"] == 1
+    assert len(payload["sources"]) == 1
+
+    source = payload["sources"][0]
+
+    assert source["document_id"] == "doc-architecture"
+    assert source["metadata"] == {
+        "tenant_id": "tenant-a",
+        "document_type": "architecture",
+    }
