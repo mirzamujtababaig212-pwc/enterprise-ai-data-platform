@@ -10,7 +10,9 @@ from ai_platform.llm_gateway.routing.router import Router
 
 @pytest.fixture
 def routing_resolver():
-    return MagicMock()
+    resolver = MagicMock()
+    resolver.is_logical_model.return_value = False
+    return resolver
 
 
 @pytest.fixture
@@ -82,6 +84,48 @@ async def test_route_chat(router, routing_resolver, fake_provider):
         {
             "provider": "openai",
             "model": "gpt-4o",
+            "prompt": "Hello",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_chat_uses_physical_model_for_logical_route(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    routing_resolver.is_logical_model.return_value = True
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=fake_provider,
+            model="gpt-4.1-mini",
+        )
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
+    ):
+        response = await router.route_chat(
+            {
+                "model": "enterprise-chat",
+                "prompt": "Hello",
+            }
+        )
+
+    assert response["reply"] == "hello"
+
+    routing_resolver.resolve_routes.assert_called_once_with(
+        capability="chat",
+        model="enterprise-chat",
+        requested_provider=None,
+    )
+
+    fake_provider.chat.assert_awaited_once_with(
+        {
+            "model": "gpt-4.1-mini",
             "prompt": "Hello",
         }
     )

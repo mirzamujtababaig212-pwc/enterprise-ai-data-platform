@@ -76,6 +76,9 @@ class FakeRoutingResolver:
         self.resolve = Mock(return_value=list(self.providers))
         self.resolve_names = Mock(return_value=list(self.names))
 
+    def is_logical_model(self, model: str) -> bool:
+        return False
+
     def resolve(
         self,
         capability,

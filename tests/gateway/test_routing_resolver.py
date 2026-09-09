@@ -12,12 +12,26 @@ from ai_platform.llm_gateway.routing.candidates import (
     RoutingCandidate,
 )
 from ai_platform.llm_gateway.routing.resolver import (
+    ResolvedRoute,
     RoutingResolver,
 )
 
 
 class FakeModelRegistry:
     """Minimal model registry used to test routing behavior."""
+
+    def is_logical_model(
+        self,
+        model: str,
+    ) -> bool:
+        return False
+
+    def get_logical_model_routes(
+        self,
+        model: str,
+        capability: str,
+    ) -> list:
+        return []
 
     def get_providers_for_model(
         self,
@@ -342,4 +356,40 @@ def test_resolver_delegates_candidate_resolution_to_policy() -> None:
             "model": "gpt-4o",
             "provider": None,
         }
+    ]
+
+
+def test_resolve_routes_preserves_candidate_models() -> None:
+    class FakePolicy:
+        def resolve_candidates(self, request):
+            return CandidateSet(
+                [
+                    RoutingCandidate(
+                        provider="openai",
+                        model="gpt-4.1-mini",
+                    ),
+                    RoutingCandidate(
+                        provider="azure_openai",
+                        model="azure-openai-chat",
+                    ),
+                ]
+            )
+
+    resolver = RoutingResolver(
+        model_registry=FakeModelRegistry(),
+        routing_policy=FakePolicy(),
+        provider_resolver=FakeProviderResolver(),
+        load_balancer=FakeBalancer(),
+    )
+
+    routes = resolver.resolve_routes(
+        capability="chat",
+        model="enterprise-chat",
+    )
+
+    assert all(isinstance(route, ResolvedRoute) for route in routes)
+
+    assert [(route.provider, route.model) for route in routes] == [
+        ("provider:azure_openai", "azure-openai-chat"),
+        ("provider:openai", "gpt-4.1-mini"),
     ]

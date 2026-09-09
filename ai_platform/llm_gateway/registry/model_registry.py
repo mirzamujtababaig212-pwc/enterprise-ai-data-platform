@@ -5,6 +5,9 @@ from ai_platform.llm_gateway.models.capabilities import (
     ProviderCapabilities,
     RegistrySnapshot,
 )
+from ai_platform.llm_gateway.registry.logical_models import (
+    LogicalModelRoute,
+)
 
 
 class ModelRegistry:
@@ -22,6 +25,10 @@ class ModelRegistry:
     def __init__(self):
         self._providers: dict[str, Any] = {}
         self._snapshot = RegistrySnapshot.empty()
+        self._logical_model_routes: dict[
+            str,
+            list[LogicalModelRoute],
+        ] = {}
 
     def register_provider(
         self,
@@ -129,6 +136,97 @@ class ModelRegistry:
             )
         ]
 
+    def register_logical_model(
+        self,
+        logical_model: str,
+        capability: str,
+        provider: str,
+        model: str,
+    ) -> None:
+        """
+        Register a capability-aware provider-specific route for a
+        logical model.
+
+        The provider and physical model must already exist in the
+        runtime registry and support the requested capability.
+        """
+
+        logical_model = str(logical_model).strip()
+        capability = str(capability).strip()
+        provider = str(provider).strip()
+        model = str(model).strip()
+
+        if not logical_model:
+            raise ValueError("logical_model must not be empty")
+
+        if not capability:
+            raise ValueError("capability must not be empty")
+
+        if not provider:
+            raise ValueError("provider must not be empty")
+
+        if not model:
+            raise ValueError("model must not be empty")
+
+        if not self.provider_exists(provider):
+            raise ValueError(f"Provider is not registered: {provider}")
+
+        if not self.model_supported(
+            provider,
+            capability,
+            model,
+        ):
+            raise ValueError(
+                f"Model is not supported for capability: " f"{provider} / {capability} / {model}"
+            )
+
+        route = LogicalModelRoute(
+            logical_model=logical_model,
+            capability=capability,
+            provider=provider,
+            model=model,
+        )
+
+        routes = self._logical_model_routes.setdefault(
+            logical_model,
+            [],
+        )
+
+        if route not in routes:
+            routes.append(route)
+
+    def get_logical_model_routes(
+        self,
+        logical_model: str,
+        capability: str | None = None,
+    ) -> list[LogicalModelRoute]:
+        """
+        Return registered routes for a logical model.
+
+        When capability is provided, only routes supporting that
+        capability are returned.
+        """
+
+        routes = list(
+            self._logical_model_routes.get(
+                logical_model,
+                [],
+            )
+        )
+
+        if capability is not None:
+            routes = [route for route in routes if route.capability == capability]
+
+        return routes
+
+    def is_logical_model(
+        self,
+        logical_model: str,
+    ) -> bool:
+        """Return whether a logical model has registered routes."""
+
+        return logical_model in self._logical_model_routes
+
     def list_providers(self) -> list[str]:
         return list(
             self._providers.keys(),
@@ -171,6 +269,7 @@ class ModelRegistry:
     def clear(self) -> None:
         self._providers.clear()
         self._snapshot = RegistrySnapshot.empty()
+        self._logical_model_routes.clear()
 
     @classmethod
     def _discover_capabilities(

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any
 
 from ai_platform.llm_gateway.providers.resolver import ProviderResolver
@@ -13,6 +14,14 @@ from ai_platform.llm_gateway.routing.policy import (
 from ai_platform.llm_gateway.routing.registry_policy import (
     RegistryRoutingPolicy,
 )
+
+
+@dataclass(frozen=True)
+class ResolvedRoute:
+    """Provider implementation bound to its routed model."""
+
+    provider: Any
+    model: str
 
 
 class RoutingResolver:
@@ -58,6 +67,52 @@ class RoutingResolver:
         self.load_balancer = (
             load_balancer if load_balancer is not None else RoundRobinLoadBalancer()
         )
+
+    def resolve_routes(
+        self,
+        capability: str,
+        model: str,
+        requested_provider: str | None = None,
+    ) -> list[ResolvedRoute]:
+        """Return ordered provider/model bindings for a request."""
+
+        candidate_set = self.resolve_candidates(
+            capability=capability,
+            model=model,
+            requested_provider=requested_provider,
+        )
+
+        if not candidate_set:
+            return []
+
+        candidates = candidate_set.as_list()
+
+        selected = self.load_balancer.select(candidates)
+
+        selected_index = candidates.index(selected)
+
+        ordered_candidates = candidates[selected_index:] + candidates[:selected_index]
+
+        providers = self.provider_resolver.resolve_many(
+            [candidate.provider for candidate in ordered_candidates]
+        )
+
+        return [
+            ResolvedRoute(
+                provider=provider,
+                model=candidate.model,
+            )
+            for provider, candidate in zip(
+                providers,
+                ordered_candidates,
+                strict=True,
+            )
+        ]
+
+    def is_logical_model(self, model: str) -> bool:
+        """Return whether a model is registered as a logical model."""
+
+        return self.model_registry.is_logical_model(model)
 
     def resolve(
         self,

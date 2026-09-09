@@ -30,20 +30,36 @@ class RegistryRoutingPolicy(RoutingPolicy):
         if not capability or not model:
             return CandidateSet()
 
-        providers = self.model_registry.get_providers_for_model(
-            capability,
-            model,
-        )
+        if self.model_registry.is_logical_model(model):
+            routes = self.model_registry.get_logical_model_routes(
+                model,
+                capability,
+            )
+
+            candidates = [
+                RoutingCandidate(
+                    provider=route.provider,
+                    model=route.model,
+                )
+                for route in routes
+            ]
+        else:
+            providers = self.model_registry.get_providers_for_model(
+                capability,
+                model,
+            )
+
+            candidates = [
+                RoutingCandidate(
+                    provider=provider,
+                    model=model,
+                )
+                for provider in providers
+            ]
 
         if requested_provider is not None:
-            providers = [provider for provider in providers if provider == requested_provider]
-
-        candidates = [
-            RoutingCandidate(
-                provider=provider,
-                model=model,
-            )
-            for provider in providers
-        ]
+            candidates = [
+                candidate for candidate in candidates if candidate.provider == requested_provider
+            ]
 
         return CandidateSet(candidates)

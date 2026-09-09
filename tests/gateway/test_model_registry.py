@@ -1,3 +1,5 @@
+import pytest
+
 from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
 
 
@@ -250,3 +252,205 @@ def test_clear():
     registry.clear()
 
     assert registry.list_providers() == []
+
+
+def test_register_logical_model():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise-chat",
+        capability="chat",
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    routes = registry.get_logical_model_routes(
+        "enterprise-chat",
+    )
+
+    assert len(routes) == 1
+
+    assert routes[0].logical_model == "enterprise-chat"
+    assert routes[0].capability == "chat"
+    assert routes[0].provider == "openai"
+    assert routes[0].model == "gpt-4o"
+
+
+def test_logical_model_can_have_multiple_provider_routes():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    registry.register_provider(
+        "another-openai",
+        FakeProvider(),
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise-chat",
+        capability="chat",
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise-chat",
+        capability="chat",
+        provider="another-openai",
+        model="gpt-4o",
+    )
+
+    routes = registry.get_logical_model_routes(
+        "enterprise-chat",
+    )
+
+    assert [route.provider for route in routes] == [
+        "openai",
+        "another-openai",
+    ]
+
+
+def test_unknown_logical_model_returns_empty_routes():
+
+    registry = ModelRegistry()
+
+    routes = registry.get_logical_model_routes(
+        "does-not-exist",
+    )
+
+    assert routes == []
+
+
+def test_is_logical_model():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise-chat",
+        capability="chat",
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    assert registry.is_logical_model(
+        "enterprise-chat",
+    )
+
+    assert not registry.is_logical_model(
+        "does-not-exist",
+    )
+
+
+def test_logical_model_requires_registered_provider():
+
+    registry = ModelRegistry()
+
+    with pytest.raises(
+        ValueError,
+        match="Provider is not registered",
+    ):
+        registry.register_logical_model(
+            logical_model="enterprise-chat",
+            capability="chat",
+            provider="openai",
+            model="gpt-4o",
+        )
+
+
+def test_clear_removes_logical_model_routes():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise-chat",
+        capability="chat",
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    registry.clear()
+
+    assert not registry.is_logical_model(
+        "enterprise-chat",
+    )
+
+
+def test_logical_model_routes_can_be_filtered_by_capability():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise",
+        capability="chat",
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    registry.register_logical_model(
+        logical_model="enterprise",
+        capability="embeddings",
+        provider="openai",
+        model="openai-embedding",
+    )
+
+    chat_routes = registry.get_logical_model_routes(
+        "enterprise",
+        capability="chat",
+    )
+
+    embedding_routes = registry.get_logical_model_routes(
+        "enterprise",
+        capability="embeddings",
+    )
+
+    assert len(chat_routes) == 1
+    assert chat_routes[0].model == "gpt-4o"
+
+    assert len(embedding_routes) == 1
+    assert embedding_routes[0].model == "openai-embedding"
+
+
+def test_logical_model_requires_model_capability_support():
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Model is not supported for capability",
+    ):
+        registry.register_logical_model(
+            logical_model="enterprise",
+            capability="embeddings",
+            provider="openai",
+            model="gpt-4o",
+        )

@@ -55,6 +55,9 @@ class FakeRoutingResolver:
         self.provider = provider
         self.calls: list[dict[str, Any]] = []
 
+    def is_logical_model(self, model: str) -> bool:
+        return False
+
     def resolve(
         self,
         capability: str,
@@ -246,6 +249,9 @@ async def test_router_raises_when_resolver_returns_no_provider() -> None:
     """Router should reject requests with no routable provider."""
 
     class EmptyRoutingResolver:
+        def is_logical_model(self, model: str) -> bool:
+            return False
+
         def resolve(
             self,
             capability: str,

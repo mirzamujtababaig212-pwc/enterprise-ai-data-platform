@@ -56,14 +56,29 @@ class Router:
                 model,
             )
 
-        providers = self.routing_resolver.resolve(
-            capability="chat",
-            model=model,
-            requested_provider=provider_name,
-        )
+        if self.routing_resolver.is_logical_model(model):
+            routes = self.routing_resolver.resolve_routes(
+                capability="chat",
+                model=model,
+                requested_provider=provider_name,
+            )
 
-        if not providers:
-            raise ProviderNotFound(f"No provider supports chat model: {model}")
+            if not routes:
+                raise ProviderNotFound(f"No provider supports chat model: {model}")
+
+            providers = [route.provider for route in routes]
+            physical_models = {id(route.provider): route.model for route in routes}
+        else:
+            providers = self.routing_resolver.resolve(
+                capability="chat",
+                model=model,
+                requested_provider=provider_name,
+            )
+
+            if not providers:
+                raise ProviderNotFound(f"No provider supports chat model: {model}")
+
+            physical_models = {}
 
         with tracer.start_as_current_span("gateway.chat") as span:
             span.set_attribute(
@@ -77,9 +92,22 @@ class Router:
                     provider_name,
                 )
 
+            async def call_provider(provider):
+                physical_model = physical_models.get(id(provider))
+
+                if physical_model is None:
+                    return await provider.chat(request)
+
+                provider_request = {
+                    **request,
+                    "model": physical_model,
+                }
+
+                return await provider.chat(provider_request)
+
             result = await self.fallback_executor.execute(
                 providers,
-                lambda provider: provider.chat(request),
+                call_provider,
             )
 
             span.set_attribute(
