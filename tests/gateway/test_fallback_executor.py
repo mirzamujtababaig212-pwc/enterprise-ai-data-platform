@@ -173,6 +173,57 @@ async def test_fallback_metric_increases_when_second_provider_is_attempted():
     assert after == before + 1
 
 
+def _provider_request_metric_value(provider: str) -> float:
+    for metric in REGISTRY.collect():
+        if metric.name != "llm_gateway_provider_requests":
+            continue
+
+        for sample in metric.samples:
+            if (
+                sample.name == "llm_gateway_provider_requests_total"
+                and sample.labels.get("provider") == provider
+            ):
+                return sample.value
+
+    return 0.0
+
+
+@pytest.mark.asyncio
+async def test_provider_request_metric_counts_each_provider_attempt():
+    executor = FallbackExecutor(
+        max_retries=0,
+        base_delay=0,
+    )
+
+    first = FakeProvider("requests-openai")
+    second = FakeProvider("requests-ollama")
+
+    before_first = _provider_request_metric_value(first.name)
+    before_second = _provider_request_metric_value(second.name)
+
+    async def call(provider: FakeProvider):
+        if provider.name == first.name:
+            raise TimeoutError("provider timeout")
+
+        return {
+            "provider": provider.name,
+            "response": "success",
+        }
+
+    result = await executor.execute(
+        [first, second],
+        call,
+    )
+
+    assert result.provider_name == second.name
+
+    after_first = _provider_request_metric_value(first.name)
+    after_second = _provider_request_metric_value(second.name)
+
+    assert after_first == before_first + 1
+    assert after_second == before_second + 1
+
+
 @pytest.mark.asyncio
 async def test_retry_succeeds_on_same_provider_before_fallback():
     executor = FallbackExecutor(

@@ -87,6 +87,64 @@ def test_chat_records_usage_event(usage_store) -> None:
     assert event.latency_ms >= 0
 
 
+def test_chat_records_prometheus_usage_metrics(usage_store) -> None:
+    fake_router = AsyncMock()
+    fake_router.route_chat_with_metadata.return_value = type(
+        "ChatResult",
+        (),
+        {
+            "response": {
+                "reply": "Telemetry response",
+                "usage": {
+                    "tokens_in": 10,
+                    "tokens_out": 20,
+                },
+            },
+            "provider_name": "openai",
+            "model_name": "gpt-4.1-mini",
+        },
+    )()
+
+    with (
+        patch(
+            "app.control_plane.routes.llm.get_llm_router",
+            return_value=fake_router,
+        ),
+        patch(
+            "app.control_plane.routes.llm.MODEL_REQUESTS_TOTAL",
+        ) as model_requests,
+        patch(
+            "app.control_plane.routes.llm.INPUT_TOKENS_TOTAL",
+        ) as input_tokens,
+        patch(
+            "app.control_plane.routes.llm.OUTPUT_TOKENS_TOTAL",
+        ) as output_tokens,
+        patch(
+            "app.control_plane.routes.llm.ESTIMATED_COST_TOTAL",
+        ) as estimated_cost,
+    ):
+        response = client.post(
+            "/api/v1/llm/chat",
+            json={
+                "prompt": "Hello",
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+
+    model_requests.labels.assert_called_once_with(
+        model="gpt-4.1-mini",
+    )
+    model_requests.labels.return_value.inc.assert_called_once_with()
+
+    input_tokens.inc.assert_called_once_with(10)
+    output_tokens.inc.assert_called_once_with(20)
+    estimated_cost.inc.assert_called_once()
+
+
 def test_chat_records_actual_fallback_provider(usage_store) -> None:
     fake_router = AsyncMock()
     fake_router.route_chat_with_metadata.return_value = type(
@@ -214,6 +272,49 @@ def test_embeddings_records_usage_event(usage_store) -> None:
     assert event.tokens_out == 0
     assert event.status == "success"
     assert event.latency_ms >= 0
+
+
+def test_embeddings_records_prometheus_usage_metrics(usage_store) -> None:
+    fake_router = AsyncMock()
+    fake_router.route_embeddings_with_metadata.return_value = type(
+        "EmbeddingResult",
+        (),
+        {
+            "response": [0.1, 0.2, 0.3],
+            "provider_name": "openai",
+        },
+    )()
+
+    with (
+        patch(
+            "app.control_plane.routes.llm.get_llm_router",
+            return_value=fake_router,
+        ),
+        patch(
+            "app.control_plane.routes.llm.MODEL_REQUESTS_TOTAL",
+        ) as model_requests,
+        patch(
+            "app.control_plane.routes.llm.INPUT_TOKENS_TOTAL",
+        ) as input_tokens,
+    ):
+        response = client.post(
+            "/api/v1/llm/embeddings",
+            json={
+                "text": "Hello world",
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+
+    model_requests.labels.assert_called_once_with(
+        model="gpt-4.1-mini",
+    )
+    model_requests.labels.return_value.inc.assert_called_once_with()
+
+    input_tokens.inc.assert_called_once_with(2)
 
 
 def test_embeddings_records_actual_fallback_provider(usage_store) -> None:

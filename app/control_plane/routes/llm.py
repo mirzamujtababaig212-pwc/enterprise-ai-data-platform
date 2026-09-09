@@ -23,6 +23,12 @@ from ai_platform.llm_gateway.gateway.cost import build_usage_record
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderRateLimitError,
 )
+from ai_platform.llm_gateway.observability.prometheus import (
+    ESTIMATED_COST_TOTAL,
+    INPUT_TOKENS_TOTAL,
+    MODEL_REQUESTS_TOTAL,
+    OUTPUT_TOKENS_TOTAL,
+)
 
 router = APIRouter(
     prefix="/api/v1/llm",
@@ -51,6 +57,10 @@ async def chat(
 
     if request_id is None:
         request_id = str(uuid4())
+
+    MODEL_REQUESTS_TOTAL.labels(
+        model=request.model,
+    ).inc()
 
     try:
         result = await llm_router.route_chat_with_metadata(
@@ -126,6 +136,16 @@ async def chat(
         request_id=request_id,
     )
 
+    INPUT_TOKENS_TOTAL.inc(
+        usage_record.prompt_tokens,
+    )
+    OUTPUT_TOKENS_TOTAL.inc(
+        usage_record.completion_tokens,
+    )
+    ESTIMATED_COST_TOTAL.inc(
+        float(usage_record.estimated_cost_usd),
+    )
+
     latency_ms = (time.time() - start) * 1000
 
     usage_event = UsageEvent(
@@ -182,6 +202,10 @@ async def embeddings(
     if request_id is None:
         request_id = UsageMetrics().request_id
 
+    MODEL_REQUESTS_TOTAL.labels(
+        model=request.model,
+    ).inc()
+
     try:
         result = await llm_router.route_embeddings_with_metadata(
             request.model_dump(),
@@ -232,6 +256,10 @@ async def embeddings(
         prompt_tokens=tokens_in,
         completion_tokens=tokens_out,
         request_id=request_id,
+    )
+
+    INPUT_TOKENS_TOTAL.inc(
+        usage_record.prompt_tokens,
     )
 
     latency_ms = (time.time() - start) * 1000

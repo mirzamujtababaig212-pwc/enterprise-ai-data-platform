@@ -12,6 +12,7 @@ from ai_platform.llm_gateway.metrics.prometheus import (
     FALLBACK_REQUESTS_TOTAL,
     PROVIDER_ERRORS_TOTAL,
     PROVIDER_LATENCY_SECONDS,
+    PROVIDER_REQUESTS_TOTAL,
     PROVIDER_RETRIES_TOTAL,
 )
 from ai_platform.llm_gateway.reliability.failure_classifier import (
@@ -94,6 +95,10 @@ class FallbackExecutor:
                 started_at = time.perf_counter()
 
                 try:
+                    PROVIDER_REQUESTS_TOTAL.labels(
+                        provider=provider_name,
+                    ).inc()
+
                     response = await call(provider)
 
                     attempts.append(

@@ -27,7 +27,6 @@ from ai_platform.llm_gateway.observability.prometheus import (
     INPUT_TOKENS_TOTAL,
     MODEL_REQUESTS_TOTAL,
     OUTPUT_TOKENS_TOTAL,
-    PROVIDER_REQUESTS_TOTAL,
 )
 from ai_platform.llm_gateway.security.redaction import (
     sanitize_body,
@@ -184,15 +183,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             endpoint=endpoint,
             status_code=status_code,
         ).observe(latency_ms / 1000.0)
-
-        # ------------------------------------------------------------------
-        # Provider metrics
-        # ------------------------------------------------------------------
-
-        if provider:
-            PROVIDER_REQUESTS_TOTAL.labels(
-                provider=provider,
-            ).inc()
 
         # ------------------------------------------------------------------
         # Model metrics
