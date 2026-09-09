@@ -85,6 +85,8 @@ async def query_rag(
         result = await service.query(
             query=request.query,
             top_k=request.top_k,
+            min_score=request.min_score,
+            metadata_filter=request.metadata_filter,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             user_id=request.user_id,

@@ -274,3 +274,109 @@ def test_control_plane_rag_query_rejects_empty_query() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_control_plane_rag_query_passes_retrieval_controls() -> None:
+    class RecordingService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def query(
+            self,
+            *,
+            query,
+            top_k=5,
+            min_score=None,
+            metadata_filter=None,
+            temperature=0.2,
+            max_tokens=1024,
+            user_id=None,
+        ):
+            self.calls.append(
+                {
+                    "query": query,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                    "metadata_filter": metadata_filter,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "user_id": user_id,
+                }
+            )
+
+            return type(
+                "Result",
+                (),
+                {
+                    "answer": "test answer",
+                    "sources": [],
+                    "retrieved_count": 0,
+                },
+            )()
+
+    service = RecordingService()
+
+    app.dependency_overrides[get_rag_query_service] = lambda: service
+
+    metadata_filter = {
+        "tenant_id": "tenant-a",
+        "source": "architecture.md",
+    }
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "query": "enterprise architecture",
+            "top_k": 5,
+            "min_score": 0.75,
+            "metadata_filter": metadata_filter,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert service.calls == [
+        {
+            "query": "enterprise architecture",
+            "top_k": 5,
+            "min_score": 0.75,
+            "metadata_filter": metadata_filter,
+            "temperature": 0.2,
+            "max_tokens": 1024,
+            "user_id": None,
+        }
+    ]
+
+
+def test_control_plane_rag_query_rejects_invalid_min_score() -> None:
+    service = build_test_query_service()
+
+    app.dependency_overrides[get_rag_query_service] = lambda: service
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "query": "RAG",
+            "min_score": 1.1,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_control_plane_rag_query_rejects_invalid_metadata_filter() -> None:
+    service = build_test_query_service()
+
+    app.dependency_overrides[get_rag_query_service] = lambda: service
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "query": "RAG",
+            "metadata_filter": ["tenant-a"],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 422

@@ -19,6 +19,8 @@ class RAGIndexResponse(BaseModel):
 class RAGQueryRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, gt=0)
+    min_score: float | None = Field(default=None, ge=0, le=1)
+    metadata_filter: dict[str, Any] | None = None
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_tokens: int = Field(default=1024, gt=0)
     user_id: str | None = None
