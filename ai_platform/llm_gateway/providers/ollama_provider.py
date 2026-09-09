@@ -33,6 +33,8 @@ OLLAMA_TAGS_ENDPOINT = "/api/tags"
 
 
 class OllamaProvider(BaseProvider):
+    name = "ollama"
+
     def __init__(
         self,
         client: httpx.AsyncClient | None = None,

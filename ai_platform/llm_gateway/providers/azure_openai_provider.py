@@ -39,6 +39,8 @@ SUPPORTED_EMBEDDING_MODELS = {
 
 
 class AzureOpenAIProvider(BaseProvider):
+    name = "azure_openai"
+
     def __init__(
         self,
         client: AsyncAzureOpenAI | None = None,

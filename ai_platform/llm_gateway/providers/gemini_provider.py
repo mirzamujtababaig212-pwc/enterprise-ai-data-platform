@@ -42,6 +42,8 @@ GEMINI_EMBEDDING_MODEL_MAP = {
 
 
 class GeminiProvider(BaseProvider):
+    name = "gemini"
+
     def __init__(
         self,
         client: genai.Client | None = None,

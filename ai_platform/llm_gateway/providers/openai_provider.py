@@ -48,6 +48,8 @@ OPENAI_EMBEDDING_MODEL_MAP = {
 
 
 class OpenAIProvider(BaseProvider):
+    name = "openai"
+
     def __init__(
         self,
         client: AsyncOpenAI | None = None,

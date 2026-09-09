@@ -39,6 +39,8 @@ SUPPORTED_EMBEDDING_MODELS = {
 
 
 class BedrockProvider(BaseProvider):
+    name = "bedrock"
+
     def __init__(
         self,
         client: Any | None = None,

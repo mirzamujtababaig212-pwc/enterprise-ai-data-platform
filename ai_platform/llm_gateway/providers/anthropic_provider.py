@@ -23,6 +23,8 @@ ANTHROPIC_CHAT_MODEL_MAP = {
 
 
 class AnthropicProvider(BaseProvider):
+    name = "anthropic"
+
     def __init__(
         self,
         client: AsyncAnthropic | None = None,
