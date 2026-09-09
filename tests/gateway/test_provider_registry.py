@@ -141,6 +141,47 @@ def test_reload_reloads_configured_providers():
     assert "ollama" in providers
 
 
+def test_reload_bootstraps_default_logical_models() -> None:
+    registry = ProviderRegistry()
+
+    registry.reload()
+
+    routes = model_registry.get_logical_model_routes(
+        "enterprise-chat",
+        "chat",
+    )
+
+    assert routes
+
+    route_map = {route.provider: route.model for route in routes}
+
+    assert route_map["openai"] == "gpt-4.1-mini"
+    assert route_map["gemini"] == "gemini-chat"
+    assert route_map["anthropic"] == "anthropic-chat"
+    assert route_map["azure_openai"] == "azure-openai-chat"
+    assert route_map["ollama"] == "ollama-chat"
+
+
+def test_reload_rebuilds_logical_model_routes() -> None:
+    registry = ProviderRegistry()
+
+    registry.reload()
+
+    first_routes = model_registry.get_logical_model_routes(
+        "enterprise-chat",
+        "chat",
+    )
+
+    registry.reload()
+
+    second_routes = model_registry.get_logical_model_routes(
+        "enterprise-chat",
+        "chat",
+    )
+
+    assert first_routes == second_routes
+
+
 ###############################################################################
 # health()
 ###############################################################################

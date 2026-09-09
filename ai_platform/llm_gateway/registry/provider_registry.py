@@ -6,6 +6,9 @@ from ai_platform.llm_gateway.providers.provider_loader import (
 from ai_platform.llm_gateway.registry.model_registry import (
     model_registry,
 )
+from ai_platform.llm_gateway.registry.logical_model_bootstrap import (
+    register_default_logical_models,
+)
 
 
 class ProviderRegistry:
@@ -90,6 +93,10 @@ class ProviderRegistry:
         self.clear()
         load_providers(self)
 
+        register_default_logical_models(
+            model_registry,
+        )
+
     def health(
         self,
     ) -> dict[str, Any]:
@@ -100,6 +107,4 @@ class ProviderRegistry:
 
 registry = ProviderRegistry()
 
-load_providers(
-    registry,
-)
+registry.reload()
