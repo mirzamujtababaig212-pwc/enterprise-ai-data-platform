@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from rag.contracts import EmbeddingService, VectorStore
 from rag.models import RetrievalResult
@@ -27,6 +27,7 @@ class SemanticRetriever:
         query: str,
         top_k: int = 5,
         min_score: float | None = None,
+        metadata_filter: Mapping[str, object] | None = None,
     ) -> Sequence[RetrievalResult]:
         if not query.strip():
             raise ValueError("Query must not be empty.")
@@ -42,6 +43,7 @@ class SemanticRetriever:
         results = await self.vector_store.search(
             embedding,
             top_k=top_k,
+            metadata_filter=metadata_filter,
         )
 
         if min_score is None:

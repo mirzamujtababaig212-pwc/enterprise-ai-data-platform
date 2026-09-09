@@ -157,3 +157,49 @@ async def test_retriever_rejects_invalid_min_score():
             "electric vehicle",
             min_score=1.1,
         )
+
+
+@pytest.mark.asyncio
+async def test_retriever_filters_by_metadata():
+    store = InMemoryVectorStore()
+
+    matching_chunk = DocumentChunk(
+        id="matching",
+        document_id="doc-1",
+        content="Electric vehicle architecture.",
+        metadata={"source": "architecture.md"},
+    )
+
+    non_matching_chunk = DocumentChunk(
+        id="non-matching",
+        document_id="doc-2",
+        content="Electric vehicle gateway.",
+        metadata={"source": "gateway.md"},
+    )
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=matching_chunk,
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=non_matching_chunk,
+                embedding=(0.9, 0.1, 0.0),
+            ),
+        ]
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+    )
+
+    results = await retriever.retrieve(
+        "How does an electric vehicle work?",
+        top_k=5,
+        metadata_filter={"source": "architecture.md"},
+    )
+
+    assert len(results) == 1
+    assert results[0].chunk.id == "matching"

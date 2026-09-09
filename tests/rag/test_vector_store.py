@@ -66,3 +66,44 @@ async def test_vector_store_rejects_dimension_mismatch():
         await store.search(
             embedding=(1.0, 0.0, 0.0),
         )
+
+
+@pytest.mark.asyncio
+async def test_vector_store_filters_by_metadata():
+    store = InMemoryVectorStore()
+
+    architecture_chunk = DocumentChunk(
+        id="architecture",
+        document_id="doc-1",
+        content="Architecture document.",
+        metadata={"source": "architecture.md"},
+    )
+
+    gateway_chunk = DocumentChunk(
+        id="gateway",
+        document_id="doc-2",
+        content="Gateway document.",
+        metadata={"source": "gateway.md"},
+    )
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=architecture_chunk,
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=gateway_chunk,
+                embedding=(0.9, 0.1, 0.0),
+            ),
+        ]
+    )
+
+    results = await store.search(
+        embedding=(1.0, 0.0, 0.0),
+        top_k=5,
+        metadata_filter={"source": "gateway.md"},
+    )
+
+    assert len(results) == 1
+    assert results[0].chunk.id == "gateway"

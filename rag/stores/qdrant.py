@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -94,6 +94,7 @@ class QdrantVectorStore:
         self,
         embedding: Sequence[float],
         top_k: int = 5,
+        metadata_filter: Mapping[str, object] | None = None,
     ) -> Sequence[RetrievalResult]:
         if top_k <= 0:
             return []
@@ -105,9 +106,23 @@ class QdrantVectorStore:
 
         await self._ensure_collection(len(query))
 
+        query_filter = None
+
+        if metadata_filter:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key=f"metadata.{key}",
+                        match=models.MatchValue(value=value),
+                    )
+                    for key, value in metadata_filter.items()
+                ],
+            )
+
         response = await self._client.query_points(
             collection_name=self._collection_name,
             query=query,
+            query_filter=query_filter,
             limit=top_k,
             with_payload=True,
         )

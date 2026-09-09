@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from rag.models import Document, DocumentChunk, EmbeddedChunk, RetrievalResult
@@ -52,6 +52,7 @@ class VectorStore(Protocol):
         self,
         embedding: Sequence[float],
         top_k: int = 5,
+        metadata_filter: Mapping[str, object] | None = None,
     ) -> Sequence[RetrievalResult]: ...
 
 
@@ -64,4 +65,6 @@ class Retriever(Protocol):
         self,
         query: str,
         top_k: int = 5,
+        min_score: float | None = None,
+        metadata_filter: Mapping[str, object] | None = None,
     ) -> Sequence[RetrievalResult]: ...

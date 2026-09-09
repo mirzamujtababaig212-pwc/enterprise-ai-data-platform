@@ -182,3 +182,116 @@ async def test_delete_chunks_removes_selected_chunks() -> None:
         assert results[0].chunk.id == "chunk-2"
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_search_filters_by_metadata():
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_metadata_filter",
+        )
+
+        first = DocumentChunk(
+            id="chunk-1",
+            document_id="document-1",
+            content="architecture",
+            metadata={
+                "source": "architecture.md",
+                "tenant_id": "tenant-a",
+            },
+            chunk_index=0,
+        )
+
+        second = DocumentChunk(
+            id="chunk-2",
+            document_id="document-2",
+            content="gateway",
+            metadata={
+                "source": "gateway.md",
+                "tenant_id": "tenant-a",
+            },
+            chunk_index=0,
+        )
+
+        await store.upsert(
+            [
+                EmbeddedChunk(
+                    chunk=first,
+                    embedding=(1.0, 0.0, 0.0),
+                ),
+                EmbeddedChunk(
+                    chunk=second,
+                    embedding=(0.9, 0.1, 0.0),
+                ),
+            ]
+        )
+
+        results = await store.search(
+            embedding=(1.0, 0.0, 0.0),
+            top_k=5,
+            metadata_filter={"source": "gateway.md"},
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.id == "chunk-2"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_search_applies_multiple_metadata_filters():
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_metadata_multi_filter",
+        )
+
+        chunks = [
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="match",
+                    document_id="document-1",
+                    content="matching document",
+                    metadata={
+                        "source": "architecture.md",
+                        "tenant_id": "tenant-a",
+                    },
+                    chunk_index=0,
+                ),
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="wrong-tenant",
+                    document_id="document-2",
+                    content="wrong tenant",
+                    metadata={
+                        "source": "architecture.md",
+                        "tenant_id": "tenant-b",
+                    },
+                    chunk_index=0,
+                ),
+                embedding=(0.99, 0.01, 0.0),
+            ),
+        ]
+
+        await store.upsert(chunks)
+
+        results = await store.search(
+            embedding=(1.0, 0.0, 0.0),
+            top_k=5,
+            metadata_filter={
+                "source": "architecture.md",
+                "tenant_id": "tenant-a",
+            },
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.id == "match"
+    finally:
+        await client.close()

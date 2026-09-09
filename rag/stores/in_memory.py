@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from rag.models import EmbeddedChunk, RetrievalResult
 
 
@@ -34,19 +34,32 @@ class InMemoryVectorStore:
         self,
         embedding: Sequence[float],
         top_k: int = 5,
+        metadata_filter: Mapping[str, object] | None = None,
     ) -> list[RetrievalResult]:
         if top_k <= 0:
             return []
 
         query = tuple(float(value) for value in embedding)
 
+        if self._items:
+            stored_dimension = len(next(iter(self._items.values())).embedding)
+
+            if len(query) != stored_dimension:
+                raise ValueError(
+                    "Embedding dimensions must match: "
+                    f"expected {stored_dimension}, got {len(query)}."
+                )
+
         results: list[RetrievalResult] = []
 
         for item in self._items.values():
-            score = self._cosine_similarity(
-                query,
-                item.embedding,
-            )
+            if metadata_filter is not None:
+                if any(
+                    item.chunk.metadata.get(key) != value for key, value in metadata_filter.items()
+                ):
+                    continue
+
+            score = self._cosine_similarity(query, item.embedding)
 
             results.append(
                 RetrievalResult(
