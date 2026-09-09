@@ -3,6 +3,7 @@ import shutil
 import tempfile
 
 import pytest
+from delta import configure_spark_with_delta_pip
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 
@@ -46,12 +47,18 @@ def local_mlflow_environment():
 
 @pytest.fixture(scope="session")
 def spark():
-    spark = (
+    builder = (
         SparkSession.builder.master("local[2]")
         .appName("Integration Tests")
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config(
+            "spark.sql.catalog.spark_catalog",
+            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        )
         .config("spark.sql.shuffle.partitions", "2")
-        .getOrCreate()
     )
+
+    spark = configure_spark_with_delta_pip(builder).getOrCreate()
     yield spark
     spark.stop()
 
