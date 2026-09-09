@@ -65,3 +65,95 @@ async def test_retriever_rejects_empty_query():
 
     with pytest.raises(ValueError, match="empty"):
         await retriever.retrieve("")
+
+
+@pytest.mark.asyncio
+async def test_retriever_filters_results_below_min_score():
+    store = InMemoryVectorStore()
+
+    relevant_chunk = DocumentChunk(
+        id="relevant",
+        document_id="vehicle-doc",
+        content="Electric vehicles use battery power.",
+    )
+
+    unrelated_chunk = DocumentChunk(
+        id="unrelated",
+        document_id="vehicle-doc",
+        content="Gasoline vehicles use combustion engines.",
+    )
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=relevant_chunk,
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=unrelated_chunk,
+                embedding=(0.0, 1.0, 0.0),
+            ),
+        ]
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+    )
+
+    results = await retriever.retrieve(
+        "How does an electric vehicle work?",
+        top_k=2,
+        min_score=0.5,
+    )
+
+    assert len(results) == 1
+    assert results[0].chunk.id == "relevant"
+    assert results[0].score >= 0.5
+
+
+@pytest.mark.asyncio
+async def test_retriever_returns_empty_when_no_result_meets_min_score():
+    store = InMemoryVectorStore()
+
+    chunk = DocumentChunk(
+        id="gasoline",
+        document_id="vehicle-doc",
+        content="Gasoline vehicles use combustion engines.",
+    )
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=chunk,
+                embedding=(0.0, 1.0, 0.0),
+            ),
+        ]
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+    )
+
+    results = await retriever.retrieve(
+        "How does an electric vehicle work?",
+        top_k=5,
+        min_score=0.9,
+    )
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_retriever_rejects_invalid_min_score():
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=InMemoryVectorStore(),
+    )
+
+    with pytest.raises(ValueError, match="between -1.0 and 1.0"):
+        await retriever.retrieve(
+            "electric vehicle",
+            min_score=1.1,
+        )

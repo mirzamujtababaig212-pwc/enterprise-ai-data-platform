@@ -26,6 +26,7 @@ class SemanticRetriever:
         self,
         query: str,
         top_k: int = 5,
+        min_score: float | None = None,
     ) -> Sequence[RetrievalResult]:
         if not query.strip():
             raise ValueError("Query must not be empty.")
@@ -33,9 +34,17 @@ class SemanticRetriever:
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
 
+        if min_score is not None and not -1.0 <= min_score <= 1.0:
+            raise ValueError("min_score must be between -1.0 and 1.0.")
+
         embedding = await self.embedding_service.embed(query)
 
-        return await self.vector_store.search(
+        results = await self.vector_store.search(
             embedding,
             top_k=top_k,
         )
+
+        if min_score is None:
+            return results
+
+        return [result for result in results if result.score >= min_score]
