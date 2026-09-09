@@ -43,7 +43,12 @@ async def index_document(
             metadata=request.metadata,
         )
 
-        embedded_chunks = await indexer.index(document)
+        existing_chunks = state_repository.get_chunks(document.id)
+
+        embedded_chunks = await indexer.index(
+            document,
+            previous_chunk_ids=[chunk.id for chunk in existing_chunks],
+        )
 
         chunks = [embedded_chunk.chunk for embedded_chunk in embedded_chunks]
 

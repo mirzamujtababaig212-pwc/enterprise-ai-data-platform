@@ -43,6 +43,11 @@ class VectorStore(Protocol):
         chunks: Sequence[EmbeddedChunk],
     ) -> None: ...
 
+    async def delete_chunks(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> None: ...
+
     async def search(
         self,
         embedding: Sequence[float],

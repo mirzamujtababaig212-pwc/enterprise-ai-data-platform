@@ -34,6 +34,8 @@ class RAGIndexer:
     async def index(
         self,
         document: Document,
+        *,
+        previous_chunk_ids: Sequence[str] = (),
     ) -> Sequence[EmbeddedChunk]:
         chunks = self.chunker.chunk(document)
 
@@ -51,5 +53,14 @@ class RAGIndexer:
 
         if embedded_chunks:
             await self.vector_store.upsert(embedded_chunks)
+
+        new_chunk_ids = {embedded_chunk.chunk.id for embedded_chunk in embedded_chunks}
+
+        stale_chunk_ids = [
+            chunk_id for chunk_id in previous_chunk_ids if chunk_id not in new_chunk_ids
+        ]
+
+        if stale_chunk_ids:
+            await self.vector_store.delete_chunks(stale_chunk_ids)
 
         return embedded_chunks

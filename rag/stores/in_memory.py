@@ -23,6 +23,13 @@ class InMemoryVectorStore:
         for item in chunks:
             self._items[item.chunk.id] = item
 
+    async def delete_chunks(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> None:
+        for chunk_id in chunk_ids:
+            self._items.pop(chunk_id, None)
+
     async def search(
         self,
         embedding: Sequence[float],

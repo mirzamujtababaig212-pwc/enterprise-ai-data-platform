@@ -146,3 +146,39 @@ async def test_mismatched_embedding_dimensions_are_rejected() -> None:
             )
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_chunks_removes_selected_chunks() -> None:
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_delete_chunks",
+        )
+
+        chunks = [
+            EmbeddedChunk(
+                chunk=make_chunk("chunk-1", "alpha", 0),
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=make_chunk("chunk-2", "beta", 1),
+                embedding=(0.0, 1.0, 0.0),
+            ),
+        ]
+
+        await store.upsert(chunks)
+
+        await store.delete_chunks(["chunk-1"])
+
+        results = await store.search(
+            embedding=(0.0, 1.0, 0.0),
+            top_k=5,
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.id == "chunk-2"
+    finally:
+        await client.close()

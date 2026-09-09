@@ -65,6 +65,31 @@ class QdrantVectorStore:
             points=points,
         )
 
+    async def delete_chunks(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> None:
+        ids = [chunk_id for chunk_id in chunk_ids if chunk_id]
+
+        if not ids:
+            return
+
+        await self._client.delete(
+            collection_name=self._collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="chunk_id",
+                            match=models.MatchAny(
+                                any=ids,
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+        )
+
     async def search(
         self,
         embedding: Sequence[float],

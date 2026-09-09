@@ -28,6 +28,12 @@ class FakeRAGStateRepository:
     def __init__(self) -> None:
         self.saved = []
 
+    def get_chunks(self, document_id: str):
+        for record in reversed(self.saved):
+            if record["document"].id == document_id:
+                return record["chunks"]
+        return []
+
     def save_document(
         self,
         document,
