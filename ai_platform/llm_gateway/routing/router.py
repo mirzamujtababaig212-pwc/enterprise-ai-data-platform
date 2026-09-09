@@ -50,7 +50,7 @@ class Router:
         provider_name = request.get("provider")
         model = request["model"]
 
-        if provider_name is not None:
+        if provider_name is not None and not self.routing_resolver.is_logical_model(model):
             capability_service.validate_chat(
                 provider_name,
                 model,

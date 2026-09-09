@@ -90,6 +90,9 @@ class FakeModelRegistry:
             [],
         )
 
+    def is_logical_model(self, model: str) -> bool:
+        return False
+
 
 class FakeProviderResolver:
     """Fake provider resolver matching the production resolver interface."""

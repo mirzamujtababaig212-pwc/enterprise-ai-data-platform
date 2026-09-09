@@ -132,6 +132,52 @@ async def test_route_chat_uses_physical_model_for_logical_route(
 
 
 @pytest.mark.asyncio
+async def test_route_chat_uses_physical_model_for_logical_route_with_provider(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    routing_resolver.is_logical_model.return_value = True
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=fake_provider,
+            model="ollama-chat",
+        )
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
+    ) as validate_chat:
+        response = await router.route_chat(
+            {
+                "provider": "ollama",
+                "model": "enterprise-chat",
+                "prompt": "Hello",
+            }
+        )
+
+    assert response["reply"] == "hello"
+
+    validate_chat.assert_not_called()
+
+    routing_resolver.resolve_routes.assert_called_once_with(
+        capability="chat",
+        model="enterprise-chat",
+        requested_provider="ollama",
+    )
+
+    fake_provider.chat.assert_awaited_once_with(
+        {
+            "provider": "ollama",
+            "model": "ollama-chat",
+            "prompt": "Hello",
+        }
+    )
+
+
+@pytest.mark.asyncio
 async def test_route_embeddings(
     router,
     routing_resolver,
