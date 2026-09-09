@@ -314,6 +314,10 @@ class AnthropicProvider(BaseProvider):
 
         raise ValueError(f"Unsupported Anthropic embedding model: {model}")
 
+    @property
+    def is_configured(self) -> bool:
+        return self.client is not None
+
     async def health_check(self) -> dict[str, Any]:
         if self.client is None:
             return {

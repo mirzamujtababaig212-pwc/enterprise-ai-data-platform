@@ -216,6 +216,10 @@ class MockProvider(BaseProvider):
         for word in response.split():
             yield f"{word} "
 
+    @property
+    def is_configured(self) -> bool:
+        return True
+
     async def health_check(self) -> dict[str, Any]:
         """Return provider health."""
 

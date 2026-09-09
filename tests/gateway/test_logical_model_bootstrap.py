@@ -19,6 +19,7 @@ def test_register_default_logical_models() -> None:
 
     for provider_name, models in providers.items():
         provider = MagicMock()
+        provider.is_configured = True
         provider.supported_chat_models.return_value = models
         provider.supported_embedding_models.return_value = []
         provider.supported_stream_models.return_value = []
@@ -50,6 +51,7 @@ def test_register_default_logical_models_skips_unconfigured_providers() -> None:
     registry = ModelRegistry()
 
     provider = MagicMock()
+    provider.is_configured = False
     provider.supported_chat_models.return_value = [
         "gpt-4.1-mini",
     ]
@@ -70,15 +72,14 @@ def test_register_default_logical_models_skips_unconfigured_providers() -> None:
         "chat",
     )
 
-    assert [(route.provider, route.model) for route in routes] == [
-        ("openai", "gpt-4.1-mini"),
-    ]
+    assert routes == []
 
 
 def test_register_default_logical_models_is_idempotent() -> None:
     registry = ModelRegistry()
 
     provider = MagicMock()
+    provider.is_configured = True
     provider.supported_chat_models.return_value = [
         "gpt-4.1-mini",
     ]

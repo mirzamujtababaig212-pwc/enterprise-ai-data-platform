@@ -141,9 +141,36 @@ def test_reload_reloads_configured_providers():
     assert "ollama" in providers
 
 
-def test_reload_bootstraps_default_logical_models() -> None:
-    registry = ProviderRegistry()
+def test_reload_bootstraps_default_logical_models(monkeypatch) -> None:
+    configured_providers = {
+        "openai": "gpt-4.1-mini",
+        "gemini": "gemini-chat",
+        "anthropic": "anthropic-chat",
+        "azure_openai": "azure-openai-chat",
+        "ollama": "ollama-chat",
+    }
 
+    provider_classes = {}
+
+    for provider_name, model in configured_providers.items():
+        provider = MagicMock()
+        provider.is_configured = True
+        provider.supported_chat_models.return_value = [model]
+        provider.supported_embedding_models.return_value = []
+        provider.supported_stream_models.return_value = []
+
+        provider_classes[provider_name] = lambda provider=provider: provider
+
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.providers.provider_loader.PROVIDER_CLASSES",
+        provider_classes,
+    )
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.providers.provider_loader.get_enabled_providers",
+        lambda: list(configured_providers),
+    )
+
+    registry = ProviderRegistry()
     registry.reload()
 
     routes = model_registry.get_logical_model_routes(
@@ -151,15 +178,9 @@ def test_reload_bootstraps_default_logical_models() -> None:
         "chat",
     )
 
-    assert routes
-
     route_map = {route.provider: route.model for route in routes}
 
-    assert route_map["openai"] == "gpt-4.1-mini"
-    assert route_map["gemini"] == "gemini-chat"
-    assert route_map["anthropic"] == "anthropic-chat"
-    assert route_map["azure_openai"] == "azure-openai-chat"
-    assert route_map["ollama"] == "ollama-chat"
+    assert route_map == configured_providers
 
 
 def test_reload_rebuilds_logical_model_routes() -> None:

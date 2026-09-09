@@ -22,6 +22,12 @@ class BaseProvider(ABC):
         request: dict[str, Any],
     ) -> list[float]: ...
 
+    @property
+    @abstractmethod
+    def is_configured(self) -> bool:
+        """Return whether the provider has the configuration required to run."""
+        ...
+
     @abstractmethod
     async def health_check(
         self,

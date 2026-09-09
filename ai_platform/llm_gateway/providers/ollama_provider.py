@@ -446,6 +446,10 @@ class OllamaProvider(BaseProvider):
         except Exception as exc:
             raise ProviderExecutionError("Unexpected Ollama embedding error.") from exc
 
+    @property
+    def is_configured(self) -> bool:
+        return self.client is not None
+
     async def health_check(self) -> dict[str, Any]:
         try:
             response = await self.client.get(OLLAMA_TAGS_ENDPOINT)

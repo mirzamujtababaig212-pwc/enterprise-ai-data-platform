@@ -495,6 +495,10 @@ class OpenAIProvider(BaseProvider):
 
             raise ProviderConnectionError("Unexpected OpenAI embedding error.") from exc
 
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.settings.api_key)
+
     async def health_check(
         self,
     ) -> dict[str, Any]:

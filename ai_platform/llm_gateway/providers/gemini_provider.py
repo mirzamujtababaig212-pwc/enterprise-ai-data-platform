@@ -537,6 +537,10 @@ class GeminiProvider(BaseProvider):
 
         raise ProviderExecutionError("Unexpected Gemini embedding failure.")
 
+    @property
+    def is_configured(self) -> bool:
+        return self.client is not None
+
     async def health_check(self) -> dict[str, Any]:
         return {
             "status": "ok",

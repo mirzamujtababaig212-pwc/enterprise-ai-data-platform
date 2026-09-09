@@ -583,6 +583,10 @@ class AzureOpenAIProvider(BaseProvider):
             logger.exception("Unexpected Azure OpenAI embedding error.")
             raise ProviderExecutionError("Unexpected Azure OpenAI embedding error.") from exc
 
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.settings.api_key and self.settings.endpoint)
+
     async def health_check(
         self,
     ) -> dict[str, Any]:

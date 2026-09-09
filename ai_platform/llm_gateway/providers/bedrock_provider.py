@@ -377,6 +377,10 @@ class BedrockProvider(BaseProvider):
             self._raise_provider_error(exc)
             raise AssertionError("unreachable")
 
+    @property
+    def is_configured(self) -> bool:
+        return self.client is not None
+
     async def health_check(
         self,
     ) -> dict[str, Any]:

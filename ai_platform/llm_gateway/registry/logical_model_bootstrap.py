@@ -50,6 +50,11 @@ def register_default_logical_models(
         if not model_registry.provider_exists(provider):
             continue
 
+        provider_instance = model_registry.get_provider(provider)
+
+        if not provider_instance.is_configured:
+            continue
+
         if not model_registry.model_supported(
             provider,
             capability,
