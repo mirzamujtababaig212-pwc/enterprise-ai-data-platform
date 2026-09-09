@@ -82,8 +82,12 @@ class ChatRequest(BaseModel):
         description="Optional tool definitions available to the model.",
     )
 
-    provider: str = Field(
-        default="openai",
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Optional provider constraint. Omit to allow automatic routing "
+            "across eligible providers."
+        ),
         json_schema_extra={
             "example": "openai",
         },
