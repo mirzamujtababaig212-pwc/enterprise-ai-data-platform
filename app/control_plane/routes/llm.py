@@ -127,10 +127,11 @@ async def chat(
 
     provider = result.provider_name
     model = request.model
+    pricing_model = result.model_name or model
 
     usage_record = build_usage_record(
         provider=provider,
-        model=model,
+        model=pricing_model,
         prompt_tokens=tokens_in,
         completion_tokens=tokens_out,
         request_id=request_id,

@@ -1,5 +1,5 @@
 from unittest.mock import AsyncMock, patch
-
+from decimal import Decimal
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
@@ -142,7 +142,13 @@ def test_chat_records_prometheus_usage_metrics(usage_store) -> None:
 
     input_tokens.inc.assert_called_once_with(10)
     output_tokens.inc.assert_called_once_with(20)
-    estimated_cost.inc.assert_called_once()
+    expected_cost = Decimal("10") / Decimal("1000000") * Decimal("0.40") + Decimal("20") / Decimal(
+        "1000000"
+    ) * Decimal("1.60")
+
+    estimated_cost.inc.assert_called_once_with(
+        float(expected_cost),
+    )
 
 
 def test_chat_records_actual_fallback_provider(usage_store) -> None:

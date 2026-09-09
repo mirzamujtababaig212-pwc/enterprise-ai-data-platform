@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 
 from opentelemetry import trace
@@ -16,6 +17,7 @@ from ai_platform.llm_gateway.routing.resolver import (
 from ai_platform.llm_gateway.services.capability_service import (
     capability_service,
 )
+
 
 tracer = trace.get_tracer(__name__)
 
@@ -120,7 +122,28 @@ class Router:
                 len(result.attempts),
             )
 
-            return result
+            physical_model = model
+
+            if self.routing_resolver.is_logical_model(model):
+                for provider in providers:
+                    provider_name_for_route = getattr(
+                        provider,
+                        "name",
+                        getattr(
+                            provider,
+                            "provider_name",
+                            provider.__class__.__name__,
+                        ),
+                    )
+
+                    if provider_name_for_route == result.provider_name:
+                        physical_model = physical_models[id(provider)]
+                        break
+
+            return replace(
+                result,
+                model_name=physical_model,
+            )
 
     async def route_embeddings(
         self,

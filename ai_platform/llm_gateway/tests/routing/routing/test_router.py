@@ -10,7 +10,10 @@ from ai_platform.llm_gateway.routing.router import Router
 @pytest.mark.asyncio
 async def test_logical_model_without_provider_allows_automatic_routing():
     openai_provider = Mock()
+    openai_provider.name = "openai"
+
     ollama_provider = Mock()
+    ollama_provider.name = "ollama"
 
     resolver = Mock(spec=RoutingResolver)
     resolver.is_logical_model.return_value = True
@@ -61,11 +64,13 @@ async def test_logical_model_without_provider_allows_automatic_routing():
     ]
     assert result.provider_name == "ollama"
     assert result.response == {"reply": "automatic routing works"}
+    assert result.model_name == "ollama-chat"
 
 
 @pytest.mark.asyncio
 async def test_logical_model_with_explicit_provider_remains_constrained():
     ollama_provider = Mock()
+    ollama_provider.name = "ollama"
 
     resolver = Mock(spec=RoutingResolver)
     resolver.is_logical_model.return_value = True
@@ -109,3 +114,39 @@ async def test_logical_model_with_explicit_provider_remains_constrained():
     assert providers == [ollama_provider]
     assert result.provider_name == "ollama"
     assert result.response == {"reply": "ollama routing works"}
+    assert result.model_name == "ollama-chat"
+
+
+@pytest.mark.asyncio
+async def test_physical_model_preserves_requested_model_name():
+    openai_provider = Mock()
+    openai_provider.name = "openai"
+
+    resolver = Mock(spec=RoutingResolver)
+    resolver.is_logical_model.return_value = False
+    resolver.resolve.return_value = [openai_provider]
+
+    fallback_executor = Mock()
+    fallback_executor.execute = AsyncMock(
+        return_value=FallbackResult(
+            response={"reply": "physical routing works"},
+            provider_name="openai",
+            attempts=(),
+        )
+    )
+
+    router = Router(
+        routing_resolver=resolver,
+        fallback_executor=fallback_executor,
+    )
+
+    result = await router.route_chat_with_metadata(
+        {
+            "model": "gpt-4.1-mini",
+            "prompt": "test",
+            "provider": "openai",
+        }
+    )
+
+    assert result.provider_name == "openai"
+    assert result.model_name == "gpt-4.1-mini"

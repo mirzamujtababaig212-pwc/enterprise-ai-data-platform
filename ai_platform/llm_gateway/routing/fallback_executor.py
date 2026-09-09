@@ -40,6 +40,7 @@ class FallbackResult:
     response: Any
     provider_name: str
     attempts: tuple[ProviderAttempt, ...]
+    model_name: str | None = None
 
 
 class FallbackExecutor:
