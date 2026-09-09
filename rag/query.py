@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,6 +63,8 @@ class RAGQueryService:
         query: str,
         *,
         top_k: int = 5,
+        min_score: float | None = None,
+        metadata_filter: Mapping[str, object] | None = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
         user_id: str | None = None,
@@ -76,6 +78,8 @@ class RAGQueryService:
         results = await self.retriever.retrieve(
             query,
             top_k=top_k,
+            min_score=min_score,
+            metadata_filter=metadata_filter,
         )
 
         prompt = self._build_prompt(

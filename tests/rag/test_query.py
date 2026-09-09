@@ -71,6 +71,8 @@ async def test_rag_query_returns_answer_and_sources():
     retriever.retrieve.assert_awaited_once_with(
         "What does the platform support?",
         top_k=2,
+        min_score=None,
+        metadata_filter=None,
     )
 
     chat_service.generate.assert_awaited_once()
@@ -80,3 +82,42 @@ async def test_rag_query_returns_answer_and_sources():
     assert "What does the platform support?" in generated_prompt
     assert "The enterprise platform supports RAG." in generated_prompt
     assert "The platform provides model routing." in generated_prompt
+
+
+@pytest.mark.asyncio
+async def test_rag_query_passes_min_score_and_metadata_filter() -> None:
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=[])
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(
+        return_value={
+            "reply": "No relevant information was retrieved.",
+        }
+    )
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+    )
+
+    metadata_filter = {
+        "tenant_id": "tenant-a",
+        "source": "architecture.md",
+    }
+
+    result = await service.query(
+        "What does the platform support?",
+        top_k=5,
+        min_score=0.75,
+        metadata_filter=metadata_filter,
+    )
+
+    assert result.retrieved_count == 0
+
+    retriever.retrieve.assert_awaited_once_with(
+        "What does the platform support?",
+        top_k=5,
+        min_score=0.75,
+        metadata_filter=metadata_filter,
+    )
