@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
+from rag.governance import GovernancePolicy
 from rag.models import Document, DocumentChunk, EmbeddedChunk, RetrievalResult
 
 
@@ -67,4 +68,5 @@ class Retriever(Protocol):
         top_k: int = 5,
         min_score: float | None = None,
         metadata_filter: Mapping[str, object] | None = None,
+        governance_policy: GovernancePolicy | None = None,
     ) -> Sequence[RetrievalResult]: ...
