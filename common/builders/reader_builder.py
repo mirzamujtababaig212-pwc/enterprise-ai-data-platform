@@ -3,7 +3,6 @@ from common.registry.reader_registry import READER_REGISTRY
 from spark.schemas.bronze_schema import bronze_schema
 from spark.schemas.silver_schema import silver_schema
 
-
 SCHEMAS = {
     "bronze_schema": bronze_schema,
     "silver_schema": silver_schema,
@@ -92,6 +91,7 @@ class ReaderBuilder:
         if reader_type in {
             "postgres",
             "fabric",
+            "databricks",
         }:
 
             table = cfg.get("table")

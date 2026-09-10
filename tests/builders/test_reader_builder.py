@@ -3,6 +3,7 @@ import pytest
 from common.builders.reader_builder import ReaderBuilder
 from common.readers.csv_reader import CSVReader
 from common.readers.delta_reader import DeltaReader
+from common.readers.databricks_reader import DatabricksReader
 from common.readers.fabric_reader import FabricReader
 from common.readers.kafka_reader import KafkaReader
 from common.readers.parquet_reader import ParquetReader
@@ -40,6 +41,20 @@ def test_build_delta():
     reader = ReaderBuilder.build(config)
 
     assert isinstance(reader, DeltaReader)
+
+
+def test_build_databricks():
+    config = {
+        "reader": {
+            "type": "databricks",
+            "table": "vehicle_platform.rpt_vehicle_summary",
+        }
+    }
+
+    reader = ReaderBuilder.build(config)
+
+    assert isinstance(reader, DatabricksReader)
+    assert reader.table == "vehicle_platform.rpt_vehicle_summary"
 
 
 def test_build_postgres():
