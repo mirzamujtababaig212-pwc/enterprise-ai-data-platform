@@ -18,7 +18,6 @@ from ai_platform.llm_gateway.services.capability_service import (
     capability_service,
 )
 
-
 tracer = trace.get_tracer(__name__)
 
 

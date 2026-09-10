@@ -32,7 +32,6 @@ from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
 from ai_platform.llm_gateway.routing.router import Router
 
-
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
 SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
 

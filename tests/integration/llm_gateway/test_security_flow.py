@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 from ai_platform.llm_gateway.api.main import app
 from ai_platform.llm_gateway.config.settings import settings
 
-
 VALID_API_KEY = "super-secret-key"
 
 CHAT_PAYLOAD = {
