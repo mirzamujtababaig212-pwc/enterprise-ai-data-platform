@@ -4,11 +4,16 @@ from tools.authorization.models import (
     ToolAuthorizationRequest,
     ToolAuthorizationResult,
 )
+from tools.authorization.policy import ToolAuthorizationPolicy
 
 
 class InMemoryToolAuthorizer:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        policy: ToolAuthorizationPolicy | None = None,
+    ) -> None:
         self._permissions: dict[str, set[str]] = {}
+        self._policy = policy
 
     async def allow(
         self,
@@ -59,17 +64,30 @@ class InMemoryToolAuthorizer:
             set(),
         )
 
-        if request.tool_name in permissions:
+        if request.tool_name not in permissions:
             return ToolAuthorizationResult(
                 principal=request.principal,
                 tool_name=request.tool_name,
-                allowed=True,
-                reason="Tool is authorized.",
+                allowed=False,
+                reason=("Tool is not authorized for this principal."),
             )
+
+        if self._policy is not None:
+            policy_result = await self._policy.evaluate(request)
+
+            if not policy_result.allowed:
+                return ToolAuthorizationResult(
+                    principal=request.principal,
+                    tool_name=request.tool_name,
+                    allowed=False,
+                    reason=(
+                        policy_result.reason or "Tool authorization policy denied the request."
+                    ),
+                )
 
         return ToolAuthorizationResult(
             principal=request.principal,
             tool_name=request.tool_name,
-            allowed=False,
-            reason=("Tool is not authorized for this principal."),
+            allowed=True,
+            reason="Tool is authorized.",
         )

@@ -7,6 +7,7 @@ from tools.authorization.models import (
     ToolAuthorizationRequest,
     ToolAuthorizationResult,
 )
+from tools.authorization.policy import MetadataAuthorizationPolicy
 from tools.authorization.service import (
     ToolAuthorizationService,
 )
@@ -222,3 +223,112 @@ async def test_authorization_service_passes_metadata_to_authorizer():
     assert result.allowed is True
     assert len(authorizer.requests) == 1
     assert authorizer.requests[0].metadata == metadata
+
+
+@pytest.mark.asyncio
+async def test_authorizer_allows_tool_when_permission_and_policy_match():
+    policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "document-server",
+        },
+    )
+
+    assert result.allowed is True
+    assert result.reason == "Tool is authorized."
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_tool_when_metadata_policy_fails():
+    policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "finance-server",
+        },
+    )
+
+    assert result.allowed is False
+    assert "mcp_server='document-server'" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_without_tool_permission_even_when_policy_matches():
+    policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "document-server",
+        },
+    )
+
+    assert result.allowed is False
+    assert result.reason == "Tool is not authorized for this principal."
+
+
+@pytest.mark.asyncio
+async def test_authorizer_without_policy_preserves_existing_behavior():
+    authorizer = InMemoryToolAuthorizer()
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "untrusted-server",
+        },
+    )
+
+    assert result.allowed is True
+    assert result.reason == "Tool is authorized."
