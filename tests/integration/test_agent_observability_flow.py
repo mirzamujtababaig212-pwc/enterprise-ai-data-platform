@@ -12,6 +12,14 @@ from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
 )
+from ai_platform.agents.otel_observer import (
+    OpenTelemetryAgentExecutionObserver,
+)
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.agents.tool_calls import AgentToolCall
@@ -262,6 +270,118 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
             assert "result" not in event.metadata
             assert "governance_policy" not in event.metadata
             assert "request_metadata" not in event.metadata
+
+        assert len(gateway.requests) == 2
+
+    finally:
+        await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_agent_mcp_execution_creates_otel_trace_hierarchy() -> None:
+    tool_registry = InMemoryToolRegistry()
+
+    authorizer, authorization_service = make_authorization_service(
+        "document-server",
+    )
+
+    manager = MCPServerManager(tool_registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+    )
+
+    await manager.register_server(config)
+
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.integration.agent")
+
+    observer = OpenTelemetryAgentExecutionObserver(
+        tracer=tracer,
+    )
+    gateway = FakeToolCallingLLMGateway()
+
+    agent = make_agent(observer)
+
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=authorization_service,
+    )
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+        llm_gateway=gateway,
+    )
+
+    await authorizer.allow(
+        "user-otel-integration",
+        "search_documents",
+    )
+
+    try:
+        definitions = await manager.connect_and_discover(
+            "document-server",
+        )
+
+        assert definitions[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+
+        response = await runtime.run(
+            "observable-mcp-agent",
+            AgentRequest(
+                input="Find enterprise AI architecture information.",
+                session_id="session-otel-integration",
+                user_id="user-otel-integration",
+            ),
+        )
+
+        assert response.output == "Enterprise AI platform architecture."
+
+        spans = exporter.get_finished_spans()
+        assert {span.name for span in spans} == {
+            "agent.run",
+            "agent.llm.request",
+            "agent.tool.call",
+        }
+
+        agent_span = next(span for span in spans if span.name == "agent.run")
+        llm_span = next(span for span in spans if span.name == "agent.llm.request")
+        tool_span = next(span for span in spans if span.name == "agent.tool.call")
+
+        assert agent_span.parent is None
+
+        assert llm_span.parent is not None
+        assert llm_span.parent.span_id == agent_span.context.span_id
+
+        assert tool_span.parent is not None
+        assert tool_span.parent.span_id == agent_span.context.span_id
+
+        assert llm_span.context.trace_id == agent_span.context.trace_id
+        assert tool_span.context.trace_id == agent_span.context.trace_id
+
+        assert agent_span.attributes["agent.name"] == "observable-mcp-agent"
+
+        assert llm_span.attributes["agent.name"] == "observable-mcp-agent"
+        assert llm_span.attributes["llm.provider"] == "fake"
+        assert llm_span.attributes["llm.model"] == "mock-gpt"
+
+        assert tool_span.attributes["agent.name"] == "observable-mcp-agent"
+        assert tool_span.attributes["tool.name"] == "search_documents"
+
+        assert "session.id" not in agent_span.attributes
+        assert "user.id" not in agent_span.attributes
+        assert "call.id" not in tool_span.attributes
 
         assert len(gateway.requests) == 2
 
