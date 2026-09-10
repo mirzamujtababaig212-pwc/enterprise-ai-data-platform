@@ -1,3 +1,4 @@
+from common.config.settings import Settings
 from common.kafka.kafka_reader import KafkaReader
 from common.readers.delta_reader import DeltaReader
 from common.readers.fabric_reader import FabricReader
@@ -28,7 +29,10 @@ class SparkReader:
 
     @staticmethod
     def read_snowflake(spark, table):
-        reader = SnowflakeReader(table)
+        reader = SnowflakeReader(
+            options=Settings.snowflake.options(),
+            table=table,
+        )
         return reader.read(spark)
 
     @staticmethod

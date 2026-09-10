@@ -93,9 +93,17 @@ def test_read_postgres(mock_reader):
 
 
 @patch("common.readers.spark_reader.SnowflakeReader")
-def test_read_snowflake(mock_reader):
+@patch("common.readers.spark_reader.Settings")
+def test_read_snowflake(mock_settings, mock_reader):
 
     spark = MagicMock()
+
+    options = {
+        "sfURL": "test.snowflakecomputing.com",
+        "sfUser": "test_user",
+    }
+
+    mock_settings.snowflake.options.return_value = options
 
     reader_instance = mock_reader.return_value
     reader_instance.read.return_value = "df"
@@ -105,7 +113,13 @@ def test_read_snowflake(mock_reader):
         "vehicles",
     )
 
-    mock_reader.assert_called_once_with("vehicles")
+    mock_settings.snowflake.options.assert_called_once_with()
+
+    mock_reader.assert_called_once_with(
+        options=options,
+        table="vehicles",
+    )
+
     reader_instance.read.assert_called_once_with(spark)
 
     assert result == "df"
