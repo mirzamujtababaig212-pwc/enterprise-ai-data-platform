@@ -5,10 +5,24 @@ from tools.authorization.in_memory import (
 )
 from tools.authorization.models import (
     ToolAuthorizationRequest,
+    ToolAuthorizationResult,
 )
 from tools.authorization.service import (
     ToolAuthorizationService,
 )
+
+
+class RecordingToolAuthorizer:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def authorize(self, request):
+        self.requests.append(request)
+        return ToolAuthorizationResult(
+            principal=request.principal,
+            tool_name=request.tool_name,
+            allowed=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -187,3 +201,24 @@ async def test_allow_rejects_empty_tool_name():
             "agent:research",
             "",
         )
+
+
+@pytest.mark.asyncio
+async def test_authorization_service_passes_metadata_to_authorizer():
+    authorizer = RecordingToolAuthorizer()
+    service = ToolAuthorizationService(authorizer)
+
+    metadata = {
+        "source": "mcp",
+        "mcp_server": "document-server",
+    }
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata=metadata,
+    )
+
+    assert result.allowed is True
+    assert len(authorizer.requests) == 1
+    assert authorizer.requests[0].metadata == metadata

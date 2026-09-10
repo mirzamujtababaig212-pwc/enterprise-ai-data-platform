@@ -70,6 +70,7 @@ class ToolExecutionService:
             authorization = await self.authorization_service.authorize(
                 principal,
                 tool_name,
+                metadata=tool.definition.metadata,
             )
 
             if not authorization.allowed:

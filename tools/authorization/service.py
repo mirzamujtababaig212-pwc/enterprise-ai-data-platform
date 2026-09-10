@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from tools.authorization.models import (
     ToolAuthorizationRequest,
     ToolAuthorizationResult,
@@ -18,6 +21,7 @@ class ToolAuthorizationService:
         self,
         principal: str,
         tool_name: str,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ToolAuthorizationResult:
         if not principal.strip():
             raise ValueError("Principal must not be empty.")
@@ -28,6 +32,7 @@ class ToolAuthorizationService:
         request = ToolAuthorizationRequest(
             principal=principal,
             tool_name=tool_name,
+            metadata=dict(metadata or {}),
         )
 
         return await self.authorizer.authorize(request)

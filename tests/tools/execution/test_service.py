@@ -11,6 +11,21 @@ from tools.authorization.service import (
 from tools.execution.service import ToolExecutionService
 from tools.models import ToolDefinition
 from tools.registry.in_memory import InMemoryToolRegistry
+from tools.authorization.models import ToolAuthorizationResult
+
+
+class RecordingToolAuthorizer:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def authorize(self, request):
+        self.requests.append(request)
+
+        return ToolAuthorizationResult(
+            principal=request.principal,
+            tool_name=request.tool_name,
+            allowed=True,
+        )
 
 
 class FakeTool:
@@ -516,3 +531,31 @@ async def test_authorization_happens_before_contextual_tool_execution():
     assert result.error == "Tool is not authorized for this principal."
     assert tool.received_arguments is None
     assert tool.received_context is None
+
+
+@pytest.mark.asyncio
+async def test_execution_authorization_receives_tool_metadata():
+    registry = InMemoryToolRegistry()
+    authorizer = RecordingToolAuthorizer()
+
+    tool = FakeTool()
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+    )
+
+    assert result.success is True
+    assert len(authorizer.requests) == 1
+    assert authorizer.requests[0].principal == "agent:research"
+    assert authorizer.requests[0].tool_name == "test_tool"
+    assert authorizer.requests[0].metadata == tool.definition.metadata
