@@ -96,6 +96,7 @@ class AgentToolContext:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
+        execution_context: dict[str, Any] | None = None,
     ):
         """
         Execute an agent-declared tool through ToolExecutionService.
@@ -125,4 +126,5 @@ class AgentToolContext:
             arguments,
             principal=principal,
             timeout_seconds=timeout_seconds,
+            execution_context=execution_context,
         )

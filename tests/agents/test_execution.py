@@ -17,6 +17,7 @@ from ai_platform.agents.llm_messages import (
     tool_message,
     user_message,
 )
+from rag.governance import GovernancePolicy
 
 
 class FakeGateway:
@@ -372,6 +373,7 @@ class FakeToolExecutionService:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
+        execution_context: dict | None = None,
     ) -> dict:
         self.calls.append(
             {
@@ -379,6 +381,7 @@ class FakeToolExecutionService:
                 "arguments": arguments,
                 "principal": principal,
                 "timeout_seconds": timeout_seconds,
+                "execution_context": execution_context,
             }
         )
 
@@ -446,6 +449,13 @@ async def test_execution_context_maps_tool_call_to_tool_result() -> None:
             },
             "principal": "user-123",
             "timeout_seconds": None,
+            "execution_context": {
+                "governance_policy": None,
+                "agent_name": "test-agent",
+                "session_id": None,
+                "user_id": "user-123",
+                "request_metadata": {},
+            },
         }
     ]
 
@@ -510,3 +520,86 @@ async def test_execution_context_rejects_invalid_tool_calls() -> None:
         await context.execute_tool_calls(
             ("invalid",),  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.asyncio
+async def test_execution_context_propagates_governance_policy_to_tools() -> None:
+    definition = make_definition(
+        tool_names=("search",),
+    )
+
+    execution_service = FakeToolExecutionService()
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+        execution_service=execution_service,
+    )
+
+    policy = GovernancePolicy(
+        required_metadata={
+            "classification": "internal",
+            "allowed_use": "enterprise_ai",
+        }
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find internal documentation.",
+            session_id="session-123",
+            user_id="user-456",
+            governance_policy=policy,
+            metadata={
+                "source": "agent-api",
+            },
+        ),
+        tools=tools,
+        llm=AgentLLMContext(
+            FakeGateway(),
+            definition.llm_config,
+        ),
+    )
+
+    results = await context.execute_tool_calls(
+        (
+            AgentToolCall(
+                call_id="call-123",
+                name="search",
+                arguments={
+                    "query": "internal documentation",
+                },
+            ),
+        )
+    )
+
+    assert results == (
+        AgentToolResult(
+            call_id="call-123",
+            tool_name="search",
+            output={
+                "status": "healthy",
+            },
+        ),
+    )
+
+    assert context.governance_policy is policy
+
+    assert execution_service.calls == [
+        {
+            "tool_name": "search",
+            "arguments": {
+                "query": "internal documentation",
+            },
+            "principal": "user-456",
+            "timeout_seconds": None,
+            "execution_context": {
+                "governance_policy": policy,
+                "agent_name": "test-agent",
+                "session_id": "session-123",
+                "user_id": "user-456",
+                "request_metadata": {
+                    "source": "agent-api",
+                },
+            },
+        }
+    ]

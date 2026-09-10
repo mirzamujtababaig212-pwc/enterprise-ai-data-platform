@@ -355,6 +355,7 @@ class FakeExecutionService:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
+        execution_context: dict[str, Any] | None = None,
     ) -> Any:
         self.calls.append(
             {
@@ -362,6 +363,7 @@ class FakeExecutionService:
                 "arguments": arguments,
                 "principal": principal,
                 "timeout_seconds": timeout_seconds,
+                "execution_context": execution_context,
             }
         )
 
@@ -410,6 +412,7 @@ async def test_execute_delegates_to_execution_service() -> None:
             "arguments": {"query": "hello"},
             "principal": None,
             "timeout_seconds": None,
+            "execution_context": None,
         }
     ]
 
@@ -498,3 +501,44 @@ async def test_execute_rejects_undeclared_tool_before_execution_service() -> Non
         )
 
     assert execution_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_execution_context_to_execution_service() -> None:
+    registry = InMemoryToolRegistry()
+
+    execution_service = FakeExecutionService(
+        {"success": True},
+    )
+
+    context = AgentToolContext(
+        registry,
+        make_agent_definition(
+            tool_names=("search",),
+        ),
+        execution_service=execution_service,
+    )
+
+    execution_context = {
+        "agent_name": "test-agent",
+        "session_id": "session-123",
+        "user_id": "user-456",
+    }
+
+    await context.execute(
+        "search",
+        {"query": "RAG"},
+        principal="user-456",
+        timeout_seconds=15.0,
+        execution_context=execution_context,
+    )
+
+    assert execution_service.calls == [
+        {
+            "tool_name": "search",
+            "arguments": {"query": "RAG"},
+            "principal": "user-456",
+            "timeout_seconds": 15.0,
+            "execution_context": execution_context,
+        }
+    ]

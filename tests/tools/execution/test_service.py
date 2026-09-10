@@ -40,6 +40,33 @@ class FakeTool:
         }
 
 
+class ContextAwareTool:
+    def __init__(self, name: str = "context_tool"):
+        self._definition = ToolDefinition(
+            name=name,
+            description="A context-aware test tool.",
+        )
+        self.received_arguments = None
+        self.received_context = None
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        raise AssertionError("execute() should not be called for a context-aware tool.")
+
+    async def execute_with_context(self, arguments, context):
+        self.received_arguments = arguments
+        self.received_context = context
+
+        return {
+            "status": "context_success",
+            "arguments": arguments,
+            "context": context,
+        }
+
+
 class FailingTool:
     def __init__(self):
         self._definition = ToolDefinition(
@@ -383,3 +410,109 @@ async def test_authorized_tool_still_respects_timeout():
 
     assert result.success is False
     assert "timed out" in result.error
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_execution_context_to_context_aware_tool():
+    registry = InMemoryToolRegistry()
+    tool = ContextAwareTool()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    execution_context = {
+        "agent_name": "research-agent",
+        "session_id": "session-123",
+        "user_id": "user-456",
+        "governance_policy": "internal-only",
+    }
+
+    result = await service.execute(
+        "context_tool",
+        {"query": "RAG"},
+        execution_context=execution_context,
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "context_success",
+        "arguments": {"query": "RAG"},
+        "context": execution_context,
+    }
+
+    assert tool.received_arguments == {"query": "RAG"}
+    assert tool.received_context == execution_context
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_empty_context_when_none_is_provided():
+    registry = InMemoryToolRegistry()
+    tool = ContextAwareTool()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "context_tool",
+        {},
+    )
+
+    assert result.success is True
+    assert tool.received_context == {}
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_legacy_tool_execution_without_context():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context={
+            "agent_name": "legacy-compatible-agent",
+        },
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_authorization_happens_before_contextual_tool_execution():
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+    tool = ContextAwareTool()
+
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    result = await service.execute(
+        "context_tool",
+        {},
+        principal="agent:restricted",
+        execution_context={
+            "governance_policy": "internal-only",
+        },
+    )
+
+    assert result.success is False
+    assert result.error == "Tool is not authorized for this principal."
+    assert tool.received_arguments is None
+    assert tool.received_context is None

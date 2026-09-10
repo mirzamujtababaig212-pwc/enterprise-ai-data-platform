@@ -12,6 +12,7 @@ from ai_platform.agents.tool_calls import (
 from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.models import ToolExecutionResult
+from rag.governance import GovernancePolicy
 
 
 class AgentExecutionContext:
@@ -83,6 +84,13 @@ class AgentExecutionContext:
         )
 
     @property
+    def agent_name(self) -> str:
+        """
+        Return the name of the agent executing this context.
+        """
+        return self.tools.agent_name
+
+    @property
     def session_id(self) -> str | None:
         return self.request.session_id
 
@@ -94,6 +102,10 @@ class AgentExecutionContext:
     def metadata(self) -> dict[str, object]:
         """Return request metadata available during agent execution."""
         return dict(self.request.metadata)
+
+    @property
+    def governance_policy(self) -> GovernancePolicy | None:
+        return self.request.governance_policy
 
     async def execute_tool_calls(
         self,
@@ -117,6 +129,13 @@ class AgentExecutionContext:
                 tool_call.name,
                 tool_call.arguments,
                 principal=self.user_id,
+                execution_context={
+                    "governance_policy": self.governance_policy,
+                    "agent_name": self.agent_name,
+                    "session_id": self.session_id,
+                    "user_id": self.user_id,
+                    "request_metadata": self.metadata,
+                },
             )
 
             if isinstance(result, ToolExecutionResult):

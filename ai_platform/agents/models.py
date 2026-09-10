@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ai_platform.agents.llm_config import AgentLLMConfig
+from rag.governance import GovernancePolicy
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class AgentRequest:
 
     session_id: str | None = None
     user_id: str | None = None
+    governance_policy: GovernancePolicy | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)
 

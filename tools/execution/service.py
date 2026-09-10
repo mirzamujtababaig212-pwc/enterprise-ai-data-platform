@@ -30,6 +30,7 @@ class ToolExecutionService:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
+        execution_context: dict[str, Any] | None = None,
     ) -> ToolExecutionResult:
         if not tool_name.strip():
             raise ValueError("Tool name must not be empty.")
@@ -79,8 +80,18 @@ class ToolExecutionService:
                 )
 
         try:
+            contextual_execute = getattr(tool, "execute_with_context", None)
+
+            if contextual_execute is not None:
+                execution = contextual_execute(
+                    arguments,
+                    execution_context or {},
+                )
+            else:
+                execution = tool.execute(arguments)
+
             output = await asyncio.wait_for(
-                tool.execute(arguments),
+                execution,
                 timeout=timeout,
             )
 
