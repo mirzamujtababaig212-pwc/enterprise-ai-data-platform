@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rag.governance import GovernancePolicy
 from rag.retrieval.retriever import SemanticRetriever
 from tools.models import ToolDefinition
 
@@ -39,16 +40,16 @@ class RAGSearchTool:
                         "minimum": 0.0,
                         "maximum": 1.0,
                         "description": (
-                            "Optional minimum relevance score. Results below this "
-                            "threshold are excluded."
+                            "Optional minimum relevance score. Results below "
+                            "this threshold are excluded."
                         ),
                     },
                     "metadata_filter": {
                         "type": "object",
                         "additionalProperties": True,
                         "description": (
-                            "Optional equality-based metadata filters. Multiple fields "
-                            "are combined with AND semantics."
+                            "Optional equality-based metadata filters. "
+                            "Multiple fields are combined with AND semantics."
                         ),
                     },
                 },
@@ -60,12 +61,28 @@ class RAGSearchTool:
             },
         )
 
-    async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self._execute(
+            arguments,
+            governance_policy=None,
+        )
+
+    async def _execute(
+        self,
+        arguments: dict[str, Any],
+        *,
+        governance_policy: GovernancePolicy | None,
+    ) -> dict[str, Any]:
         query = arguments.get("query")
+
         if not isinstance(query, str) or not query.strip():
             raise ValueError("rag.search query must be a non-empty string.")
 
         top_k = arguments.get("top_k", 5)
+
         if not isinstance(top_k, int) or isinstance(top_k, bool):
             raise TypeError("rag.search top_k must be an integer.")
 
@@ -91,6 +108,7 @@ class RAGSearchTool:
             top_k=top_k,
             min_score=min_score,
             metadata_filter=metadata_filter,
+            governance_policy=governance_policy,
         )
 
         return {
@@ -107,3 +125,21 @@ class RAGSearchTool:
             ],
             "retrieved_count": len(results),
         }
+
+    async def execute_with_context(
+        self,
+        arguments: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        governance_policy = context.get("governance_policy")
+
+        if governance_policy is not None and not isinstance(
+            governance_policy,
+            GovernancePolicy,
+        ):
+            raise TypeError("governance_policy must be a GovernancePolicy.")
+
+        return await self._execute(
+            arguments,
+            governance_policy=governance_policy,
+        )

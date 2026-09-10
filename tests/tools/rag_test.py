@@ -4,6 +4,7 @@ import pytest
 
 from rag.models import DocumentChunk, RetrievalResult
 from tools.rag.search import RAGSearchTool
+from rag.governance import GovernancePolicy
 
 
 class FakeRetriever:
@@ -14,6 +15,7 @@ class FakeRetriever:
                 int,
                 float | None,
                 dict[str, object] | None,
+                GovernancePolicy | None,
             ]
         ] = []
 
@@ -23,6 +25,7 @@ class FakeRetriever:
         top_k: int,
         min_score: float | None = None,
         metadata_filter: dict[str, object] | None = None,
+        governance_policy: GovernancePolicy | None = None,
     ) -> list[RetrievalResult]:
         self.calls.append(
             (
@@ -30,6 +33,7 @@ class FakeRetriever:
                 top_k,
                 min_score,
                 metadata_filter,
+                governance_policy,
             )
         )
 
@@ -70,7 +74,13 @@ async def test_rag_search_returns_structured_results() -> None:
     )
 
     assert retriever.calls == [
-        ("How does enterprise RAG work?", 2, None, None),
+        (
+            "How does enterprise RAG work?",
+            2,
+            None,
+            None,
+            None,
+        ),
     ]
 
     assert result["query"] == "How does enterprise RAG work?"
@@ -100,7 +110,15 @@ async def test_rag_search_defaults_top_k_to_five() -> None:
 
     await tool.execute({"query": "RAG"})
 
-    assert retriever.calls == [("RAG", 5, None, None)]
+    assert retriever.calls == [
+        (
+            "RAG",
+            5,
+            None,
+            None,
+            None,
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -173,6 +191,7 @@ async def test_rag_search_passes_min_score_and_metadata_filter() -> None:
             5,
             0.75,
             metadata_filter,
+            None,
         )
     ]
 
@@ -204,3 +223,27 @@ async def test_rag_search_rejects_invalid_metadata_filter():
                 "metadata_filter": ["tenant-a"],
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_rag_search_passes_governance_policy_from_context() -> None:
+    retriever = FakeRetriever()
+
+    tool = RAGSearchTool(retriever)
+
+    policy = GovernancePolicy(
+        required_metadata={
+            "tenant_id": "tenant-a",
+        },
+    )
+
+    await tool.execute_with_context(
+        {
+            "query": "enterprise architecture",
+        },
+        {
+            "governance_policy": policy,
+        },
+    )
+
+    assert retriever.calls[0][4] is policy
