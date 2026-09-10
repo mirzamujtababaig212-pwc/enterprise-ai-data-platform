@@ -1,27 +1,80 @@
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from common.builders.reader_builder import ReaderBuilder
 from common.readers.snowflake_reader import SnowflakeReader
+from common.snowflake.control_plane import SnowflakeControlPlaneClient
+from rag.chunking.recursive import RecursiveChunker
 from rag.dbt import DbtModel, DbtModelDocumentLoader
 from rag.embeddings.gateway import GatewayEmbeddingService
 from rag.indexing import RAGIndexer
 from rag.ingestion import RAGIngestionService
 from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.in_memory import InMemoryVectorStore
-from rag.chunking.recursive import RecursiveChunker
 
 
 @pytest.mark.asyncio
-async def test_snowflake_dbt_model_flows_through_rag_pipeline():
+async def test_snowflake_control_plane_metadata_composes_with_data_plane_rag():
+    connection = Mock()
+    cursor = Mock()
+
+    number_type = SimpleNamespace(name="NUMBER")
+    float_type = SimpleNamespace(name="FLOAT")
+
+    cursor.describe.return_value = [
+        SimpleNamespace(
+            name="vehicle_count",
+            type_code=number_type,
+            precision=38,
+            scale=0,
+            is_nullable=False,
+        ),
+        SimpleNamespace(
+            name="avg_speed",
+            type_code=float_type,
+            precision=None,
+            scale=None,
+            is_nullable=True,
+        ),
+    ]
+
+    connection.cursor.return_value = cursor
+
+    control_plane = SnowflakeControlPlaneClient(
+        connection=connection,
+    )
+
+    table_metadata = control_plane.get_table_metadata("VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY")
+
+    assert table_metadata.full_name == ("VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY")
+    assert table_metadata.database == "VEHICLE_PLATFORM"
+    assert table_metadata.schema == "PUBLIC"
+    assert table_metadata.name == "RPT_VEHICLE_SUMMARY"
+    assert len(table_metadata.columns) == 2
+
+    assert table_metadata.columns[0].name == "vehicle_count"
+    assert table_metadata.columns[0].type_name == "NUMBER"
+    assert table_metadata.columns[0].type_text == "NUMBER(38,0)"
+    assert table_metadata.columns[0].nullable is False
+
+    assert table_metadata.columns[1].name == "avg_speed"
+    assert table_metadata.columns[1].type_name == "FLOAT"
+    assert table_metadata.columns[1].type_text == "FLOAT"
+    assert table_metadata.columns[1].nullable is True
+
+    cursor.describe.assert_called_once_with(
+        "SELECT * FROM VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY"
+    )
+
     model = DbtModel(
         unique_id="model.vehicle_dbt.rpt_vehicle_summary",
         name="rpt_vehicle_summary",
         resource_type="model",
-        database="vehicle_platform",
-        schema="public",
-        alias="rpt_vehicle_summary",
+        database="VEHICLE_PLATFORM",
+        schema="PUBLIC",
+        alias="RPT_VEHICLE_SUMMARY",
         materialization="table",
     )
 
@@ -31,8 +84,6 @@ async def test_snowflake_dbt_model_flows_through_rag_pipeline():
             Mock(
                 asDict=Mock(
                     return_value={
-                        "battery_health": "GOOD",
-                        "fuel_health": "GOOD",
                         "vehicle_count": 25,
                         "avg_speed": 48.17,
                     }
@@ -52,13 +103,13 @@ async def test_snowflake_dbt_model_flows_through_rag_pipeline():
             {
                 "reader": {
                     "type": "snowflake",
-                    "table": "rpt_vehicle_summary",
+                    "table": "VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY",
                 }
             }
         )
 
     assert isinstance(reader, SnowflakeReader)
-    assert reader.table == "rpt_vehicle_summary"
+    assert reader.table == "VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY"
     assert reader.options["sfURL"] == "test.snowflakecomputing.com"
 
     spark = Mock()
@@ -70,29 +121,41 @@ async def test_snowflake_dbt_model_flows_through_rag_pipeline():
     documents = DbtModelDocumentLoader(
         model=model,
         reader=reader,
-        id_fn=lambda row: (f"{model.name}:" f"{row['battery_health']}:" f"{row['fuel_health']}"),
+        id_fn=lambda row: f"{model.name}:{row['vehicle_count']}",
         content_fn=lambda row: (
             f"Snowflake fleet summary: "
             f"{row['vehicle_count']} vehicles with "
-            f"average speed {row['avg_speed']} and "
-            f"battery health {row['battery_health']} "
-            f"and fuel health {row['fuel_health']}."
+            f"average speed {row['avg_speed']}."
         ),
         metadata_fn=lambda row: {
             "source": "snowflake",
-            "dataset": model.name,
-            "battery_health": row["battery_health"],
-            "fuel_health": row["fuel_health"],
+            "dataset": table_metadata.name,
+            "database": table_metadata.database,
+            "schema": table_metadata.schema,
+            "table": table_metadata.name,
+            "table_type": table_metadata.table_type,
+            "vehicle_count": row["vehicle_count"],
+            "avg_speed": row["avg_speed"],
         },
-    )
-
-    documents = documents.load(spark)
+    ).load(spark)
 
     assert len(documents) == 1
-    assert documents[0].id == "rpt_vehicle_summary:GOOD:GOOD"
+    assert documents[0].id == "rpt_vehicle_summary:25"
+
     assert documents[0].metadata["source"] == "snowflake"
+    assert documents[0].metadata["dataset"] == "RPT_VEHICLE_SUMMARY"
+    assert documents[0].metadata["database"] == "VEHICLE_PLATFORM"
+    assert documents[0].metadata["schema"] == "PUBLIC"
+    assert documents[0].metadata["table"] == "RPT_VEHICLE_SUMMARY"
+
+    assert documents[0].metadata["vehicle_count"] == 25
+    assert documents[0].metadata["avg_speed"] == 48.17
+
     assert documents[0].metadata["dbt_model"] == "rpt_vehicle_summary"
-    assert documents[0].metadata["dbt_database"] == "vehicle_platform"
+    assert documents[0].metadata["dbt_database"] == "VEHICLE_PLATFORM"
+    assert documents[0].metadata["dbt_schema"] == "PUBLIC"
+    assert documents[0].metadata["dbt_alias"] == "RPT_VEHICLE_SUMMARY"
+    assert documents[0].metadata["dbt_materialization"] == "table"
 
     vector_store = InMemoryVectorStore()
 
@@ -123,10 +186,13 @@ async def test_snowflake_dbt_model_flows_through_rag_pipeline():
     )
 
     results = await retriever.retrieve(
-        "What is the average speed for the fleet with good battery and fuel health?",
+        "What is the average speed for the Snowflake fleet?",
         top_k=5,
     )
 
     assert results
-    assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_summary"
     assert results[0].chunk.metadata["source"] == "snowflake"
+    assert results[0].chunk.metadata["database"] == "VEHICLE_PLATFORM"
+    assert results[0].chunk.metadata["schema"] == "PUBLIC"
+    assert results[0].chunk.metadata["table"] == "RPT_VEHICLE_SUMMARY"
+    assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_summary"
