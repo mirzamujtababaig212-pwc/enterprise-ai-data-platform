@@ -7,6 +7,12 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
 )
 from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
 from ai_platform.llm_gateway.routing.router import Router
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
 
 class FakeProvider:
@@ -549,3 +555,142 @@ async def test_unknown_provider_error_does_not_fallback(
 
     with pytest.raises(RuntimeError, match="unexpected provider failure"):
         await router.route_chat(request)
+
+
+@pytest.mark.asyncio
+async def test_chat_provider_failure_marks_provider_span_error_before_fallback(
+    capability_service,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.gateway.router.error")
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    provider_a = FakeProvider(
+        "provider-a",
+        chat_exception=ProviderConnectionError("provider-a failure"),
+    )
+
+    provider_b = FakeProvider(
+        "provider-b",
+        chat_result={
+            "provider": "provider-b",
+            "response": "success-b",
+        },
+    )
+
+    fallback_executor = FallbackExecutor(max_retries=0)
+
+    router, _ = build_router(
+        [provider_a, provider_b],
+        fallback_executor=fallback_executor,
+    )
+
+    request = {
+        "model": "test-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    with tracer.start_as_current_span("test.request"):
+        result = await router.route_chat(request)
+
+    assert result["response"] == "success-b"
+
+    spans = exporter.get_finished_spans()
+
+    gateway_span = next(span for span in spans if span.name == "gateway.chat")
+    provider_spans = [span for span in spans if span.name == "provider_call"]
+
+    assert len(provider_spans) == 2
+
+    failed_span = next(
+        span for span in provider_spans if span.attributes["provider.name"] == "provider-a"
+    )
+    successful_span = next(
+        span for span in provider_spans if span.attributes["provider.name"] == "provider-b"
+    )
+
+    assert failed_span.status.status_code is trace.StatusCode.ERROR
+    assert successful_span.status.status_code is not trace.StatusCode.ERROR
+    assert gateway_span.status.status_code is not trace.StatusCode.ERROR
+
+    assert failed_span.attributes["provider.model"] == "test-model"
+    assert successful_span.attributes["provider.model"] == "test-model"
+
+    assert "prompt" not in failed_span.attributes
+    assert "response" not in failed_span.attributes
+    assert "user.id" not in failed_span.attributes
+    assert "session.id" not in failed_span.attributes
+
+
+@pytest.mark.asyncio
+async def test_chat_all_provider_failures_mark_gateway_and_provider_spans_error(
+    capability_service,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.gateway.router.error")
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    provider_a = FakeProvider(
+        "provider-a",
+        chat_exception=ProviderConnectionError("provider-a failure"),
+    )
+
+    provider_b = FakeProvider(
+        "provider-b",
+        chat_exception=ProviderConnectionError("provider-b failure"),
+    )
+
+    fallback_executor = FallbackExecutor(max_retries=0)
+
+    router, _ = build_router(
+        [provider_a, provider_b],
+        fallback_executor=fallback_executor,
+    )
+
+    request = {
+        "model": "test-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    with tracer.start_as_current_span("test.request"):
+        with pytest.raises(ProviderConnectionError, match="provider-b failure"):
+            await router.route_chat(request)
+
+    spans = exporter.get_finished_spans()
+
+    gateway_span = next(span for span in spans if span.name == "gateway.chat")
+    provider_spans = [span for span in spans if span.name == "provider_call"]
+
+    assert len(provider_spans) == 2
+
+    assert gateway_span.status.status_code is trace.StatusCode.ERROR
+
+    for provider_span in provider_spans:
+        assert provider_span.status.status_code is trace.StatusCode.ERROR
+        assert provider_span.attributes["provider.model"] == "test-model"
+        assert "prompt" not in provider_span.attributes
+        assert "response" not in provider_span.attributes
+        assert "user.id" not in provider_span.attributes
+        assert "session.id" not in provider_span.attributes

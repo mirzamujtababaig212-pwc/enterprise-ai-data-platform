@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -15,6 +16,7 @@ from ai_platform.agents.observability import (
 from ai_platform.agents.otel_observer import (
     OpenTelemetryAgentExecutionObserver,
 )
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -31,6 +33,10 @@ from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
 from ai_platform.llm_gateway.routing.router import Router
+from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+    ProviderConnectionError,
+)
+from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
 SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
@@ -483,6 +489,139 @@ async def test_agent_llm_gateway_creates_nested_otel_trace_hierarchy(
     assert "prompt" not in gateway_span.attributes
     assert "response" not in gateway_span.attributes
     assert "user.id" not in gateway_span.attributes
+
+
+@pytest.mark.asyncio
+async def test_agent_llm_gateway_provider_failure_marks_full_otel_hierarchy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify provider failures propagate ERROR status through the full trace."""
+
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.integration.agent.gateway.error")
+
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    observer = OpenTelemetryAgentExecutionObserver(
+        tracer=tracer,
+    )
+
+    agent = make_agent(observer)
+
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    tool_registry = InMemoryToolRegistry()
+
+    provider_a = Mock()
+    provider_a.name = "provider-a"
+    provider_a.chat = AsyncMock(
+        side_effect=ProviderConnectionError("provider-a failure"),
+    )
+
+    provider_b = Mock()
+    provider_b.name = "provider-b"
+    provider_b.chat = AsyncMock(
+        side_effect=ProviderConnectionError("provider-b failure"),
+    )
+
+    fallback_executor = FallbackExecutor(max_retries=0)
+
+    router = Router(
+        fallback_executor=fallback_executor,
+    )
+
+    monkeypatch.setattr(
+        router.routing_resolver,
+        "is_logical_model",
+        Mock(return_value=False),
+    )
+    monkeypatch.setattr(
+        router.routing_resolver,
+        "resolve",
+        Mock(return_value=[provider_a, provider_b]),
+    )
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_registry=tool_registry,
+        llm_gateway=router,
+    )
+
+    with pytest.raises(
+        ProviderConnectionError,
+        match="provider-b failure",
+    ):
+        await runtime.run(
+            "observable-mcp-agent",
+            AgentRequest(
+                input="Explain enterprise AI architecture.",
+                session_id="session-gateway-error",
+                user_id="user-gateway-error",
+            ),
+        )
+
+    spans = exporter.get_finished_spans()
+
+    assert {span.name for span in spans} == {
+        "agent.run",
+        "agent.llm.request",
+        "gateway.chat",
+        "provider_call",
+    }
+
+    agent_span = next(span for span in spans if span.name == "agent.run")
+    llm_span = next(span for span in spans if span.name == "agent.llm.request")
+    gateway_span = next(span for span in spans if span.name == "gateway.chat")
+    provider_spans = [span for span in spans if span.name == "provider_call"]
+
+    assert len(provider_spans) == 2
+
+    assert agent_span.parent is None
+
+    assert llm_span.parent is not None
+    assert llm_span.parent.span_id == agent_span.context.span_id
+
+    assert gateway_span.parent is not None
+    assert gateway_span.parent.span_id == llm_span.context.span_id
+
+    for provider_span in provider_spans:
+        assert provider_span.parent is not None
+        assert provider_span.parent.span_id == gateway_span.context.span_id
+        assert provider_span.context.trace_id == agent_span.context.trace_id
+        assert provider_span.context.trace_id == llm_span.context.trace_id
+        assert provider_span.context.trace_id == gateway_span.context.trace_id
+        assert provider_span.status.status_code is trace.StatusCode.ERROR
+        assert provider_span.attributes["provider.model"] == "mock-gpt"
+        assert "prompt" not in provider_span.attributes
+        assert "response" not in provider_span.attributes
+        assert "user.id" not in provider_span.attributes
+        assert "session.id" not in provider_span.attributes
+
+    assert agent_span.context.trace_id == llm_span.context.trace_id
+    assert agent_span.context.trace_id == gateway_span.context.trace_id
+
+    assert gateway_span.status.status_code is trace.StatusCode.ERROR
+    assert llm_span.status.status_code is trace.StatusCode.ERROR
+    assert agent_span.status.status_code is trace.StatusCode.ERROR
+
+    assert gateway_span.attributes["llm.model"] == "mock-gpt"
+
+    assert "prompt" not in gateway_span.attributes
+    assert "response" not in gateway_span.attributes
+    assert "user.id" not in gateway_span.attributes
+    assert "session.id" not in gateway_span.attributes
+
+    provider_names = {span.attributes["provider.name"] for span in provider_spans}
+    assert provider_names == {
+        "provider-a",
+        "provider-b",
+    }
 
 
 @pytest.mark.asyncio

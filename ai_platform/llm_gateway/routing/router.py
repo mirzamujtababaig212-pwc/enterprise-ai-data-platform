@@ -119,15 +119,21 @@ class Router:
                         provider_model,
                     )
 
-                    if physical_model is None:
-                        return await provider.chat(request)
+                    try:
+                        if physical_model is None:
+                            return await provider.chat(request)
 
-                    provider_request = {
-                        **request,
-                        "model": physical_model,
-                    }
+                        provider_request = {
+                            **request,
+                            "model": physical_model,
+                        }
 
-                    return await provider.chat(provider_request)
+                        return await provider.chat(provider_request)
+
+                    except Exception as exc:
+                        provider_span.record_exception(exc)
+                        provider_span.set_status(trace.StatusCode.ERROR)
+                        raise
 
             result = await self.fallback_executor.execute(
                 providers,
