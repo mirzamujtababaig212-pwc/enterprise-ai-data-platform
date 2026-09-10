@@ -30,6 +30,12 @@ class FakeGeminiProvider:
 class FakeModelRegistry:
     """Minimal capability-aware registry for Gemini streaming."""
 
+    def is_logical_model(
+        self,
+        model: str,
+    ) -> bool:
+        return False
+
     def get_providers_for_model(
         self,
         capability: str,

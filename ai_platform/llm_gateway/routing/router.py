@@ -97,15 +97,38 @@ class Router:
             async def call_provider(provider):
                 physical_model = physical_models.get(id(provider))
 
-                if physical_model is None:
-                    return await provider.chat(request)
+                provider_name_for_call = getattr(
+                    provider,
+                    "name",
+                    getattr(
+                        provider,
+                        "provider_name",
+                        provider.__class__.__name__,
+                    ),
+                )
 
-                provider_request = {
-                    **request,
-                    "model": physical_model,
-                }
+                provider_model = physical_model or model
 
-                return await provider.chat(provider_request)
+                with tracer.start_as_current_span("provider_call") as provider_span:
+                    provider_span.set_attribute(
+                        "provider.name",
+                        provider_name_for_call,
+                    )
+
+                    provider_span.set_attribute(
+                        "provider.model",
+                        provider_model,
+                    )
+
+                    if physical_model is None:
+                        return await provider.chat(request)
+
+                    provider_request = {
+                        **request,
+                        "model": physical_model,
+                    }
+
+                    return await provider.chat(provider_request)
 
             result = await self.fallback_executor.execute(
                 providers,

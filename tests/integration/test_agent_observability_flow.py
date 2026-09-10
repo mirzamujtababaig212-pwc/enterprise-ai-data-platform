@@ -30,6 +30,8 @@ from tools.execution.service import ToolExecutionService
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
+from ai_platform.llm_gateway.routing.router import Router
+
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
 SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
@@ -311,6 +313,7 @@ async def test_agent_mcp_execution_creates_otel_trace_hierarchy() -> None:
     agent_registry = InMemoryAgentRegistry()
     await agent_registry.register(agent)
 
+    tool_registry = InMemoryToolRegistry()
     execution_service = ToolExecutionService(
         tool_registry,
         authorization_service=authorization_service,
@@ -319,6 +322,7 @@ async def test_agent_mcp_execution_creates_otel_trace_hierarchy() -> None:
     runtime = AgentRuntime(
         agent_registry,
         tool_execution_service=execution_service,
+        tool_registry=tool_registry,
         llm_gateway=gateway,
     )
 
@@ -387,6 +391,99 @@ async def test_agent_mcp_execution_creates_otel_trace_hierarchy() -> None:
 
     finally:
         await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_agent_llm_gateway_creates_nested_otel_trace_hierarchy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify agent LLM spans contain the real Gateway spans."""
+
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.integration.agent.gateway")
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    observer = OpenTelemetryAgentExecutionObserver(
+        tracer=tracer,
+    )
+
+    agent = make_agent(observer)
+
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    tool_registry = InMemoryToolRegistry()
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_registry=tool_registry,
+        llm_gateway=Router(),
+    )
+
+    response = await runtime.run(
+        "observable-mcp-agent",
+        AgentRequest(
+            input="Explain enterprise AI architecture.",
+            session_id="session-gateway-otel",
+            user_id="user-gateway-otel",
+        ),
+    )
+
+    assert response.output == "Mock response: Explain enterprise AI architecture."
+
+    spans = exporter.get_finished_spans()
+
+    assert {span.name for span in spans} == {
+        "agent.run",
+        "agent.llm.request",
+        "gateway.chat",
+        "provider_call",
+    }
+
+    agent_span = next(span for span in spans if span.name == "agent.run")
+    llm_span = next(span for span in spans if span.name == "agent.llm.request")
+    gateway_span = next(span for span in spans if span.name == "gateway.chat")
+    provider_span = next(span for span in spans if span.name == "provider_call")
+
+    assert agent_span.parent is None
+
+    assert llm_span.parent is not None
+    assert llm_span.parent.span_id == agent_span.context.span_id
+
+    assert gateway_span.parent is not None
+    assert gateway_span.parent.span_id == llm_span.context.span_id
+
+    assert provider_span.parent is not None
+    assert provider_span.parent.span_id == gateway_span.context.span_id
+
+    assert llm_span.context.trace_id == agent_span.context.trace_id
+    assert gateway_span.context.trace_id == agent_span.context.trace_id
+    assert provider_span.context.trace_id == agent_span.context.trace_id
+
+    assert agent_span.attributes["agent.name"] == "observable-mcp-agent"
+
+    assert llm_span.attributes["agent.name"] == "observable-mcp-agent"
+    assert llm_span.attributes["llm.provider"] == "mock"
+    assert llm_span.attributes["llm.model"] == "mock-gpt"
+
+    assert gateway_span.attributes["llm.model"] == "mock-gpt"
+    assert "llm.requested_provider" not in gateway_span.attributes
+    assert gateway_span.attributes["llm.provider"] == "mock"
+    assert gateway_span.attributes["llm.attempt_count"] == 1
+
+    assert "session.id" not in agent_span.attributes
+    assert "user.id" not in agent_span.attributes
+    assert "session.id" not in llm_span.attributes
+    assert "user.id" not in llm_span.attributes
+
+    assert "prompt" not in gateway_span.attributes
+    assert "response" not in gateway_span.attributes
+    assert "user.id" not in gateway_span.attributes
 
 
 @pytest.mark.asyncio
