@@ -210,7 +210,10 @@ async def test_discover_server_registers_tools():
             name="search",
             description="Search documents",
             input_schema={"type": "object"},
-            metadata={"source": "mcp"},
+            metadata={
+                "source": "mcp",
+                "mcp_server": "server-a",
+            },
         )
     ]
 
@@ -218,6 +221,10 @@ async def test_discover_server_registers_tools():
 
     assert registered is not None
     assert registered.definition.name == "search"
+    assert registered.definition.metadata == {
+        "source": "mcp",
+        "mcp_server": "server-a",
+    }
 
 
 @pytest.mark.asyncio

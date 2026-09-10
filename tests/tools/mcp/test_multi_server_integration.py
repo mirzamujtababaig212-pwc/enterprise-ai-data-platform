@@ -9,7 +9,6 @@ from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
 
-
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
@@ -56,9 +55,17 @@ async def test_manager_manages_multiple_real_stdio_servers():
 
         assert len(document_tools) == 1
         assert document_tools[0].name == "search_documents"
+        assert document_tools[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
 
         assert len(policy_tools) == 1
         assert policy_tools[0].name == "get_policy"
+        assert policy_tools[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "policy-server",
+        }
 
         registered_tools = await registry.list_tools()
 
@@ -73,6 +80,15 @@ async def test_manager_manages_multiple_real_stdio_servers():
 
         assert search_tool is not None
         assert policy_tool is not None
+        assert search_tool.definition.metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+
+        assert policy_tool.definition.metadata == {
+            "source": "mcp",
+            "mcp_server": "policy-server",
+        }
 
         search_result = await search_tool.execute({"query": "enterprise AI"})
 

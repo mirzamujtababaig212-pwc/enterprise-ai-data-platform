@@ -111,6 +111,7 @@ class MCPServerManager:
         discovery = MCPToolDiscoveryService(
             client=runtime.client,
             registry=self.registry,
+            server_name=name,
         )
 
         return await discovery.discover_and_register()

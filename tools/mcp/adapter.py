@@ -12,6 +12,7 @@ class MCPToolAdapter:
         self,
         client: MCPClient,
         definition: MCPToolDefinition,
+        server_name: str | None = None,
     ):
         if not definition.name.strip():
             raise ValueError("MCP tool name must not be empty.")
@@ -19,18 +20,27 @@ class MCPToolAdapter:
         if not definition.description.strip():
             raise ValueError("MCP tool description must not be empty.")
 
+        if server_name is not None and not server_name.strip():
+            raise ValueError("MCP server name must not be empty.")
+
         self.client = client
         self._definition = definition
+        self._server_name = server_name
 
     @property
     def definition(self) -> ToolDefinition:
+        metadata = {
+            "source": "mcp",
+        }
+
+        if self._server_name is not None:
+            metadata["mcp_server"] = self._server_name
+
         return ToolDefinition(
             name=self._definition.name,
             description=self._definition.description,
             input_schema=dict(self._definition.input_schema),
-            metadata={
-                "source": "mcp",
-            },
+            metadata=metadata,
         )
 
     async def execute(

@@ -16,9 +16,14 @@ class MCPToolDiscoveryService:
         self,
         client: MCPClient,
         registry: ToolRegistry,
+        server_name: str | None = None,
     ) -> None:
+        if server_name is not None and not server_name.strip():
+            raise ValueError("MCP server name must not be empty.")
+
         self.client = client
         self.registry = registry
+        self.server_name = server_name
 
     async def discover_and_register(
         self,
@@ -31,6 +36,7 @@ class MCPToolDiscoveryService:
             adapter = MCPToolAdapter(
                 self.client,
                 mcp_tool,
+                server_name=self.server_name,
             )
 
             await self.registry.register(adapter)
