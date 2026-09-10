@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
+from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
+from ai_platform.agents.runtime import AgentRuntime
+from ai_platform.agents.tool_calls import AgentToolCall
+from rag.governance import GovernancePolicy
+from tools.authorization.in_memory import InMemoryToolAuthorizer
+from tools.authorization.policy import MetadataAuthorizationPolicy
+from tools.authorization.service import ToolAuthorizationService
+from tools.execution.service import ToolExecutionService
+from tools.mcp.config import MCPServerConfig
+from tools.mcp.manager import MCPServerManager
+from tools.registry.in_memory import InMemoryToolRegistry
+
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
+SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
+
+
+class MCPCallingAgent:
+    def __init__(self, definition: AgentDefinition) -> None:
+        self._definition = definition
+        self.last_tool_results = None
+
+    @property
+    def definition(self) -> AgentDefinition:
+        return self._definition
+
+    async def run(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentResponse:
+        self.last_tool_results = await context.execute_tool_calls(
+            (
+                AgentToolCall(
+                    call_id="call-1",
+                    name="search_documents",
+                    arguments={
+                        "query": "enterprise AI",
+                    },
+                ),
+            )
+        )
+
+        return AgentResponse(
+            agent_name=self.definition.name,
+            output=str(self.last_tool_results),
+            session_id=context.session_id,
+        )
+
+
+def make_agent() -> MCPCallingAgent:
+    return MCPCallingAgent(
+        AgentDefinition(
+            name="governed-mcp-agent-test",
+            description="Agent integration test for governed MCP authorization.",
+            system_prompt=(
+                "You are an enterprise AI agent. "
+                "Use the search_documents MCP tool when required."
+            ),
+            model="mock-gpt",
+            tool_names=("search_documents",),
+        )
+    )
+
+
+def make_governance_policy() -> GovernancePolicy:
+    return GovernancePolicy(
+        required_metadata={
+            "classification": "internal",
+            "tenant": "deldai",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_authorizes_real_mcp_tool_before_execution() -> None:
+    registry = InMemoryToolRegistry()
+
+    authorization_policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+    )
+    authorizer = InMemoryToolAuthorizer(
+        policy=authorization_policy,
+    )
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    execution_service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+    )
+
+    await manager.register_server(config)
+
+    agent = make_agent()
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+    )
+
+    await authorizer.allow(
+        "user-mcp-456",
+        "search_documents",
+    )
+
+    try:
+        definitions = await manager.connect_and_discover("document-server")
+
+        assert [definition.name for definition in definitions] == [
+            "search_documents",
+        ]
+
+        assert definitions[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+
+        response = await runtime.run(
+            "governed-mcp-agent-test",
+            AgentRequest(
+                input="Find enterprise AI architecture information.",
+                session_id="session-mcp-123",
+                user_id="user-mcp-456",
+                governance_policy=make_governance_policy(),
+                metadata={
+                    "source": "agent-mcp-authorization-test",
+                },
+            ),
+        )
+
+        assert response.agent_name == "governed-mcp-agent-test"
+        assert response.session_id == "session-mcp-123"
+
+        assert agent.last_tool_results is not None
+        assert len(agent.last_tool_results) == 1
+
+        tool_result = agent.last_tool_results[0]
+
+        assert tool_result.tool_name == "search_documents"
+        assert tool_result.success is True
+        assert tool_result.output == {
+            "query": "enterprise AI",
+            "results": [
+                {
+                    "id": "document-1",
+                    "content": "Enterprise AI platform architecture.",
+                }
+            ],
+        }
+
+    finally:
+        await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_denies_real_mcp_tool_before_server_execution() -> None:
+    registry = InMemoryToolRegistry()
+
+    authorization_policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "finance-server",
+        }
+    )
+    authorizer = InMemoryToolAuthorizer(
+        policy=authorization_policy,
+    )
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    execution_service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+    )
+
+    await manager.register_server(config)
+
+    agent = make_agent()
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+    )
+
+    await authorizer.allow(
+        "user-mcp-456",
+        "search_documents",
+    )
+
+    try:
+        definitions = await manager.connect_and_discover("document-server")
+
+        assert definitions[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+
+        response = await runtime.run(
+            "governed-mcp-agent-test",
+            AgentRequest(
+                input="Find enterprise AI architecture information.",
+                session_id="session-mcp-denied",
+                user_id="user-mcp-456",
+                governance_policy=make_governance_policy(),
+                metadata={
+                    "source": "agent-mcp-authorization-test",
+                },
+            ),
+        )
+
+        assert response.agent_name == "governed-mcp-agent-test"
+
+        assert agent.last_tool_results is not None
+        assert len(agent.last_tool_results) == 1
+
+        tool_result = agent.last_tool_results[0]
+
+        assert tool_result.tool_name == "search_documents"
+        assert tool_result.success is False
+        assert tool_result.output is None
+        assert "mcp_server='finance-server'" in tool_result.error
+
+    finally:
+        await manager.disconnect_all()
