@@ -5,6 +5,10 @@ from typing import Any
 from databricks.sdk import WorkspaceClient
 
 from common.config.settings import Settings
+from common.databricks.metadata import (
+    DatabricksColumnMetadata,
+    DatabricksTableMetadata,
+)
 
 
 class DatabricksControlPlaneClient:
@@ -58,3 +62,39 @@ class DatabricksControlPlaneClient:
     def get_table(self, full_name: str, **kwargs):
         """Get table metadata using its fully qualified name."""
         return self._client.tables.get(full_name, **kwargs)
+
+    def get_table_metadata(self, full_name: str, **kwargs) -> DatabricksTableMetadata:
+        """
+        Get canonical DELDAI metadata for a Databricks table.
+
+        Databricks SDK objects are intentionally converted at the
+        control-plane boundary so downstream components do not depend
+        directly on the Databricks SDK model types.
+        """
+        table = self.get_table(full_name, **kwargs)
+
+        columns = tuple(
+            DatabricksColumnMetadata(
+                name=column.name,
+                type_name=(column.type_name.value if column.type_name is not None else None),
+                type_text=column.type_text,
+                nullable=column.nullable,
+                comment=column.comment,
+                position=column.position,
+                partition_index=column.partition_index,
+            )
+            for column in (table.columns or [])
+        )
+
+        return DatabricksTableMetadata(
+            full_name=table.full_name,
+            catalog=table.catalog_name,
+            schema=table.schema_name,
+            name=table.name,
+            table_type=(table.table_type.value if table.table_type is not None else None),
+            owner=table.owner,
+            comment=table.comment,
+            table_id=table.table_id,
+            properties=dict(table.properties or {}),
+            columns=columns,
+        )

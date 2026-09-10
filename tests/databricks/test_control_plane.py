@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from common.databricks.control_plane import DatabricksControlPlaneClient
@@ -124,3 +125,96 @@ def test_constructor_creates_workspace_client(monkeypatch):
     control_plane = DatabricksControlPlaneClient()
 
     assert control_plane._client is workspace_client
+
+
+def test_get_table_metadata_maps_table_and_columns():
+    client = Mock()
+
+    column_a = SimpleNamespace(
+        name="vehicle_id",
+        type_name=SimpleNamespace(value="STRING"),
+        type_text="string",
+        nullable=False,
+        comment="Vehicle identifier",
+        position=0,
+        partition_index=None,
+    )
+    column_b = SimpleNamespace(
+        name="avg_speed",
+        type_name=SimpleNamespace(value="DOUBLE"),
+        type_text="double",
+        nullable=True,
+        comment="Average speed",
+        position=1,
+        partition_index=None,
+    )
+
+    table = SimpleNamespace(
+        full_name="vehicle_platform.analytics.rpt_vehicle_summary",
+        catalog_name="vehicle_platform",
+        schema_name="analytics",
+        name="rpt_vehicle_summary",
+        table_type=SimpleNamespace(value="MANAGED"),
+        owner="data-platform",
+        comment="Vehicle fleet summary",
+        table_id="table-123",
+        properties={"domain": "vehicle", "tier": "gold"},
+        columns=[column_a, column_b],
+    )
+
+    client.tables.get.return_value = table
+
+    control_plane = DatabricksControlPlaneClient(client=client)
+
+    metadata = control_plane.get_table_metadata("vehicle_platform.analytics.rpt_vehicle_summary")
+
+    assert metadata.full_name == "vehicle_platform.analytics.rpt_vehicle_summary"
+    assert metadata.catalog == "vehicle_platform"
+    assert metadata.schema == "analytics"
+    assert metadata.name == "rpt_vehicle_summary"
+    assert metadata.table_type == "MANAGED"
+    assert metadata.owner == "data-platform"
+    assert metadata.comment == "Vehicle fleet summary"
+    assert metadata.table_id == "table-123"
+    assert metadata.properties == {
+        "domain": "vehicle",
+        "tier": "gold",
+    }
+
+    assert len(metadata.columns) == 2
+    assert metadata.columns[0].name == "vehicle_id"
+    assert metadata.columns[0].type_name == "STRING"
+    assert metadata.columns[0].nullable is False
+    assert metadata.columns[1].name == "avg_speed"
+    assert metadata.columns[1].type_name == "DOUBLE"
+
+    client.tables.get.assert_called_once_with("vehicle_platform.analytics.rpt_vehicle_summary")
+
+
+def test_get_table_metadata_handles_missing_optional_fields():
+    client = Mock()
+
+    table = SimpleNamespace(
+        full_name="main.analytics.vehicle_events",
+        catalog_name="main",
+        schema_name="analytics",
+        name="vehicle_events",
+        table_type=None,
+        owner=None,
+        comment=None,
+        table_id=None,
+        properties=None,
+        columns=None,
+    )
+
+    client.tables.get.return_value = table
+
+    control_plane = DatabricksControlPlaneClient(client=client)
+
+    metadata = control_plane.get_table_metadata("main.analytics.vehicle_events")
+
+    assert metadata.full_name == "main.analytics.vehicle_events"
+    assert metadata.table_type is None
+    assert metadata.owner is None
+    assert metadata.properties == {}
+    assert metadata.columns == ()
