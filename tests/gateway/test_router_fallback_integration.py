@@ -694,3 +694,148 @@ async def test_chat_all_provider_failures_mark_gateway_and_provider_spans_error(
         assert "response" not in provider_span.attributes
         assert "user.id" not in provider_span.attributes
         assert "session.id" not in provider_span.attributes
+
+
+@pytest.mark.asyncio
+async def test_stream_creates_gateway_and_provider_otel_hierarchy(
+    capability_service,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.gateway.router.stream")
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    provider = FakeProvider(
+        "provider-a",
+        stream_chunks=[
+            "chunk-1",
+            "chunk-2",
+        ],
+    )
+
+    router, _ = build_router([provider])
+
+    request = {
+        "provider": "provider-a",
+        "model": "test-stream-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    with tracer.start_as_current_span("test.request"):
+        chunks = []
+
+        async for chunk in router.route_stream(request):
+            chunks.append(chunk)
+
+    assert chunks == [
+        "chunk-1",
+        "chunk-2",
+    ]
+
+    spans = exporter.get_finished_spans()
+
+    gateway_span = next(span for span in spans if span.name == "gateway.stream")
+    provider_span = next(span for span in spans if span.name == "provider_call")
+
+    assert gateway_span.context.trace_id == provider_span.context.trace_id
+    assert provider_span.parent is not None
+    assert provider_span.parent.span_id == gateway_span.context.span_id
+
+    assert gateway_span.status.status_code is trace.StatusCode.OK
+    assert provider_span.status.status_code is trace.StatusCode.OK
+
+    assert gateway_span.attributes["llm.model"] == "test-stream-model"
+    assert gateway_span.attributes["llm.requested_provider"] == "provider-a"
+
+    assert provider_span.attributes["provider.name"] == "provider-a"
+    assert provider_span.attributes["provider.model"] == "test-stream-model"
+
+    assert "prompt" not in gateway_span.attributes
+    assert "response" not in gateway_span.attributes
+    assert "user.id" not in gateway_span.attributes
+    assert "session.id" not in gateway_span.attributes
+
+    assert "prompt" not in provider_span.attributes
+    assert "response" not in provider_span.attributes
+    assert "user.id" not in provider_span.attributes
+    assert "session.id" not in provider_span.attributes
+
+
+@pytest.mark.asyncio
+async def test_stream_provider_failure_marks_gateway_and_provider_spans_error(
+    capability_service,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = tracer_provider.get_tracer("tests.gateway.router.stream")
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.routing.router.tracer",
+        tracer,
+    )
+
+    provider = FakeProvider(
+        "provider-a",
+        stream_exception=ProviderConnectionError("provider stream failure"),
+    )
+
+    router, _ = build_router([provider])
+
+    request = {
+        "provider": "provider-a",
+        "model": "test-stream-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    with tracer.start_as_current_span("test.request"):
+        with pytest.raises(
+            ProviderConnectionError,
+            match="provider stream failure",
+        ):
+            async for _ in router.route_stream(request):
+                pass
+
+    spans = exporter.get_finished_spans()
+
+    gateway_span = next(span for span in spans if span.name == "gateway.stream")
+    provider_span = next(span for span in spans if span.name == "provider_call")
+
+    assert gateway_span.context.trace_id == provider_span.context.trace_id
+    assert provider_span.parent is not None
+    assert provider_span.parent.span_id == gateway_span.context.span_id
+
+    assert gateway_span.status.status_code is trace.StatusCode.ERROR
+    assert provider_span.status.status_code is trace.StatusCode.ERROR
+
+    assert provider_span.attributes["provider.name"] == "provider-a"
+    assert provider_span.attributes["provider.model"] == "test-stream-model"
+    assert provider_span.attributes["provider.stream.error"] is True
+
+    assert any(event.name == "exception" for event in provider_span.events)
+    assert any(event.name == "exception" for event in gateway_span.events)
+
+    assert "prompt" not in gateway_span.attributes
+    assert "response" not in gateway_span.attributes
+    assert "user.id" not in gateway_span.attributes
+    assert "session.id" not in gateway_span.attributes
+
+    assert "prompt" not in provider_span.attributes
+    assert "response" not in provider_span.attributes
+    assert "user.id" not in provider_span.attributes
+    assert "session.id" not in provider_span.attributes

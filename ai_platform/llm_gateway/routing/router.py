@@ -255,41 +255,67 @@ class Router:
 
         provider = providers[0]
 
-        with tracer.start_as_current_span("provider_call") as span:
-            span.set_attribute(
-                "provider.name",
-                getattr(
-                    provider,
-                    "name",
-                    getattr(
-                        provider,
-                        "provider_name",
-                        provider.__class__.__name__,
-                    ),
-                ),
-            )
-
-            span.set_attribute(
-                "provider.model",
+        with tracer.start_as_current_span("gateway.stream") as gateway_span:
+            gateway_span.set_attribute(
+                "llm.model",
                 model,
             )
 
-            try:
-                stream = provider.stream(request)
-
-                async for chunk in stream:
-                    yield chunk
-
-            except GeneratorExit:
-                raise
-
-            except Exception as exc:
-                span.record_exception(exc)
-                span.set_attribute(
-                    "provider.stream.error",
-                    True,
+            if provider_name:
+                gateway_span.set_attribute(
+                    "llm.requested_provider",
+                    provider_name,
                 )
-                raise
+
+            with tracer.start_as_current_span("provider_call") as provider_span:
+                provider_span.set_attribute(
+                    "provider.name",
+                    getattr(
+                        provider,
+                        "name",
+                        getattr(
+                            provider,
+                            "provider_name",
+                            provider.__class__.__name__,
+                        ),
+                    ),
+                )
+
+                provider_span.set_attribute(
+                    "provider.model",
+                    model,
+                )
+
+                try:
+                    stream = provider.stream(request)
+
+                    async for chunk in stream:
+                        yield chunk
+
+                    provider_span.set_status(
+                        trace.StatusCode.OK,
+                    )
+                    gateway_span.set_status(
+                        trace.StatusCode.OK,
+                    )
+
+                except GeneratorExit:
+                    raise
+
+                except Exception as exc:
+                    provider_span.record_exception(exc)
+                    provider_span.set_attribute(
+                        "provider.stream.error",
+                        True,
+                    )
+                    provider_span.set_status(
+                        trace.StatusCode.ERROR,
+                    )
+                    gateway_span.record_exception(exc)
+                    gateway_span.set_status(
+                        trace.StatusCode.ERROR,
+                    )
+                    raise
 
     async def route_health(
         self,
