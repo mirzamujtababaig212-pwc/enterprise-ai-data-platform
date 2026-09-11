@@ -13,11 +13,15 @@ class RetrievalEvaluationDataset:
     """
 
     name: str
+    version: str
     cases: tuple[RetrievalEvaluationCase, ...]
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("name must not be empty")
+
+        if not self.version.strip():
+            raise ValueError("version must not be empty")
 
         if not self.cases:
             raise ValueError("cases must not be empty")
@@ -27,9 +31,12 @@ class RetrievalEvaluationDataset:
         cls,
         name: str,
         cases: Sequence[RetrievalEvaluationCase],
+        *,
+        version: str = "unversioned",
     ) -> RetrievalEvaluationDataset:
         return cls(
             name=name,
+            version=version,
             cases=tuple(cases),
         )
 
