@@ -14,6 +14,10 @@ from rag.evaluation.quality_gate import (
     RetrievalQualityGate,
     RetrievalQualityGateResult,
 )
+from rag.evaluation.release import (
+    RetrievalEvaluationReleaseDecision,
+    RetrievalEvaluationReleaseGate,
+)
 from rag.evaluation.models import (
     RetrievalEvaluationCase,
     RetrievalEvaluationResult,
@@ -45,5 +49,7 @@ __all__ = [
     "RetrievalQueryResult",
     "RetrievalEvaluationLineage",
     "RetrievalEvaluationRegression",
+    "RetrievalEvaluationReleaseDecision",
+    "RetrievalEvaluationReleaseGate",
     "RetrievalEvaluationRun",
 ]
