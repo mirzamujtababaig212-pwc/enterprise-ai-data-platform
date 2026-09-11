@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.models import RetrievalEvaluationRunRecord
@@ -77,6 +77,30 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
             return None
 
         return _deserialize_run(record)
+
+    async def list(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RetrievalEvaluationRun]:
+        records = self._session.scalars(
+            select(RetrievalEvaluationRunRecord)
+            .order_by(
+                RetrievalEvaluationRunRecord.created_at.desc(),
+                RetrievalEvaluationRunRecord.run_id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        ).all()
+
+        return [_deserialize_run(record) for record in records]
+
+    async def count(self) -> int:
+        return int(
+            self._session.scalar(select(func.count()).select_from(RetrievalEvaluationRunRecord))
+            or 0
+        )
 
 
 def _serialize_run(
