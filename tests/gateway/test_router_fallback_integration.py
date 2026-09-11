@@ -5,6 +5,14 @@ import pytest
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderConnectionError,
 )
+from ai_platform.llm_gateway.metrics.prometheus import (
+    PROVIDER_ERRORS_TOTAL,
+    PROVIDER_LATENCY_SECONDS,
+    PROVIDER_REQUESTS_TOTAL,
+)
+from ai_platform.llm_gateway.reliability.failure_classifier import (
+    failure_classifier,
+)
 from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
 from ai_platform.llm_gateway.routing.router import Router
 from opentelemetry import trace
@@ -13,6 +21,21 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+
+
+def _counter_value(counter, **labels) -> float:
+    return counter.labels(**labels)._value.get()
+
+
+def _histogram_count(histogram, **labels) -> float:
+    target_labels = {key: str(value) for key, value in labels.items()}
+
+    for metric in histogram.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_count") and dict(sample.labels) == target_labels:
+                return sample.value
+
+    return 0.0
 
 
 class FakeProvider:
@@ -772,6 +795,65 @@ async def test_stream_creates_gateway_and_provider_otel_hierarchy(
 
 
 @pytest.mark.asyncio
+async def test_stream_records_provider_prometheus_metrics(
+    capability_service,
+):
+    provider = FakeProvider(
+        "provider-stream-metrics-success",
+        stream_chunks=[
+            "chunk-1",
+            "chunk-2",
+        ],
+    )
+
+    router, _ = build_router([provider])
+
+    request = {
+        "provider": "provider-stream-metrics-success",
+        "model": "test-stream-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    before_requests = _counter_value(
+        PROVIDER_REQUESTS_TOTAL,
+        provider="provider-stream-metrics-success",
+    )
+
+    before_latency_count = _histogram_count(
+        PROVIDER_LATENCY_SECONDS,
+        provider="provider-stream-metrics-success",
+    )
+
+    chunks = []
+
+    async for chunk in router.route_stream(request):
+        chunks.append(chunk)
+
+    assert chunks == [
+        "chunk-1",
+        "chunk-2",
+    ]
+
+    after_requests = _counter_value(
+        PROVIDER_REQUESTS_TOTAL,
+        provider="provider-stream-metrics-success",
+    )
+
+    after_latency_count = _histogram_count(
+        PROVIDER_LATENCY_SECONDS,
+        provider="provider-stream-metrics-success",
+    )
+
+    assert after_requests == before_requests + 1
+    assert after_latency_count == before_latency_count + 1
+
+
+@pytest.mark.asyncio
 async def test_stream_provider_failure_marks_gateway_and_provider_spans_error(
     capability_service,
     monkeypatch: pytest.MonkeyPatch,
@@ -839,3 +921,77 @@ async def test_stream_provider_failure_marks_gateway_and_provider_spans_error(
     assert "response" not in provider_span.attributes
     assert "user.id" not in provider_span.attributes
     assert "session.id" not in provider_span.attributes
+
+
+@pytest.mark.asyncio
+async def test_stream_failure_records_provider_prometheus_metrics(
+    capability_service,
+):
+    provider_name = "provider-stream-metrics-failure"
+
+    error = ProviderConnectionError(
+        "provider stream failure",
+    )
+
+    provider = FakeProvider(
+        provider_name,
+        stream_exception=error,
+    )
+
+    router, _ = build_router([provider])
+
+    request = {
+        "provider": provider_name,
+        "model": "test-stream-model",
+        "messages": [
+            {
+                "role": "user",
+                "content": "hello",
+            }
+        ],
+    }
+
+    category = failure_classifier.classify(error)
+
+    before_requests = _counter_value(
+        PROVIDER_REQUESTS_TOTAL,
+        provider=provider_name,
+    )
+
+    before_errors = _counter_value(
+        PROVIDER_ERRORS_TOTAL,
+        provider=provider_name,
+        error_type=category.value,
+    )
+
+    before_latency_count = _histogram_count(
+        PROVIDER_LATENCY_SECONDS,
+        provider=provider_name,
+    )
+
+    with pytest.raises(
+        ProviderConnectionError,
+        match="provider stream failure",
+    ):
+        async for _ in router.route_stream(request):
+            pass
+
+    after_requests = _counter_value(
+        PROVIDER_REQUESTS_TOTAL,
+        provider=provider_name,
+    )
+
+    after_errors = _counter_value(
+        PROVIDER_ERRORS_TOTAL,
+        provider=provider_name,
+        error_type=category.value,
+    )
+
+    after_latency_count = _histogram_count(
+        PROVIDER_LATENCY_SECONDS,
+        provider=provider_name,
+    )
+
+    assert after_requests == before_requests + 1
+    assert after_errors == before_errors + 1
+    assert after_latency_count == before_latency_count + 1

@@ -1,3 +1,4 @@
+import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
@@ -6,6 +7,14 @@ from opentelemetry import trace
 
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
+)
+from ai_platform.llm_gateway.metrics.prometheus import (
+    PROVIDER_ERRORS_TOTAL,
+    PROVIDER_LATENCY_SECONDS,
+    PROVIDER_REQUESTS_TOTAL,
+)
+from ai_platform.llm_gateway.reliability.failure_classifier import (
+    failure_classifier,
 )
 from ai_platform.llm_gateway.providers.provider_factory import (
     ProviderFactory,
@@ -255,6 +264,22 @@ class Router:
 
         provider = providers[0]
 
+        provider_name_for_call = getattr(
+            provider,
+            "name",
+            getattr(
+                provider,
+                "provider_name",
+                provider.__class__.__name__,
+            ),
+        )
+
+        started_at = time.perf_counter()
+
+        PROVIDER_REQUESTS_TOTAL.labels(
+            provider=provider_name_for_call,
+        ).inc()
+
         with tracer.start_as_current_span("gateway.stream") as gateway_span:
             gateway_span.set_attribute(
                 "llm.model",
@@ -270,15 +295,7 @@ class Router:
             with tracer.start_as_current_span("provider_call") as provider_span:
                 provider_span.set_attribute(
                     "provider.name",
-                    getattr(
-                        provider,
-                        "name",
-                        getattr(
-                            provider,
-                            "provider_name",
-                            provider.__class__.__name__,
-                        ),
-                    ),
+                    provider_name_for_call,
                 )
 
                 provider_span.set_attribute(
@@ -303,6 +320,11 @@ class Router:
                     raise
 
                 except Exception as exc:
+                    category = failure_classifier.classify(exc)
+                    PROVIDER_ERRORS_TOTAL.labels(
+                        provider=provider_name_for_call,
+                        error_type=category.value,
+                    ).inc()
                     provider_span.record_exception(exc)
                     provider_span.set_attribute(
                         "provider.stream.error",
@@ -316,6 +338,11 @@ class Router:
                         trace.StatusCode.ERROR,
                     )
                     raise
+
+                finally:
+                    PROVIDER_LATENCY_SECONDS.labels(
+                        provider=provider_name_for_call,
+                    ).observe(time.perf_counter() - started_at)
 
     async def route_health(
         self,
