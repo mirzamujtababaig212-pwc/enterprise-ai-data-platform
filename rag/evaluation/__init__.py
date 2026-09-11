@@ -5,6 +5,11 @@ from rag.evaluation.metrics import (
     recall_at_k,
     reciprocal_rank,
 )
+from rag.evaluation.policy import RetrievalEvaluationPolicy
+from rag.evaluation.quality_gate import (
+    RetrievalQualityGate,
+    RetrievalQualityGateResult,
+)
 from rag.evaluation.models import (
     RetrievalEvaluationCase,
     RetrievalEvaluationResult,
@@ -14,6 +19,9 @@ from rag.evaluation.models import (
 __all__ = [
     "RetrievalEvaluationCase",
     "RetrievalEvaluationResult",
+    "RetrievalEvaluationPolicy",
+    "RetrievalQualityGate",
+    "RetrievalQualityGateResult",
     "RetrievalEvaluator",
     "RetrievalQueryEvaluation",
     "ndcg_at_k",
