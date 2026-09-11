@@ -184,6 +184,26 @@ class RAGChunkRecord(Base):
         nullable=True,
     )
 
+    embedding_requested_provider: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    embedding_requested_model: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    embedding_resolved_provider: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    embedding_resolved_model: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

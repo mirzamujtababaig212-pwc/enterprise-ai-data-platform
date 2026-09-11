@@ -7,7 +7,7 @@ from app.control_plane.persistence.models import (
     RAGChunkRecord,
     RAGDocumentRecord,
 )
-from rag.models import Document, DocumentChunk
+from rag.models import Document, DocumentChunk, EmbeddedChunk
 
 
 class PostgreSQLRAGStateRepository:
@@ -52,6 +52,68 @@ class PostgreSQLRAGStateRepository:
                         chunk_metadata=dict(chunk.metadata),
                         embedding_model=embedding_model,
                         embedding_dimension=embedding_dimension,
+                    )
+                )
+
+            self._session.commit()
+
+        except Exception:
+            self._session.rollback()
+            raise
+
+    def save_indexed_document(
+        self,
+        document: Document,
+        embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        try:
+            existing = self._session.scalar(
+                select(RAGDocumentRecord).where(RAGDocumentRecord.document_id == document.id)
+            )
+
+            if existing is not None:
+                existing.content = document.content
+                existing.document_metadata = dict(document.metadata)
+
+                self._session.execute(
+                    delete(RAGChunkRecord).where(RAGChunkRecord.document_id == document.id)
+                )
+            else:
+                existing = RAGDocumentRecord(
+                    document_id=document.id,
+                    content=document.content,
+                    document_metadata=dict(document.metadata),
+                )
+                self._session.add(existing)
+
+            for embedded_chunk in embedded_chunks:
+                identity = embedded_chunk.embedding_identity
+
+                self._session.add(
+                    RAGChunkRecord(
+                        chunk_id=embedded_chunk.chunk.id,
+                        document_id=embedded_chunk.chunk.document_id,
+                        chunk_index=embedded_chunk.chunk.chunk_index,
+                        content=embedded_chunk.chunk.content,
+                        chunk_metadata=dict(embedded_chunk.chunk.metadata),
+                        embedding_model=(identity.resolved_model if identity is not None else None),
+                        embedding_dimension=(
+                            identity.dimension
+                            if identity is not None
+                            else len(embedded_chunk.embedding)
+                        ),
+                        embedding_requested_provider=(
+                            identity.requested_provider if identity is not None else None
+                        ),
+                        embedding_requested_model=(
+                            identity.requested_model if identity is not None else None
+                        ),
+                        embedding_resolved_provider=(
+                            identity.resolved_provider if identity is not None else None
+                        ),
+                        embedding_resolved_model=(
+                            identity.resolved_model if identity is not None else None
+                        ),
                     )
                 )
 

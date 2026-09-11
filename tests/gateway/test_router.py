@@ -25,6 +25,7 @@ def router(routing_resolver):
 @pytest.fixture
 def fake_provider():
     provider = MagicMock()
+    provider.name = "openai"
 
     provider.chat = AsyncMock(return_value={"reply": "hello"})
 
@@ -214,6 +215,154 @@ async def test_route_embeddings(
         {
             "provider": "openai",
             "model": "openai-embedding",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_embeddings_with_metadata_preserves_physical_model(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+    """Physical embedding routes should expose the requested model as metadata."""
+
+    routing_resolver.resolve.return_value = [
+        fake_provider,
+    ]
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_embeddings",
+    ):
+        result = await router.route_embeddings_with_metadata(
+            {
+                "provider": "openai",
+                "model": "text-embedding-3-small",
+            }
+        )
+
+    assert result.response == [
+        0.1,
+        0.2,
+        0.3,
+    ]
+    assert result.provider_name == fake_provider.name
+    assert result.model_name == "text-embedding-3-small"
+
+    fake_provider.embeddings.assert_awaited_once_with(
+        {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_embeddings_uses_physical_model_for_logical_route(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+    """Logical embedding routes should execute using the physical model."""
+
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    fake_provider.name = "openai"
+    routing_resolver.is_logical_model.return_value = True
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=fake_provider,
+            model="text-embedding-3-small",
+        )
+    ]
+
+    result = await router.route_embeddings_with_metadata(
+        {
+            "model": "enterprise-embedding",
+        }
+    )
+
+    assert result.response == [
+        0.1,
+        0.2,
+        0.3,
+    ]
+    assert result.provider_name == "openai"
+    assert result.model_name == "text-embedding-3-small"
+
+    routing_resolver.resolve_routes.assert_called_once_with(
+        capability="embeddings",
+        model="enterprise-embedding",
+        requested_provider=None,
+    )
+
+    fake_provider.embeddings.assert_awaited_once_with(
+        {
+            "model": "text-embedding-3-small",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_embeddings_fallback_preserves_successful_physical_model(
+    routing_resolver,
+    fake_provider,
+):
+    """Fallback metadata should identify the physical model that actually succeeded."""
+
+    from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+        ProviderConnectionError,
+    )
+    from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    provider_a = MagicMock()
+    provider_a.name = "provider-a"
+    provider_a.embeddings = AsyncMock(
+        side_effect=ProviderConnectionError("provider-a failure"),
+    )
+
+    provider_b = MagicMock()
+    provider_b.name = "provider-b"
+    provider_b.embeddings = AsyncMock(
+        return_value=[0.9, 0.8, 0.7],
+    )
+
+    routing_resolver.is_logical_model.return_value = True
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=provider_a,
+            model="provider-a-embedding",
+        ),
+        ResolvedRoute(
+            provider=provider_b,
+            model="provider-b-embedding",
+        ),
+    ]
+
+    fallback_router = Router(
+        routing_resolver=routing_resolver,
+        fallback_executor=FallbackExecutor(max_retries=0),
+    )
+
+    result = await fallback_router.route_embeddings_with_metadata(
+        {
+            "model": "enterprise-embedding",
+        }
+    )
+
+    assert result.response == [0.9, 0.8, 0.7]
+    assert result.provider_name == "provider-b"
+    assert result.model_name == "provider-b-embedding"
+
+    provider_a.embeddings.assert_awaited_once_with(
+        {
+            "model": "provider-a-embedding",
+        }
+    )
+    provider_b.embeddings.assert_awaited_once_with(
+        {
+            "model": "provider-b-embedding",
         }
     )
 

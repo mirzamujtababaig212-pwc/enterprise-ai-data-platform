@@ -42,12 +42,25 @@ class RAGIndexer:
         embedded_chunks: list[EmbeddedChunk] = []
 
         for chunk in chunks:
-            embedding = await self.embedding_service.embed(chunk.content)
+            embed_with_metadata = getattr(
+                self.embedding_service,
+                "embed_with_metadata",
+                None,
+            )
+
+            if embed_with_metadata is not None:
+                embedding_result = await embed_with_metadata(chunk.content)
+                embedding = embedding_result.vector
+                embedding_identity = embedding_result.identity
+            else:
+                embedding = await self.embedding_service.embed(chunk.content)
+                embedding_identity = None
 
             embedded_chunks.append(
                 EmbeddedChunk(
                     chunk=chunk,
                     embedding=tuple(float(value) for value in embedding),
+                    embedding_identity=embedding_identity,
                 )
             )
 

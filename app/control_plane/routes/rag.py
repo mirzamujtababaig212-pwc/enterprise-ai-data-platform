@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from ai_platform.llm_gateway.config.settings import settings
-
 from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
@@ -52,15 +50,9 @@ async def index_document(
             previous_chunk_ids=[chunk.id for chunk in existing_chunks],
         )
 
-        chunks = [embedded_chunk.chunk for embedded_chunk in embedded_chunks]
-
-        embedding_dimension = len(embedded_chunks[0].embedding) if embedded_chunks else None
-
-        state_repository.save_document(
+        state_repository.save_indexed_document(
             document,
-            chunks,
-            embedding_model=settings.DEFAULT_EMBEDDING_MODEL,
-            embedding_dimension=embedding_dimension,
+            list(embedded_chunks),
         )
 
         return RAGIndexResponse(

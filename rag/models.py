@@ -29,6 +29,29 @@ class DocumentChunk:
 
 
 @dataclass(frozen=True)
+class EmbeddingIdentity:
+    """
+    Identity of the embedding model that actually generated a vector.
+    """
+
+    requested_provider: str | None
+    requested_model: str
+    resolved_provider: str
+    resolved_model: str
+    dimension: int
+
+
+@dataclass(frozen=True)
+class EmbeddingResult:
+    """
+    An embedding vector together with its resolved model identity.
+    """
+
+    vector: tuple[float, ...]
+    identity: EmbeddingIdentity
+
+
+@dataclass(frozen=True)
 class EmbeddedChunk:
     """
     A document chunk together with its embedding vector.
@@ -36,6 +59,7 @@ class EmbeddedChunk:
 
     chunk: DocumentChunk
     embedding: tuple[float, ...]
+    embedding_identity: EmbeddingIdentity | None = None
 
 
 @dataclass(frozen=True)

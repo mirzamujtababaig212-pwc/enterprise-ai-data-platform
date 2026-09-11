@@ -196,20 +196,35 @@ class Router:
         provider_name = request.get("provider")
         model = request["model"]
 
-        if provider_name is not None:
+        if provider_name is not None and not self.routing_resolver.is_logical_model(model):
             capability_service.validate_embeddings(
                 provider_name,
                 model,
             )
 
-        providers = self.routing_resolver.resolve(
-            capability="embeddings",
-            model=model,
-            requested_provider=provider_name,
-        )
+        if self.routing_resolver.is_logical_model(model):
+            routes = self.routing_resolver.resolve_routes(
+                capability="embeddings",
+                model=model,
+                requested_provider=provider_name,
+            )
 
-        if not providers:
-            raise ProviderNotFound(f"No provider supports embeddings model: {model}")
+            if not routes:
+                raise ProviderNotFound(f"No provider supports embeddings model: {model}")
+
+            providers = [route.provider for route in routes]
+            physical_models = {id(route.provider): route.model for route in routes}
+        else:
+            providers = self.routing_resolver.resolve(
+                capability="embeddings",
+                model=model,
+                requested_provider=provider_name,
+            )
+
+            if not providers:
+                raise ProviderNotFound(f"No provider supports embeddings model: {model}")
+
+            physical_models = {}
 
         with tracer.start_as_current_span("gateway.embeddings") as span:
             span.set_attribute(
@@ -223,9 +238,51 @@ class Router:
                     provider_name,
                 )
 
+            async def call_provider(provider):
+                physical_model = physical_models.get(id(provider))
+
+                provider_name_for_call = getattr(
+                    provider,
+                    "name",
+                    getattr(
+                        provider,
+                        "provider_name",
+                        provider.__class__.__name__,
+                    ),
+                )
+
+                provider_model = physical_model or model
+
+                with tracer.start_as_current_span("provider_call") as provider_span:
+                    provider_span.set_attribute(
+                        "provider.name",
+                        provider_name_for_call,
+                    )
+
+                    provider_span.set_attribute(
+                        "provider.model",
+                        provider_model,
+                    )
+
+                    try:
+                        if physical_model is None:
+                            return await provider.embeddings(request)
+
+                        provider_request = {
+                            **request,
+                            "model": physical_model,
+                        }
+
+                        return await provider.embeddings(provider_request)
+
+                    except Exception as exc:
+                        provider_span.record_exception(exc)
+                        provider_span.set_status(trace.StatusCode.ERROR)
+                        raise
+
             result = await self.fallback_executor.execute(
                 providers,
-                lambda provider: provider.embeddings(request),
+                call_provider,
             )
 
             span.set_attribute(
@@ -238,7 +295,28 @@ class Router:
                 len(result.attempts),
             )
 
-            return result
+            physical_model = model
+
+            if self.routing_resolver.is_logical_model(model):
+                for provider in providers:
+                    provider_name_for_route = getattr(
+                        provider,
+                        "name",
+                        getattr(
+                            provider,
+                            "provider_name",
+                            provider.__class__.__name__,
+                        ),
+                    )
+
+                    if provider_name_for_route == result.provider_name:
+                        physical_model = physical_models[id(provider)]
+                        break
+
+            return replace(
+                result,
+                model_name=physical_model,
+            )
 
     async def route_stream(
         self,

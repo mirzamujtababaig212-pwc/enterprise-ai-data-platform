@@ -13,7 +13,7 @@ from app.control_plane.dependencies import (
 )
 from rag import RAGIndexer
 from rag.chunking import RecursiveChunker
-from rag.models import Document
+from rag.models import Document, EmbeddingIdentity, EmbeddingResult
 from rag.query import RAGQueryService
 from rag.retrieval import SemanticRetriever
 from rag.stores import InMemoryVectorStore
@@ -27,6 +27,33 @@ class FakeEmbeddingService:
             float(checksum),
             float(len(text)),
         ]
+
+
+class FakeProvenanceEmbeddingService:
+    async def embed(self, text: str):
+        result = await self.embed_with_metadata(text)
+        return result.vector
+
+    async def embed_with_metadata(self, text: str):
+        checksum = sum(ord(character) for character in text)
+
+        vector = (
+            float(checksum),
+            float(len(text)),
+        )
+
+        identity = EmbeddingIdentity(
+            requested_provider="test-requested-provider",
+            requested_model="test-logical-embedding",
+            resolved_provider="test-resolved-provider",
+            resolved_model="test-physical-embedding",
+            dimension=len(vector),
+        )
+
+        return EmbeddingResult(
+            vector=vector,
+            identity=identity,
+        )
 
 
 class FakeRAGStateRepository:
@@ -65,6 +92,29 @@ class FakeRAGStateRepository:
     def delete_document(self, document_id: str) -> None:
         self.saved = [record for record in self.saved if record["document"].id != document_id]
 
+    def save_indexed_document(
+        self,
+        document,
+        embedded_chunks,
+    ) -> None:
+        self.saved.append(
+            {
+                "document": document,
+                "chunks": [embedded_chunk.chunk for embedded_chunk in embedded_chunks],
+                "embedded_chunks": list(embedded_chunks),
+                "embedding_model": (
+                    embedded_chunks[0].embedding_identity.resolved_model
+                    if embedded_chunks and embedded_chunks[0].embedding_identity is not None
+                    else None
+                ),
+                "embedding_dimension": (
+                    embedded_chunks[0].embedding_identity.dimension
+                    if embedded_chunks and embedded_chunks[0].embedding_identity is not None
+                    else (len(embedded_chunks[0].embedding) if embedded_chunks else None)
+                ),
+            }
+        )
+
 
 class FakeRAGVectorStore:
     def __init__(self) -> None:
@@ -90,7 +140,7 @@ def build_test_indexer() -> RAGIndexer:
             chunk_size=100,
             overlap=10,
         ),
-        embedding_service=FakeEmbeddingService(),
+        embedding_service=FakeProvenanceEmbeddingService(),
         vector_store=InMemoryVectorStore(),
     )
 
@@ -172,8 +222,18 @@ def test_control_plane_rag_index_executes() -> None:
     assert saved["document"].metadata["source"] == "architecture.md"
     assert len(saved["chunks"]) == 1
     assert saved["chunks"][0].id == "doc-control-plane:chunk:0"
-    assert saved["embedding_model"]
+    assert saved["embedding_model"] == "test-physical-embedding"
     assert saved["embedding_dimension"] == 2
+
+    embedded_chunk = saved["embedded_chunks"][0]
+    identity = embedded_chunk.embedding_identity
+
+    assert identity is not None
+    assert identity.requested_provider == "test-requested-provider"
+    assert identity.requested_model == "test-logical-embedding"
+    assert identity.resolved_provider == "test-resolved-provider"
+    assert identity.resolved_model == "test-physical-embedding"
+    assert identity.dimension == 2
 
 
 def test_control_plane_rag_delete_removes_vectors_and_state() -> None:

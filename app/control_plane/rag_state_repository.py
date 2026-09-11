@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from rag.models import Document, DocumentChunk
+from rag.models import Document, DocumentChunk, EmbeddedChunk
 
 
 class RAGStateRepository(Protocol):
@@ -13,6 +13,12 @@ class RAGStateRepository(Protocol):
         *,
         embedding_model: str | None = None,
         embedding_dimension: int | None = None,
+    ) -> None: ...
+
+    def save_indexed_document(
+        self,
+        document: Document,
+        embedded_chunks: list[EmbeddedChunk],
     ) -> None: ...
 
     def get_document(self, document_id: str) -> Document | None: ...

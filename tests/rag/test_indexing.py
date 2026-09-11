@@ -16,6 +16,24 @@ class FakeEmbeddingService:
         ]
 
 
+class ProvenanceEmbeddingService:
+    async def embed_with_metadata(self, text: str):
+        from rag.models import EmbeddingIdentity, EmbeddingResult
+
+        vector = (0.1, 0.2, 0.3)
+
+        return EmbeddingResult(
+            vector=vector,
+            identity=EmbeddingIdentity(
+                requested_provider="openai",
+                requested_model="openai-embedding",
+                resolved_provider="openai",
+                resolved_model="text-embedding-3-small",
+                dimension=3,
+            ),
+        )
+
+
 @pytest.mark.asyncio
 async def test_indexer_chunks_embeds_and_stores_document():
     chunker = RecursiveChunker(
@@ -221,3 +239,33 @@ async def test_indexer_preserves_previous_vectors_when_embedding_fails():
     assert set(vector_store._items) == {
         "failure-doc:chunk:0",
     }
+
+
+@pytest.mark.asyncio
+async def test_indexer_preserves_embedding_identity():
+    indexer = RAGIndexer(
+        chunker=RecursiveChunker(
+            chunk_size=100,
+            overlap=0,
+        ),
+        embedding_service=ProvenanceEmbeddingService(),
+        vector_store=InMemoryVectorStore(),
+    )
+
+    document = Document(
+        id="doc-provenance",
+        content="Enterprise AI Platform",
+    )
+
+    embedded_chunks = await indexer.index(document)
+
+    assert len(embedded_chunks) == 1
+
+    identity = embedded_chunks[0].embedding_identity
+
+    assert identity is not None
+    assert identity.requested_provider == "openai"
+    assert identity.requested_model == "openai-embedding"
+    assert identity.resolved_provider == "openai"
+    assert identity.resolved_model == "text-embedding-3-small"
+    assert identity.dimension == 3
