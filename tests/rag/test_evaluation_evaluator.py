@@ -4,6 +4,7 @@ from rag.evaluation import (
     RetrievalEvaluationCase,
     RetrievalEvaluationResult,
     RetrievalEvaluator,
+    RetrievalQueryResult,
 )
 from rag.models import DocumentChunk, RetrievalResult
 
@@ -190,3 +191,34 @@ def ndcg_binary_reference(retrieved, relevant, k):
     idcg = sum((2**grade - 1.0) / math.log2(rank + 1) for rank, grade in enumerate(ideal, start=1))
 
     return dcg / idcg
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_preserves_retrieval_scores() -> None:
+    retriever = FakeRetriever(
+        {
+            "battery": [
+                make_result("A", score=0.91),
+                make_result("B", score=0.73),
+            ],
+        }
+    )
+
+    evaluator = RetrievalEvaluator(retriever, k=2)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="battery",
+                relevant_chunk_ids=("A", "B"),
+            )
+        ]
+    )
+
+    query_result = result.query_results[0]
+
+    assert query_result.retrieved_chunk_ids == ("A", "B")
+    assert query_result.retrieved_results == (
+        RetrievalQueryResult(chunk_id="A", score=0.91),
+        RetrievalQueryResult(chunk_id="B", score=0.73),
+    )

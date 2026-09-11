@@ -14,6 +14,7 @@ from rag.evaluation.models import (
     RetrievalEvaluationCase,
     RetrievalEvaluationResult,
     RetrievalQueryEvaluation,
+    RetrievalQueryResult,
 )
 
 
@@ -63,6 +64,7 @@ class RetrievalEvaluator:
                     RetrievalQueryEvaluation(
                         query=case.query,
                         retrieved_chunk_ids=(),
+                        retrieved_results=(),
                         relevant_chunk_ids=case.relevant_chunk_ids,
                         recall_at_k=None,
                         precision_at_k=None,
@@ -77,7 +79,15 @@ class RetrievalEvaluator:
 
             latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-            retrieved_ids = tuple(result.chunk.id for result in retrieved_results[: self.k])
+            retrieved_results = tuple(
+                RetrievalQueryResult(
+                    chunk_id=result.chunk.id,
+                    score=result.score,
+                )
+                for result in retrieved_results[: self.k]
+            )
+
+            retrieved_ids = tuple(result.chunk_id for result in retrieved_results)
 
             if case.relevance_grades is None:
                 relevance_grades = {chunk_id: 1.0 for chunk_id in case.relevant_chunk_ids}
@@ -88,6 +98,7 @@ class RetrievalEvaluator:
                 RetrievalQueryEvaluation(
                     query=case.query,
                     retrieved_chunk_ids=retrieved_ids,
+                    retrieved_results=retrieved_results,
                     relevant_chunk_ids=case.relevant_chunk_ids,
                     recall_at_k=recall_at_k(
                         retrieved_ids,

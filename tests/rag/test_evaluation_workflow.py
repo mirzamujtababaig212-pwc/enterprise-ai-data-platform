@@ -13,8 +13,9 @@ class FakeChunk:
 
 
 class FakeResult:
-    def __init__(self, chunk_id: str) -> None:
+    def __init__(self, chunk_id: str, score: float = 0.9) -> None:
         self.chunk = FakeChunk(chunk_id)
+        self.score = score
 
 
 class FakeRetriever:

@@ -53,6 +53,16 @@ class RetrievalEvaluationCase:
 
 
 @dataclass(frozen=True)
+class RetrievalQueryResult:
+    """
+    Retrieved chunk identity and similarity score captured for evaluation.
+    """
+
+    chunk_id: str
+    score: float
+
+
+@dataclass(frozen=True)
 class RetrievalQueryEvaluation:
     """
     Evaluation result for one retrieval query.
@@ -63,6 +73,7 @@ class RetrievalQueryEvaluation:
 
     query: str
     retrieved_chunk_ids: tuple[str, ...]
+    retrieved_results: tuple[RetrievalQueryResult, ...]
     relevant_chunk_ids: tuple[str, ...]
     recall_at_k: float | None
     precision_at_k: float | None
