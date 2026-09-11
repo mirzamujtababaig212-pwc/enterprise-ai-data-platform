@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from rag.evaluation.external import ExternalEvaluationResult
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import (
     RetrievalEvaluationResult,
@@ -300,3 +301,75 @@ def test_regression_requires_matching_candidate_run_id() -> None:
             quality_gate=_quality_gate(),
             regression=regression,
         )
+
+
+def _external_faithfulness_result() -> ExternalEvaluationResult:
+    return ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.91},
+        evaluated_samples=7,
+    )
+
+
+def test_run_has_no_external_evaluations_by_default() -> None:
+    run = _run()
+
+    assert run.external_evaluations == ()
+
+
+def test_run_can_attach_external_evaluation_immutably() -> None:
+    run = _run()
+    result = _external_faithfulness_result()
+
+    evaluated_run = run.with_external_evaluation(result)
+
+    assert evaluated_run is not run
+    assert run.external_evaluations == ()
+    assert evaluated_run.external_evaluations == (result,)
+
+    assert evaluated_run.passed is True
+    assert evaluated_run.release_passed is True
+
+
+def test_run_can_attach_multiple_external_evaluations() -> None:
+    run = _run()
+
+    faithfulness = _external_faithfulness_result()
+
+    answer_relevance = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="answer_relevance",
+        metrics={"answer_relevance": 0.88},
+        evaluated_samples=7,
+    )
+
+    evaluated_run = run.with_external_evaluation(faithfulness).with_external_evaluation(
+        answer_relevance
+    )
+
+    assert evaluated_run.external_evaluations == (
+        faithfulness,
+        answer_relevance,
+    )
+
+
+def test_run_serializes_external_evaluation_evidence() -> None:
+    run = _run().with_external_evaluation(
+        _external_faithfulness_result(),
+    )
+
+    payload = run.as_dict()
+
+    assert payload["passed"] is True
+    assert payload["release_passed"] is True
+
+    assert payload["external_evaluations"] == [
+        {
+            "provider": "ragas",
+            "evaluator": "faithfulness",
+            "metrics": {"faithfulness": 0.91},
+            "evaluated_samples": 7,
+            "metadata": {},
+        }
+    ]

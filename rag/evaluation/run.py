@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from rag.evaluation.comparison.run_comparator import (
         RetrievalEvaluationRunComparison,
     )
+from rag.evaluation.external.models import ExternalEvaluationResult
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
@@ -52,8 +53,8 @@ class RetrievalEvaluationRun:
     """
     Immutable artifact representing one retrieval evaluation run.
 
-    The run contains evaluation outputs and provenance, but does not contain
-    raw query text, retrieved document content, embeddings, or other
+    The run contains aggregate evaluation outputs and provenance, but does not
+    contain raw query text, retrieved document content, embeddings, or per-sample
     evaluation payloads.
     """
 
@@ -63,6 +64,7 @@ class RetrievalEvaluationRun:
     evaluation: RetrievalEvaluationResult
     quality_gate: RetrievalQualityGateResult
     regression: RetrievalEvaluationRegression | None = None
+    external_evaluations: tuple[ExternalEvaluationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
@@ -128,6 +130,24 @@ class RetrievalEvaluationRun:
             regression=regression,
         )
 
+    def with_external_evaluation(
+        self,
+        result: ExternalEvaluationResult,
+    ) -> RetrievalEvaluationRun:
+        """
+        Return a new immutable run with external evaluation evidence attached.
+
+        The original run remains unchanged. External evaluation evidence does
+        not affect the native quality-gate or release decisions.
+        """
+        return replace(
+            self,
+            external_evaluations=(
+                *self.external_evaluations,
+                result,
+            ),
+        )
+
     def as_dict(self) -> dict[str, object]:
         return {
             "run_id": self.run_id,
@@ -138,4 +158,5 @@ class RetrievalEvaluationRun:
             "evaluation": self.evaluation.as_dict(),
             "quality_gate": self.quality_gate.as_dict(),
             "regression": (self.regression.as_dict() if self.regression is not None else None),
+            "external_evaluations": [result.as_dict() for result in self.external_evaluations],
         }
