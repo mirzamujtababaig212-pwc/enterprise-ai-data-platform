@@ -69,8 +69,7 @@ class InMemoryVectorStore:
             )
 
         results.sort(
-            key=lambda result: result.score,
-            reverse=True,
+            key=lambda result: (-result.score, result.chunk.id),
         )
 
         return results[:top_k]

@@ -406,3 +406,84 @@ async def test_retriever_preserves_existing_metadata_filter_behavior():
 
     assert len(results) == 1
     assert results[0].chunk.id == "matching"
+
+
+@pytest.mark.asyncio
+async def test_retriever_orders_equal_scores_by_chunk_id():
+    store = InMemoryVectorStore()
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="z-chunk",
+                    document_id="doc",
+                    content="Electric vehicle information.",
+                ),
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="a-chunk",
+                    document_id="doc",
+                    content="Electric vehicle information.",
+                ),
+                embedding=(1.0, 0.0, 0.0),
+            ),
+        ]
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+    )
+
+    results = await retriever.retrieve(
+        "electric vehicle",
+        top_k=2,
+    )
+
+    assert [result.chunk.id for result in results] == [
+        "a-chunk",
+        "z-chunk",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retriever_min_score_filters_after_candidate_retrieval():
+    store = InMemoryVectorStore()
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="high",
+                    document_id="doc",
+                    content="Electric vehicle.",
+                ),
+                embedding=(1.0, 0.0, 0.0),
+            ),
+            EmbeddedChunk(
+                chunk=DocumentChunk(
+                    id="low",
+                    document_id="doc",
+                    content="Somewhat related vehicle.",
+                ),
+                embedding=(0.6, 0.8, 0.0),
+            ),
+        ]
+    )
+
+    retriever = SemanticRetriever(
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+    )
+
+    results = await retriever.retrieve(
+        "electric vehicle",
+        top_k=2,
+        min_score=0.9,
+    )
+
+    assert [result.chunk.id for result in results] == ["high"]
+    assert results[0].score >= 0.9
