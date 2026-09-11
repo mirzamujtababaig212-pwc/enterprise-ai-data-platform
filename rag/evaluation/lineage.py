@@ -17,6 +17,12 @@ class RetrievalEvaluationLineage:
     dataset_name: str
     dataset_version: str
     evaluation_policy_name: str | None
+    min_recall_at_k: float | None
+    min_precision_at_k: float | None
+    min_mrr: float | None
+    min_ndcg_at_k: float | None
+    max_mean_latency_ms: float | None
+    min_abstention_accuracy: float | None
     evaluator_k: int
     min_relevance_score: float | None
     embedding_identity: EmbeddingIdentity | None = None
@@ -34,6 +40,21 @@ class RetrievalEvaluationLineage:
         if self.evaluator_k <= 0:
             raise ValueError("evaluator_k must be greater than zero")
 
+        quality_thresholds = {
+            "min_recall_at_k": self.min_recall_at_k,
+            "min_precision_at_k": self.min_precision_at_k,
+            "min_mrr": self.min_mrr,
+            "min_ndcg_at_k": self.min_ndcg_at_k,
+            "min_abstention_accuracy": self.min_abstention_accuracy,
+        }
+
+        for name, value in quality_thresholds.items():
+            if value is not None and not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be between 0.0 and 1.0")
+
+        if self.max_mean_latency_ms is not None and self.max_mean_latency_ms < 0.0:
+            raise ValueError("max_mean_latency_ms must be non-negative")
+
         if self.min_relevance_score is not None and not 0.0 <= self.min_relevance_score <= 1.0:
             raise ValueError("min_relevance_score must be between 0.0 and 1.0.")
 
@@ -44,6 +65,12 @@ class RetrievalEvaluationLineage:
             "dataset_name": self.dataset_name,
             "dataset_version": self.dataset_version,
             "evaluation_policy_name": self.evaluation_policy_name,
+            "min_recall_at_k": self.min_recall_at_k,
+            "min_precision_at_k": self.min_precision_at_k,
+            "min_mrr": self.min_mrr,
+            "min_ndcg_at_k": self.min_ndcg_at_k,
+            "max_mean_latency_ms": self.max_mean_latency_ms,
+            "min_abstention_accuracy": self.min_abstention_accuracy,
             "evaluator_k": self.evaluator_k,
             "min_relevance_score": self.min_relevance_score,
             "embedding_requested_provider": (embedding.requested_provider if embedding else None),

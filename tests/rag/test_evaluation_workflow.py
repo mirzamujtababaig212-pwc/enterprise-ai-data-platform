@@ -79,6 +79,12 @@ async def test_workflow_runs_evaluation_and_quality_gate() -> None:
     assert result.lineage.dataset_name == "vehicle-retrieval-v1"
     assert result.lineage.dataset_version == "unversioned"
     assert result.lineage.evaluation_policy_name == "vehicle-retrieval-quality-v1"
+    assert result.lineage.min_recall_at_k == 1.0
+    assert result.lineage.min_precision_at_k == 0.5
+    assert result.lineage.min_mrr == 1.0
+    assert result.lineage.min_ndcg_at_k == 1.0
+    assert result.lineage.max_mean_latency_ms is None
+    assert result.lineage.min_abstention_accuracy is None
     assert result.lineage.evaluator_k == 2
     assert result.lineage.min_relevance_score is None
     assert result.lineage.embedding_identity is None
