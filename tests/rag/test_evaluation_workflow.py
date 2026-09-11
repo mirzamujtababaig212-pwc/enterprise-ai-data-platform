@@ -525,3 +525,224 @@ async def test_workflow_result_to_run_keeps_original_run_without_regression() ->
     assert candidate.regression is None
     assert baseline.release_passed is True
     assert candidate.release_passed is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_selects_explicit_baseline_by_id() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            name="vehicle-quality-v1",
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-explicit-001",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    candidate = result.to_run(
+        run_id="candidate-explicit-001",
+        created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+        baseline_run_id="baseline-explicit-001",
+        baselines=[baseline],
+        regression_policy=RetrievalRegressionPolicy(
+            name="vehicle-regression-v1",
+        ),
+    )
+
+    assert candidate.regression is not None
+    assert candidate.regression.baseline_run_id == baseline.run_id
+    assert candidate.regression.candidate_run_id == candidate.run_id
+    assert candidate.regression.passed is True
+    assert candidate.release_passed is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_rejects_missing_explicit_baseline() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import (
+        RetrievalEvaluationBaselineSelectionError,
+        RetrievalRegressionPolicy,
+    )
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    with pytest.raises(
+        RetrievalEvaluationBaselineSelectionError,
+        match="baseline run not found",
+    ):
+        result.to_run(
+            run_id="candidate-explicit-002",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            baseline_run_id="missing-baseline",
+            baselines=[],
+            regression_policy=RetrievalRegressionPolicy(
+                name="vehicle-regression-v1",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_requires_baselines_for_explicit_baseline_id() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    with pytest.raises(
+        ValueError,
+        match="baselines must be provided when baseline_run_id is provided",
+    ):
+        result.to_run(
+            run_id="candidate-explicit-003",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            baseline_run_id="baseline-explicit-003",
+            regression_policy=RetrievalRegressionPolicy(
+                name="vehicle-regression-v1",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_requires_regression_policy_for_explicit_baseline_id() -> None:
+    from datetime import datetime, timezone
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-explicit-004",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="regression_policy must be provided when baseline_run_id is provided",
+    ):
+        result.to_run(
+            run_id="candidate-explicit-004",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            baseline_run_id=baseline.run_id,
+            baselines=[baseline],
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_rejects_baseline_and_baseline_id_together() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-explicit-005",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="baseline and baseline_run_id must not be provided together",
+    ):
+        result.to_run(
+            run_id="candidate-explicit-005",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            baseline=baseline,
+            baseline_run_id=baseline.run_id,
+            baselines=[baseline],
+            regression_policy=RetrievalRegressionPolicy(
+                name="vehicle-regression-v1",
+            ),
+        )

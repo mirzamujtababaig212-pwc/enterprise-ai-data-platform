@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 
+from rag.evaluation.comparison import RetrievalEvaluationBaselineSelector
 from rag.evaluation.dataset import RetrievalEvaluationDataset
 from rag.evaluation.evaluator import RetrievalEvaluator
 from rag.evaluation.lineage import RetrievalEvaluationLineage
@@ -51,17 +52,33 @@ class RetrievalEvaluationWorkflowResult:
         run_id: str,
         created_at: datetime,
         baseline: RetrievalEvaluationRun | None = None,
+        baseline_run_id: str | None = None,
+        baselines: Iterable[RetrievalEvaluationRun] | None = None,
         regression_policy: RetrievalRegressionPolicy | None = None,
     ) -> RetrievalEvaluationRun:
         """
         Create an immutable evaluation-run artifact from this result.
 
-        When both a baseline run and regression policy are supplied, the
-        regression comparison is evaluated and attached to the returned run.
-        The original workflow result and baseline remain unchanged.
+        A regression comparison may use either an explicitly supplied baseline
+        run or an explicitly requested baseline_run_id resolved from the
+        supplied baselines. Implicit or latest-baseline selection is never
+        performed.
         """
-        if (baseline is None) != (regression_policy is None):
-            raise ValueError("baseline and regression_policy must be provided together")
+        if baseline is not None and baseline_run_id is not None:
+            raise ValueError("baseline and baseline_run_id must not be provided together")
+
+        if baseline_run_id is not None:
+            if baselines is None:
+                raise ValueError("baselines must be provided when baseline_run_id is provided")
+            if regression_policy is None:
+                raise ValueError(
+                    "regression_policy must be provided when baseline_run_id is provided"
+                )
+        else:
+            if baselines is not None:
+                raise ValueError("baselines must not be provided without baseline_run_id")
+            if (baseline is None) != (regression_policy is None):
+                raise ValueError("baseline and regression_policy must be provided together")
 
         run = RetrievalEvaluationRun(
             run_id=run_id,
@@ -70,6 +87,13 @@ class RetrievalEvaluationWorkflowResult:
             evaluation=self.evaluation,
             quality_gate=self.quality_gate,
         )
+
+        if baseline_run_id is not None:
+            baseline = RetrievalEvaluationBaselineSelector.select(
+                candidate=run,
+                baselines=baselines,
+                baseline_run_id=baseline_run_id,
+            )
 
         if baseline is not None and regression_policy is not None:
             return run.with_regression(
