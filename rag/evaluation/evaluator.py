@@ -31,12 +31,17 @@ class RetrievalEvaluator:
         retriever: Retriever,
         *,
         k: int = 5,
+        min_relevance_score: float | None = None,
     ) -> None:
         if k <= 0:
             raise ValueError("k must be greater than zero.")
 
+        if min_relevance_score is not None and not 0.0 <= min_relevance_score <= 1.0:
+            raise ValueError("min_relevance_score must be between 0.0 and 1.0.")
+
         self.retriever = retriever
         self.k = k
+        self.min_relevance_score = min_relevance_score
 
     async def evaluate(
         self,
@@ -55,6 +60,7 @@ class RetrievalEvaluator:
                 retrieved_results = await self.retriever.retrieve(
                     query=case.query,
                     top_k=self.k,
+                    min_score=self.min_relevance_score,
                 )
             except Exception as exc:
                 failed_queries += 1

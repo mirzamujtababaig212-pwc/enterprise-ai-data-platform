@@ -222,3 +222,55 @@ async def test_retrieval_evaluator_preserves_retrieval_scores() -> None:
         RetrievalQueryResult(chunk_id="A", score=0.91),
         RetrievalQueryResult(chunk_id="B", score=0.73),
     )
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_passes_min_relevance_score() -> None:
+    class RecordingRetriever:
+        def __init__(self) -> None:
+            self.min_scores = []
+
+        async def retrieve(self, query, top_k=5, **kwargs):
+            self.min_scores.append(kwargs.get("min_score"))
+            return [make_result("A", score=0.91)]
+
+    retriever = RecordingRetriever()
+    evaluator = RetrievalEvaluator(
+        retriever,
+        k=1,
+        min_relevance_score=0.8,
+    )
+
+    await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="battery",
+                relevant_chunk_ids=("A",),
+            )
+        ]
+    )
+
+    assert retriever.min_scores == [0.8]
+
+
+def test_retrieval_evaluator_accepts_none_min_relevance_score() -> None:
+    evaluator = RetrievalEvaluator(
+        FakeRetriever({}),
+        min_relevance_score=None,
+    )
+
+    assert evaluator.min_relevance_score is None
+
+
+@pytest.mark.parametrize("threshold", [-0.1, 1.1])
+def test_retrieval_evaluator_rejects_invalid_min_relevance_score(
+    threshold: float,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="min_relevance_score must be between 0.0 and 1.0",
+    ):
+        RetrievalEvaluator(
+            FakeRetriever({}),
+            min_relevance_score=threshold,
+        )
