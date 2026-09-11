@@ -8,7 +8,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from rag.models import DocumentChunk, EmbeddedChunk
+from rag.models import (
+    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddingIdentity,
+    EmbeddingResult,
+)
 from rag.observability import (
     RAG_RETRIEVAL_EMPTY_RESULTS_TOTAL,
     RAG_RETRIEVAL_ERRORS_TOTAL,
@@ -19,12 +24,24 @@ from rag.stores.in_memory import InMemoryVectorStore
 
 
 class FakeEmbeddingService:
-    async def embed(self, text: str) -> tuple[float, ...]:
-        return (1.0, 0.0, 0.0)
+    def __init__(self) -> None:
+        self.identity = EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="test-model",
+            resolved_provider="test-provider",
+            resolved_model="test-model",
+            dimension=3,
+        )
+
+    async def embed_with_metadata(self, text: str) -> EmbeddingResult:
+        return EmbeddingResult(
+            vector=(1.0, 0.0, 0.0),
+            identity=self.identity,
+        )
 
 
 class FailingEmbeddingService:
-    async def embed(self, text: str) -> tuple[float, ...]:
+    async def embed_with_metadata(self, text: str) -> EmbeddingResult:
         raise RuntimeError("embedding failure")
 
 

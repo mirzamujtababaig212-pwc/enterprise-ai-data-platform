@@ -65,6 +65,7 @@ class InMemoryVectorStore:
                 RetrievalResult(
                     chunk=item.chunk,
                     score=score,
+                    embedding_identity=item.embedding_identity,
                 )
             )
 

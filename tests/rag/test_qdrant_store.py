@@ -1,7 +1,11 @@
 import pytest
 from qdrant_client import AsyncQdrantClient
 
-from rag.models import DocumentChunk, EmbeddedChunk
+from rag.models import (
+    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddingIdentity,
+)
 from rag.stores.qdrant import QdrantVectorStore
 
 
@@ -16,6 +20,18 @@ def make_chunk(
         content=content,
         metadata={"source": "test"},
         chunk_index=chunk_index,
+    )
+
+
+def make_identity(
+    dimension: int,
+) -> EmbeddingIdentity:
+    return EmbeddingIdentity(
+        requested_provider="test-provider",
+        requested_model="test-model",
+        resolved_provider="test-provider",
+        resolved_model="test-model",
+        dimension=dimension,
     )
 
 
@@ -293,5 +309,44 @@ async def test_search_applies_multiple_metadata_filters():
 
         assert len(results) == 1
         assert results[0].chunk.id == "match"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_embedding_identity():
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_embedding_identity",
+        )
+
+        identity = make_identity(3)
+
+        await store.upsert(
+            [
+                EmbeddedChunk(
+                    chunk=make_chunk(
+                        "chunk-1",
+                        "alpha",
+                        0,
+                    ),
+                    embedding=(1.0, 0.0, 0.0),
+                    embedding_identity=identity,
+                )
+            ]
+        )
+
+        results = await store.search(
+            embedding=(1.0, 0.0, 0.0),
+            top_k=5,
+        )
+
+        assert len(results) == 1
+
+        assert results[0].embedding_identity == identity
+
     finally:
         await client.close()

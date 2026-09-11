@@ -1,17 +1,42 @@
 import pytest
 
 from rag.governance import GovernancePolicy
-from rag.models import DocumentChunk, EmbeddedChunk
+from rag.models import (
+    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddingIdentity,
+    EmbeddingResult,
+)
 from rag.retrieval import SemanticRetriever
 from rag.stores import InMemoryVectorStore
 
 
 class FakeEmbeddingService:
+    def __init__(self) -> None:
+        self.identity = EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="test-model",
+            resolved_provider="test-provider",
+            resolved_model="test-model",
+            dimension=3,
+        )
+
     async def embed(self, text: str):
         if "electric" in text.lower():
             return [1.0, 0.0, 0.0]
 
         return [0.0, 1.0, 0.0]
+
+    async def embed_with_metadata(
+        self,
+        text: str,
+    ) -> EmbeddingResult:
+        embedding = await self.embed(text)
+
+        return EmbeddingResult(
+            vector=embedding,
+            identity=self.identity,
+        )
 
 
 @pytest.mark.asyncio

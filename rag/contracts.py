@@ -4,7 +4,13 @@ from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from rag.governance import GovernancePolicy
-from rag.models import Document, DocumentChunk, EmbeddedChunk, RetrievalResult
+from rag.models import (
+    Document,
+    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddingResult,
+    RetrievalResult,
+)
 
 
 class DocumentLoader(Protocol):
@@ -32,6 +38,11 @@ class EmbeddingService(Protocol):
     """
 
     async def embed(self, text: str) -> Sequence[float]: ...
+
+    async def embed_with_metadata(
+        self,
+        text: str,
+    ) -> EmbeddingResult: ...
 
 
 class VectorStore(Protocol):

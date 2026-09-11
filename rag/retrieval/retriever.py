@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 
 from opentelemetry import trace
 
+from rag.compatibility import EmbeddingCompatibilityPolicy
 from rag.contracts import EmbeddingService, VectorStore
 from rag.governance import GovernancePolicy
 from rag.models import RetrievalResult
@@ -22,8 +23,9 @@ class SemanticRetriever:
     Query-to-vector retrieval service.
 
     The retriever knows about embedding, vector-store, governance,
-    and retrieval observability contracts, but knows nothing about
-    a specific embedding provider, database, or enterprise data source.
+    embedding compatibility, and retrieval observability contracts,
+    but knows nothing about a specific embedding provider, database,
+    or enterprise data source.
     """
 
     def __init__(
@@ -83,18 +85,31 @@ class SemanticRetriever:
             )
 
             try:
-                embedding = await self.embedding_service.embed(query)
+                embedding_result = await self.embedding_service.embed_with_metadata(query)
 
                 results = await self.vector_store.search(
-                    embedding,
+                    embedding_result.vector,
                     top_k=top_k,
                     metadata_filter=effective_metadata_filter,
                 )
 
-                candidate_count = len(results)
+                compatible_results = []
+
+                for result in results:
+                    if result.embedding_identity is not None:
+                        EmbeddingCompatibilityPolicy.validate(
+                            query=embedding_result.identity,
+                            stored=result.embedding_identity,
+                        )
+
+                    compatible_results.append(result)
+
+                candidate_count = len(compatible_results)
 
                 filtered_results = [
-                    result for result in results if min_score is None or result.score >= min_score
+                    result
+                    for result in compatible_results
+                    if min_score is None or result.score >= min_score
                 ]
 
                 ordered_results = sorted(

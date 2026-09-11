@@ -12,9 +12,29 @@ from rag.stores import InMemoryVectorStore
 
 class ConstantEmbeddingService:
     async def embed(self, text: str) -> list[float]:
+        result = await self.embed_with_metadata(text)
+        return list(result.vector)
+
+    async def embed_with_metadata(self, text: str):
         if not text.strip():
             raise ValueError("Text must not be empty.")
-        return [1.0, 0.0]
+
+        from rag.models import EmbeddingIdentity, EmbeddingResult
+
+        vector = (1.0, 0.0)
+
+        identity = EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="test-embedding",
+            resolved_provider="test-provider",
+            resolved_model="test-embedding",
+            dimension=len(vector),
+        )
+
+        return EmbeddingResult(
+            vector=vector,
+            identity=identity,
+        )
 
 
 @pytest.mark.asyncio

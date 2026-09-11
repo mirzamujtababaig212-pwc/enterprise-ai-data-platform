@@ -70,3 +70,4 @@ class RetrievalResult:
 
     chunk: DocumentChunk
     score: float
+    embedding_identity: EmbeddingIdentity | None = None

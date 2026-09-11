@@ -6,7 +6,12 @@ from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import AsyncQdrantClient, models
 
-from rag.models import DocumentChunk, EmbeddedChunk, RetrievalResult
+from rag.models import (
+    DocumentChunk,
+    EmbeddedChunk,
+    EmbeddingIdentity,
+    RetrievalResult,
+)
 
 
 class QdrantVectorStore:
@@ -55,7 +60,10 @@ class QdrantVectorStore:
             models.PointStruct(
                 id=self._point_id(item.chunk.id),
                 vector=[float(value) for value in item.embedding],
-                payload=self._payload(item.chunk),
+                payload=self._payload(
+                    item.chunk,
+                    item.embedding_identity,
+                ),
             )
             for item in chunks
         ]
@@ -140,10 +148,24 @@ class QdrantVectorStore:
                 chunk_index=int(payload["chunk_index"]),
             )
 
+            identity_payload = payload.get("embedding_identity")
+
+            embedding_identity = None
+
+            if identity_payload is not None:
+                embedding_identity = EmbeddingIdentity(
+                    requested_provider=identity_payload.get("requested_provider"),
+                    requested_model=str(identity_payload["requested_model"]),
+                    resolved_provider=str(identity_payload["resolved_provider"]),
+                    resolved_model=str(identity_payload["resolved_model"]),
+                    dimension=int(identity_payload["dimension"]),
+                )
+
             results.append(
                 RetrievalResult(
                     chunk=chunk,
                     score=float(point.score),
+                    embedding_identity=embedding_identity,
                 )
             )
 
@@ -205,11 +227,25 @@ class QdrantVectorStore:
         return str(uuid5(NAMESPACE_URL, chunk_id))
 
     @staticmethod
-    def _payload(chunk: DocumentChunk) -> dict[str, Any]:
-        return {
+    def _payload(
+        chunk: DocumentChunk,
+        embedding_identity: EmbeddingIdentity | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "chunk_id": chunk.id,
             "document_id": chunk.document_id,
             "content": chunk.content,
             "metadata": dict(chunk.metadata),
             "chunk_index": chunk.chunk_index,
         }
+
+        if embedding_identity is not None:
+            payload["embedding_identity"] = {
+                "requested_provider": embedding_identity.requested_provider,
+                "requested_model": embedding_identity.requested_model,
+                "resolved_provider": embedding_identity.resolved_provider,
+                "resolved_model": embedding_identity.resolved_model,
+                "dimension": embedding_identity.dimension,
+            }
+
+        return payload

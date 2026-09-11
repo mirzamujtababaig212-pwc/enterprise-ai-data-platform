@@ -21,12 +21,29 @@ from rag.stores import InMemoryVectorStore
 
 class FakeEmbeddingService:
     async def embed(self, text: str):
+        result = await self.embed_with_metadata(text)
+        return result.vector
+
+    async def embed_with_metadata(self, text: str):
         checksum = sum(ord(character) for character in text)
 
-        return [
+        vector = (
             float(checksum),
             float(len(text)),
-        ]
+        )
+
+        identity = EmbeddingIdentity(
+            requested_provider="test-requested-provider",
+            requested_model="test-logical-embedding",
+            resolved_provider="test-resolved-provider",
+            resolved_model="test-physical-embedding",
+            dimension=len(vector),
+        )
+
+        return EmbeddingResult(
+            vector=vector,
+            identity=identity,
+        )
 
 
 class FakeProvenanceEmbeddingService:
