@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+
 
 from rag.evaluation.dataset import RetrievalEvaluationDataset
 from rag.evaluation.evaluator import RetrievalEvaluator
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
+from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.quality_gate import (
     RetrievalQualityGate,
     RetrievalQualityGateResult,
@@ -35,6 +38,21 @@ class RetrievalEvaluationWorkflowResult:
             "quality_gate": self.quality_gate.as_dict(),
             "lineage": self.lineage.as_dict(),
         }
+
+    def to_run(
+        self,
+        *,
+        run_id: str,
+        created_at: datetime,
+    ) -> RetrievalEvaluationRun:
+        """Create an immutable evaluation-run artifact from this result."""
+        return RetrievalEvaluationRun(
+            run_id=run_id,
+            created_at=created_at,
+            lineage=self.lineage,
+            evaluation=self.evaluation,
+            quality_gate=self.quality_gate,
+        )
 
 
 class RetrievalEvaluationWorkflow:

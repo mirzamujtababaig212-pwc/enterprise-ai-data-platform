@@ -194,3 +194,86 @@ async def test_workflow_as_dict_contains_evaluation_and_gate() -> None:
     assert payload["quality_gate"]["quality_gate_passed"] is True
     assert payload["lineage"]["dataset_name"] == "vehicle-retrieval-v1"
     assert payload["lineage"]["dataset_version"] == "unversioned"
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_can_create_evaluation_run() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.run import RetrievalEvaluationRun
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            name="vehicle-quality-v1",
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    run = result.to_run(
+        run_id="run-vehicle-001",
+        created_at=datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert isinstance(run, RetrievalEvaluationRun)
+    assert run.run_id == "run-vehicle-001"
+    assert run.created_at == datetime(
+        2026,
+        9,
+        11,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+    assert run.lineage == result.lineage
+    assert run.evaluation == result.evaluation
+    assert run.quality_gate == result.quality_gate
+    assert run.passed is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_does_not_persist() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.stores import InMemoryRetrievalEvaluationRunStore
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    run = result.to_run(
+        run_id="run-vehicle-002",
+        created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+    )
+
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    assert await store.get(run.run_id) is None
