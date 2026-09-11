@@ -80,7 +80,7 @@ class RetrievalEvaluationRunComparator:
         baseline: RetrievalEvaluationRun,
         candidate: RetrievalEvaluationRun,
     ) -> RetrievalEvaluationRunComparison:
-        cls._validate_compatibility(baseline, candidate)
+        cls.validate_compatibility(baseline, candidate)
 
         metrics = {}
 
@@ -156,7 +156,7 @@ class RetrievalEvaluationRunComparator:
         )
 
     @staticmethod
-    def _validate_compatibility(
+    def validate_compatibility(
         baseline: RetrievalEvaluationRun,
         candidate: RetrievalEvaluationRun,
     ) -> None:

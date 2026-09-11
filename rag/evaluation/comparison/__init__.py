@@ -9,6 +9,10 @@ from rag.evaluation.comparison.run_comparator import (
     RetrievalEvaluationRunComparator,
     RetrievalEvaluationRunComparison,
 )
+from rag.evaluation.comparison.baseline_selector import (
+    RetrievalEvaluationBaselineSelectionError,
+    RetrievalEvaluationBaselineSelector,
+)
 
 __all__ = [
     "RetrievalEvaluationMetricComparison",
@@ -18,4 +22,6 @@ __all__ = [
     "RetrievalRegressionPolicy",
     "RetrievalRegressionPolicyEvaluator",
     "RetrievalRegressionPolicyResult",
+    "RetrievalEvaluationBaselineSelectionError",
+    "RetrievalEvaluationBaselineSelector",
 ]
