@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 
 from rag.evaluation.dataset import RetrievalEvaluationDataset
@@ -14,6 +15,11 @@ from rag.evaluation.quality_gate import (
     RetrievalQualityGate,
     RetrievalQualityGateResult,
 )
+
+if TYPE_CHECKING:
+    from rag.evaluation.comparison.regression_policy import (
+        RetrievalRegressionPolicy,
+    )
 
 
 @dataclass(frozen=True)
@@ -44,15 +50,34 @@ class RetrievalEvaluationWorkflowResult:
         *,
         run_id: str,
         created_at: datetime,
+        baseline: RetrievalEvaluationRun | None = None,
+        regression_policy: RetrievalRegressionPolicy | None = None,
     ) -> RetrievalEvaluationRun:
-        """Create an immutable evaluation-run artifact from this result."""
-        return RetrievalEvaluationRun(
+        """
+        Create an immutable evaluation-run artifact from this result.
+
+        When both a baseline run and regression policy are supplied, the
+        regression comparison is evaluated and attached to the returned run.
+        The original workflow result and baseline remain unchanged.
+        """
+        if (baseline is None) != (regression_policy is None):
+            raise ValueError("baseline and regression_policy must be provided together")
+
+        run = RetrievalEvaluationRun(
             run_id=run_id,
             created_at=created_at,
             lineage=self.lineage,
             evaluation=self.evaluation,
             quality_gate=self.quality_gate,
         )
+
+        if baseline is not None and regression_policy is not None:
+            return run.with_regression(
+                baseline=baseline,
+                policy=regression_policy,
+            )
+
+        return run
 
 
 class RetrievalEvaluationWorkflow:

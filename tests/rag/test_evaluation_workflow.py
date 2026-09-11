@@ -277,3 +277,251 @@ async def test_workflow_result_to_run_does_not_persist() -> None:
     store = InMemoryRetrievalEvaluationRunStore()
 
     assert await store.get(run.run_id) is None
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_attaches_passing_regression() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+        version="v1",
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            name="vehicle-quality-v1",
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-vehicle-001",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    regression_policy = RetrievalRegressionPolicy(
+        name="vehicle-regression-v1",
+    )
+
+    candidate = result.to_run(
+        run_id="candidate-vehicle-001",
+        created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+        baseline=baseline,
+        regression_policy=regression_policy,
+    )
+
+    assert candidate.regression is not None
+    assert candidate.regression.baseline_run_id == baseline.run_id
+    assert candidate.regression.candidate_run_id == candidate.run_id
+    assert candidate.regression.passed is True
+    assert candidate.passed is True
+    assert candidate.release_passed is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_regression_failure_blocks_release() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    class ConfigurableFakeRetriever:
+        def __init__(self, chunk_ids: list[str]) -> None:
+            self.chunk_ids = chunk_ids
+
+        async def retrieve(
+            self,
+            query: str,
+            top_k: int = 5,
+            **kwargs,
+        ):
+            return [FakeResult(chunk_id) for chunk_id in self.chunk_ids[:top_k]]
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1", "chunk-2"),
+            )
+        ],
+        version="v1",
+    )
+
+    baseline_workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(
+            ConfigurableFakeRetriever(["chunk-1", "chunk-2"]),
+            k=2,
+        ),
+        policy=RetrievalEvaluationPolicy(
+            name="vehicle-quality-v1",
+            min_recall_at_k=0.5,
+        ),
+    )
+
+    baseline_result = await baseline_workflow.run(dataset)
+
+    baseline = baseline_result.to_run(
+        run_id="baseline-vehicle-regression",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    candidate_workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(
+            ConfigurableFakeRetriever(["chunk-1"]),
+            k=2,
+        ),
+        policy=RetrievalEvaluationPolicy(
+            name="vehicle-quality-v1",
+            min_recall_at_k=0.5,
+        ),
+    )
+
+    candidate_result = await candidate_workflow.run(dataset)
+
+    regression_policy = RetrievalRegressionPolicy(
+        name="vehicle-regression-strict-v1",
+        max_recall_at_k_degradation=0.0,
+    )
+
+    candidate = candidate_result.to_run(
+        run_id="candidate-vehicle-regression",
+        created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+        baseline=baseline,
+        regression_policy=regression_policy,
+    )
+
+    assert candidate.passed is True
+    assert candidate.regression is not None
+    assert candidate.regression.passed is False
+    assert candidate.regression.result.passed is False
+    assert candidate.release_passed is False
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_rejects_baseline_without_policy() -> None:
+    from datetime import datetime, timezone
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-vehicle-002",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="baseline and regression_policy must be provided together",
+    ):
+        result.to_run(
+            run_id="candidate-vehicle-002",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            baseline=baseline,
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_rejects_policy_without_baseline() -> None:
+    from datetime import datetime, timezone
+
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    regression_policy = RetrievalRegressionPolicy(
+        name="vehicle-regression-v1",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="baseline and regression_policy must be provided together",
+    ):
+        result.to_run(
+            run_id="candidate-vehicle-003",
+            created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+            regression_policy=regression_policy,
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_result_to_run_keeps_original_run_without_regression() -> None:
+    from datetime import datetime, timezone
+
+    dataset = RetrievalEvaluationDataset.from_cases(
+        "vehicle-retrieval-v1",
+        [
+            RetrievalEvaluationCase(
+                query="vehicle safety",
+                relevant_chunk_ids=("chunk-1",),
+            )
+        ],
+    )
+
+    workflow = RetrievalEvaluationWorkflow(
+        evaluator=RetrievalEvaluator(FakeRetriever(), k=2),
+        policy=RetrievalEvaluationPolicy(
+            min_recall_at_k=1.0,
+        ),
+    )
+
+    result = await workflow.run(dataset)
+
+    baseline = result.to_run(
+        run_id="baseline-vehicle-004",
+        created_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+
+    candidate = result.to_run(
+        run_id="candidate-vehicle-004",
+        created_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
+    )
+
+    assert baseline.regression is None
+    assert candidate.regression is None
+    assert baseline.release_passed is True
+    assert candidate.release_passed is True
