@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
@@ -7,6 +9,7 @@ from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
     get_rag_state_repository,
+    get_rag_vector_store,
 )
 from rag import RAGIndexer
 from rag.chunking import RecursiveChunker
@@ -36,6 +39,12 @@ class FakeRAGStateRepository:
                 return record["chunks"]
         return []
 
+    def get_document(self, document_id: str):
+        for record in reversed(self.saved):
+            if record["document"].id == document_id:
+                return record["document"]
+        return None
+
     def save_document(
         self,
         document,
@@ -52,6 +61,14 @@ class FakeRAGStateRepository:
                 "embedding_dimension": embedding_dimension,
             }
         )
+
+    def delete_document(self, document_id: str) -> None:
+        self.saved = [record for record in self.saved if record["document"].id != document_id]
+
+
+class FakeRAGVectorStore:
+    def __init__(self) -> None:
+        self.delete_chunks = AsyncMock()
 
 
 class FakeChatService:
@@ -112,6 +129,7 @@ def build_test_query_service() -> RAGQueryService:
 
 
 client = TestClient(app)
+error_client = TestClient(app, raise_server_exceptions=False)
 
 AUTH_HEADERS = {"x-api-key": "super-secret-key"}
 
@@ -156,6 +174,108 @@ def test_control_plane_rag_index_executes() -> None:
     assert saved["chunks"][0].id == "doc-control-plane:chunk:0"
     assert saved["embedding_model"]
     assert saved["embedding_dimension"] == 2
+
+
+def test_control_plane_rag_delete_removes_vectors_and_state() -> None:
+    indexer = build_test_indexer()
+    state_repository = FakeRAGStateRepository()
+    vector_store = FakeRAGVectorStore()
+
+    document = Document(
+        id="doc-delete",
+        content="Enterprise AI Platform deletion test.",
+        metadata={"source": "test"},
+    )
+
+    import asyncio
+
+    async def seed_document() -> None:
+        embedded_chunks = await indexer.index(document)
+        state_repository.save_document(
+            document,
+            [embedded_chunk.chunk for embedded_chunk in embedded_chunks],
+            embedding_model="test-embedding",
+            embedding_dimension=2,
+        )
+
+    asyncio.run(seed_document())
+
+    assert state_repository.get_chunks("doc-delete")
+
+    app.dependency_overrides[get_rag_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.delete(
+        "/api/v1/rag/doc-delete",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+    vector_store.delete_chunks.assert_awaited_once_with(
+        ["doc-delete:chunk:0"],
+    )
+
+    assert state_repository.get_chunks("doc-delete") == []
+
+
+def test_control_plane_rag_delete_missing_document_is_idempotent() -> None:
+    state_repository = FakeRAGStateRepository()
+    vector_store = FakeRAGVectorStore()
+
+    app.dependency_overrides[get_rag_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.delete(
+        "/api/v1/rag/missing-document",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 204
+    vector_store.delete_chunks.assert_not_awaited()
+
+
+def test_control_plane_rag_delete_does_not_remove_state_when_vector_delete_fails() -> None:
+    state_repository = FakeRAGStateRepository()
+    vector_store = FakeRAGVectorStore()
+
+    document = Document(
+        id="doc-vector-failure",
+        content="Vector deletion failure test.",
+        metadata={},
+    )
+
+    chunk = __import__(
+        "rag.models",
+        fromlist=["DocumentChunk"],
+    ).DocumentChunk(
+        id="doc-vector-failure:chunk:0",
+        document_id="doc-vector-failure",
+        content="Vector deletion failure test.",
+        chunk_index=0,
+    )
+
+    state_repository.save_document(
+        document,
+        [chunk],
+    )
+
+    vector_store.delete_chunks.side_effect = RuntimeError(
+        "vector deletion failed",
+    )
+
+    app.dependency_overrides[get_rag_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = error_client.delete(
+        "/api/v1/rag/doc-vector-failure",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert state_repository.get_document("doc-vector-failure") == document
+    assert state_repository.get_chunks("doc-vector-failure") == [chunk]
 
 
 def test_control_plane_rag_index_rejects_empty_content() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ai_platform.llm_gateway.config.settings import settings
 
@@ -8,6 +8,7 @@ from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
     get_rag_state_repository,
+    get_rag_vector_store,
 )
 from app.control_plane.schemas.rag import (
     RAGIndexRequest,
@@ -19,6 +20,7 @@ from app.control_plane.schemas.rag import (
 from rag.indexing import RAGIndexer
 from rag.models import Document
 from rag.query import RAGQueryService
+from rag.contracts import VectorStore
 from app.control_plane.rag_state_repository import RAGStateRepository
 
 router = APIRouter(
@@ -65,6 +67,33 @@ async def index_document(
             document_id=document.id,
             chunks_indexed=len(embedded_chunks),
         )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_document(
+    document_id: str,
+    vector_store: VectorStore = Depends(get_rag_vector_store),
+    state_repository: RAGStateRepository = Depends(get_rag_state_repository),
+) -> Response:
+    try:
+        existing_chunks = state_repository.get_chunks(document_id)
+        chunk_ids = [chunk.id for chunk in existing_chunks]
+
+        if chunk_ids:
+            await vector_store.delete_chunks(chunk_ids)
+
+        state_repository.delete_document(document_id)
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     except ValueError as exc:
         raise HTTPException(
