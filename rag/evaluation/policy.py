@@ -14,6 +14,7 @@ class RetrievalEvaluationPolicy:
     min_mrr: float | None = None
     min_ndcg_at_k: float | None = None
     max_mean_latency_ms: float | None = None
+    min_abstention_accuracy: float | None = None
     name: str | None = None
 
     def __post_init__(self) -> None:
@@ -25,6 +26,7 @@ class RetrievalEvaluationPolicy:
             "min_precision_at_k": self.min_precision_at_k,
             "min_mrr": self.min_mrr,
             "min_ndcg_at_k": self.min_ndcg_at_k,
+            "min_abstention_accuracy": self.min_abstention_accuracy,
         }
 
         for name, value in quality_thresholds.items():
@@ -42,6 +44,7 @@ class RetrievalEvaluationPolicy:
                 self.min_mrr,
                 self.min_ndcg_at_k,
                 self.max_mean_latency_ms,
+                self.min_abstention_accuracy,
             )
         ):
             raise ValueError("at least one evaluation threshold must be configured")
@@ -53,5 +56,6 @@ class RetrievalEvaluationPolicy:
             "min_mrr": self.min_mrr,
             "min_ndcg_at_k": self.min_ndcg_at_k,
             "max_mean_latency_ms": self.max_mean_latency_ms,
+            "min_abstention_accuracy": self.min_abstention_accuracy,
         }
         return {key: value for key, value in thresholds.items() if value is not None}

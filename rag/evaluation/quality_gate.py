@@ -86,6 +86,19 @@ class RetrievalQualityGate:
                     f"{policy.max_mean_latency_ms:.2f}"
                 )
 
+        if policy.min_abstention_accuracy is not None:
+            if result.abstention_evaluated_queries == 0:
+                errors.append(
+                    "retrieval_abstention_accuracy is unavailable because "
+                    "no abstention queries were evaluated"
+                )
+            elif result.abstention_accuracy < policy.min_abstention_accuracy:
+                errors.append(
+                    f"retrieval_abstention_accuracy="
+                    f"{result.abstention_accuracy:.4f} is below "
+                    f"required minimum {policy.min_abstention_accuracy:.4f}"
+                )
+
         return RetrievalQualityGateResult(
             passed=not errors,
             errors=tuple(errors),
