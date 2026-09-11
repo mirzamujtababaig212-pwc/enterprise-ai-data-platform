@@ -15,17 +15,25 @@ class RetrievalEvaluationCase:
     relevance_grades optionally assigns graded relevance to chunk IDs for
     NDCG evaluation. When omitted, relevant_chunk_ids are treated as
     binary relevance with grade 1.
+
+    expect_abstention marks a query as intentionally unanswerable. Such
+    cases must not define relevant chunks and are evaluated based on whether
+    retrieval returns no results.
     """
 
     query: str
     relevant_chunk_ids: tuple[str, ...]
     relevance_grades: Mapping[str, float] | None = None
+    expect_abstention: bool = False
 
     def __post_init__(self) -> None:
         if not self.query.strip():
             raise ValueError("query must not be empty.")
 
-        if not self.relevant_chunk_ids:
+        if self.expect_abstention and self.relevant_chunk_ids:
+            raise ValueError("expect_abstention cases must not define relevant_chunk_ids.")
+
+        if not self.expect_abstention and not self.relevant_chunk_ids:
             raise ValueError("relevant_chunk_ids must not be empty.")
 
         if len(set(self.relevant_chunk_ids)) != len(self.relevant_chunk_ids):
@@ -33,6 +41,9 @@ class RetrievalEvaluationCase:
 
         if any(not chunk_id for chunk_id in self.relevant_chunk_ids):
             raise ValueError("relevant_chunk_ids must not contain empty IDs.")
+
+        if self.expect_abstention and self.relevance_grades is not None:
+            raise ValueError("expect_abstention cases must not define relevance_grades.")
 
         if self.relevance_grades is not None:
             if not self.relevance_grades:
@@ -80,6 +91,8 @@ class RetrievalQueryEvaluation:
     reciprocal_rank: float | None
     ndcg_at_k: float | None
     latency_ms: float
+    expect_abstention: bool = False
+    abstention_correct: bool | None = None
     error_type: str | None = None
     error_message: str | None = None
 
@@ -99,6 +112,8 @@ class RetrievalEvaluationResult:
     failed_queries: int
     mean_latency_ms: float
     query_results: tuple[RetrievalQueryEvaluation, ...]
+    abstention_accuracy: float = 0.0
+    abstention_evaluated_queries: int = 0
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -110,4 +125,6 @@ class RetrievalEvaluationResult:
             "retrieval_successful_queries": float(self.successful_queries),
             "retrieval_failed_queries": float(self.failed_queries),
             "retrieval_mean_latency_ms": self.mean_latency_ms,
+            "retrieval_abstention_accuracy": self.abstention_accuracy,
+            "retrieval_abstention_evaluated_queries": float(self.abstention_evaluated_queries),
         }

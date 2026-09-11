@@ -274,3 +274,111 @@ def test_retrieval_evaluator_rejects_invalid_min_relevance_score(
             FakeRetriever({}),
             min_relevance_score=threshold,
         )
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_records_correct_abstention() -> None:
+    retriever = FakeRetriever(
+        {
+            "unknown": [],
+        }
+    )
+
+    evaluator = RetrievalEvaluator(retriever, k=3)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="unknown",
+                relevant_chunk_ids=(),
+                expect_abstention=True,
+            )
+        ]
+    )
+
+    assert result.evaluated_queries == 1
+    assert result.successful_queries == 1
+    assert result.failed_queries == 0
+    assert result.abstention_accuracy == pytest.approx(1.0)
+    assert result.abstention_evaluated_queries == 1
+
+    query_result = result.query_results[0]
+    assert query_result.expect_abstention is True
+    assert query_result.abstention_correct is True
+    assert query_result.recall_at_k is None
+    assert query_result.precision_at_k is None
+    assert query_result.reciprocal_rank is None
+    assert query_result.ndcg_at_k is None
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_records_failed_abstention() -> None:
+    retriever = FakeRetriever(
+        {
+            "unknown": [
+                make_result("A", score=0.82),
+            ],
+        }
+    )
+
+    evaluator = RetrievalEvaluator(retriever, k=3)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="unknown",
+                relevant_chunk_ids=(),
+                expect_abstention=True,
+            )
+        ]
+    )
+
+    assert result.abstention_accuracy == pytest.approx(0.0)
+    assert result.abstention_evaluated_queries == 1
+
+    query_result = result.query_results[0]
+    assert query_result.abstention_correct is False
+    assert query_result.retrieved_chunk_ids == ("A",)
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_separates_abstention_from_retrieval_metrics() -> None:
+    class MixedRetriever:
+        async def retrieve(self, query, top_k=5, **kwargs):
+            if query == "unknown":
+                return []
+
+            return [
+                make_result("A", score=0.95),
+                make_result("X", score=0.40),
+            ][:top_k]
+
+    evaluator = RetrievalEvaluator(MixedRetriever(), k=2)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="known",
+                relevant_chunk_ids=("A",),
+            ),
+            RetrievalEvaluationCase(
+                query="unknown",
+                relevant_chunk_ids=(),
+                expect_abstention=True,
+            ),
+        ]
+    )
+
+    assert result.evaluated_queries == 2
+    assert result.successful_queries == 2
+    assert result.failed_queries == 0
+
+    # Retrieval metrics use only the answerable query.
+    assert result.recall_at_k == pytest.approx(1.0)
+    assert result.precision_at_k == pytest.approx(0.5)
+    assert result.mrr == pytest.approx(1.0)
+    assert result.ndcg_at_k == pytest.approx(1.0)
+
+    # Abstention metric uses only the abstention query.
+    assert result.abstention_accuracy == pytest.approx(1.0)
+    assert result.abstention_evaluated_queries == 1
