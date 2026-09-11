@@ -21,6 +21,7 @@ from rag.evaluation.workflow import (
     RetrievalEvaluationWorkflow,
     RetrievalEvaluationWorkflowResult,
 )
+from .lineage import RetrievalEvaluationLineage
 
 __all__ = [
     "RetrievalEvaluationCase",
@@ -38,4 +39,5 @@ __all__ = [
     "RetrievalEvaluationWorkflow",
     "RetrievalEvaluationWorkflowResult",
     "RetrievalQueryResult",
+    "RetrievalEvaluationLineage",
 ]

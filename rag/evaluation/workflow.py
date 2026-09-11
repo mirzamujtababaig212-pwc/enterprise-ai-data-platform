@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from rag.evaluation.dataset import RetrievalEvaluationDataset
 from rag.evaluation.evaluator import RetrievalEvaluator
+from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import (
@@ -21,6 +22,7 @@ class RetrievalEvaluationWorkflowResult:
     dataset_name: str
     evaluation: RetrievalEvaluationResult
     quality_gate: RetrievalQualityGateResult
+    lineage: RetrievalEvaluationLineage
 
     @property
     def passed(self) -> bool:
@@ -31,6 +33,7 @@ class RetrievalEvaluationWorkflowResult:
             "dataset_name": self.dataset_name,
             "evaluation": self.evaluation.as_dict(),
             "quality_gate": self.quality_gate.as_dict(),
+            "lineage": self.lineage.as_dict(),
         }
 
 
@@ -58,8 +61,18 @@ class RetrievalEvaluationWorkflow:
             policy=self.policy,
         )
 
+        lineage = RetrievalEvaluationLineage(
+            dataset_name=dataset.name,
+            dataset_version=dataset.version,
+            evaluation_policy_name=self.policy.name,
+            evaluator_k=self.evaluator.k,
+            min_relevance_score=self.evaluator.min_relevance_score,
+            embedding_identity=self.evaluator.embedding_identity,
+        )
+
         return RetrievalEvaluationWorkflowResult(
             dataset_name=dataset.name,
             evaluation=evaluation,
             quality_gate=quality_gate,
+            lineage=lineage,
         )

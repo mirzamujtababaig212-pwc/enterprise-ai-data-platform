@@ -4,6 +4,7 @@ import time
 from collections.abc import Sequence
 
 from rag.contracts import Retriever
+from rag.models import EmbeddingIdentity
 from rag.evaluation.metrics import (
     ndcg_at_k,
     precision_at_k,
@@ -32,6 +33,7 @@ class RetrievalEvaluator:
         *,
         k: int = 5,
         min_relevance_score: float | None = None,
+        embedding_identity: EmbeddingIdentity | None = None,
     ) -> None:
         if k <= 0:
             raise ValueError("k must be greater than zero.")
@@ -42,6 +44,7 @@ class RetrievalEvaluator:
         self.retriever = retriever
         self.k = k
         self.min_relevance_score = min_relevance_score
+        self.embedding_identity = embedding_identity
 
     async def evaluate(
         self,
