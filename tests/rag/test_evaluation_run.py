@@ -135,3 +135,168 @@ def test_run_as_dict_contains_artifact_provenance() -> None:
     assert payload["lineage"]["min_recall_at_k"] == 0.9
     assert payload["evaluation"]["retrieval_recall_at_k"] == 1.0
     assert payload["quality_gate"]["quality_gate_passed"] is True
+
+
+def test_run_without_regression_is_release_passed() -> None:
+    run = _run()
+
+    assert run.passed is True
+    assert run.release_passed is True
+    assert run.regression is None
+
+
+def test_run_can_attach_passing_regression() -> None:
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    baseline = _run()
+
+    candidate = RetrievalEvaluationRun(
+        run_id="run-vehicle-002",
+        created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        lineage=_lineage(),
+        evaluation=_evaluation(),
+        quality_gate=_quality_gate(),
+    )
+
+    policy = RetrievalRegressionPolicy(
+        name="vehicle-regression-v1",
+    )
+
+    evaluated_run = candidate.with_regression(
+        baseline=baseline,
+        policy=policy,
+    )
+
+    assert evaluated_run is not candidate
+    assert candidate.regression is None
+
+    assert evaluated_run.regression is not None
+    assert evaluated_run.regression.baseline_run_id == "run-vehicle-001"
+    assert evaluated_run.regression.passed is True
+
+    assert evaluated_run.passed is True
+    assert evaluated_run.release_passed is True
+
+
+def test_run_regression_failure_blocks_release() -> None:
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+    from tests.rag.test_evaluation_run_comparison import _run as comparison_run
+
+    baseline = comparison_run(
+        "baseline",
+        recall=0.95,
+        precision=0.90,
+        mrr=0.95,
+        ndcg=0.90,
+        latency=80.0,
+        abstention_accuracy=0.95,
+    )
+
+    candidate = comparison_run(
+        "candidate",
+        recall=0.85,
+        precision=0.90,
+        mrr=0.95,
+        ndcg=0.90,
+        latency=80.0,
+        abstention_accuracy=0.95,
+    )
+
+    evaluated_run = candidate.with_regression(
+        baseline=baseline,
+        policy=RetrievalRegressionPolicy(
+            max_recall_at_k_degradation=0.01,
+        ),
+    )
+
+    assert evaluated_run.passed is True
+    assert evaluated_run.regression is not None
+    assert evaluated_run.regression.passed is False
+    assert evaluated_run.release_passed is False
+
+
+def test_run_with_regression_serializes_release_decision() -> None:
+    from rag.evaluation.comparison import RetrievalRegressionPolicy
+
+    baseline = _run()
+
+    candidate = RetrievalEvaluationRun(
+        run_id="run-vehicle-002",
+        created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        lineage=_lineage(),
+        evaluation=_evaluation(),
+        quality_gate=_quality_gate(),
+    )
+
+    evaluated_run = candidate.with_regression(
+        baseline=baseline,
+        policy=RetrievalRegressionPolicy(
+            name="vehicle-regression-v1",
+        ),
+    )
+
+    payload = evaluated_run.as_dict()
+
+    assert payload["passed"] is True
+    assert payload["release_passed"] is True
+    assert payload["regression"] is not None
+
+    regression = payload["regression"]
+
+    assert regression["baseline_run_id"] == "run-vehicle-001"
+    assert regression["candidate_run_id"] == "run-vehicle-002"
+    assert regression["passed"] is True
+    assert regression["policy"]["name"] == "vehicle-regression-v1"
+    assert regression["result"]["passed"] is True
+
+
+def test_regression_requires_matching_candidate_run_id() -> None:
+    from rag.evaluation.comparison import (
+        RetrievalEvaluationRunComparator,
+        RetrievalRegressionPolicy,
+        RetrievalRegressionPolicyEvaluator,
+    )
+    from rag.evaluation.run import RetrievalEvaluationRegression
+
+    baseline = _run()
+
+    candidate = RetrievalEvaluationRun(
+        run_id="run-vehicle-002",
+        created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        lineage=_lineage(),
+        evaluation=_evaluation(),
+        quality_gate=_quality_gate(),
+    )
+
+    comparison = RetrievalEvaluationRunComparator.compare(
+        baseline,
+        candidate,
+    )
+
+    policy = RetrievalRegressionPolicy()
+
+    result = RetrievalRegressionPolicyEvaluator.evaluate(
+        comparison,
+        policy,
+    )
+
+    regression = RetrievalEvaluationRegression(
+        baseline_run_id=baseline.run_id,
+        candidate_run_id=candidate.run_id,
+        comparison=comparison,
+        policy=policy,
+        result=result,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="regression comparison candidate_run_id must match run_id",
+    ):
+        RetrievalEvaluationRun(
+            run_id="different-run-id",
+            created_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+            lineage=_lineage(),
+            evaluation=_evaluation(),
+            quality_gate=_quality_gate(),
+            regression=regression,
+        )

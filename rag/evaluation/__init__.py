@@ -1,4 +1,8 @@
 from rag.evaluation.evaluator import RetrievalEvaluator
+from rag.evaluation.run import (
+    RetrievalEvaluationRegression,
+    RetrievalEvaluationRun,
+)
 from rag.evaluation.metrics import (
     ndcg_at_k,
     precision_at_k,
@@ -40,4 +44,6 @@ __all__ = [
     "RetrievalEvaluationWorkflowResult",
     "RetrievalQueryResult",
     "RetrievalEvaluationLineage",
+    "RetrievalEvaluationRegression",
+    "RetrievalEvaluationRun",
 ]
