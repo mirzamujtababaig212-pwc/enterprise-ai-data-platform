@@ -11,6 +11,47 @@ class Base(DeclarativeBase):
     pass
 
 
+class RetrievalEvaluationRunRecord(Base):
+    __tablename__ = "retrieval_evaluation_runs"
+
+    run_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    dataset_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    dataset_version: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    release_passed: Mapped[bool] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    lineage: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+    evaluation: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+    quality_gate: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+    regression: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
+
 class UsageEventRecord(Base):
     __tablename__ = "usage_events"
 

@@ -1,0 +1,301 @@
+from __future__ import annotations
+
+import asyncio
+import os
+
+from datetime import UTC, datetime
+
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
+
+from app.control_plane.persistence.models import Base, RetrievalEvaluationRunRecord
+from rag.evaluation.policy import RetrievalEvaluationPolicy
+from rag.evaluation.quality_gate import RetrievalQualityGate
+from rag.evaluation.run import RetrievalEvaluationRun
+from rag.evaluation.stores.postgres import (
+    PostgreSQLRetrievalEvaluationRunStore,
+)
+from rag.models import EmbeddingIdentity
+
+
+EMBEDDING_IDENTITY = EmbeddingIdentity(
+    requested_provider="logical-provider",
+    requested_model="logical-model",
+    resolved_provider="physical-provider",
+    resolved_model="physical-model",
+    dimension=4,
+)
+
+
+def _run(
+    *,
+    run_id: str = "run-1",
+    recall: float = 1.0,
+    precision: float = 0.9,
+    passed: bool = True,
+) -> RetrievalEvaluationRun:
+    from rag.evaluation.models import RetrievalEvaluationResult
+    from rag.evaluation.lineage import RetrievalEvaluationLineage
+
+    policy = RetrievalEvaluationPolicy(
+        min_recall_at_k=0.8,
+        min_precision_at_k=0.8,
+        name="vehicle-release",
+    )
+
+    evaluation = RetrievalEvaluationResult(
+        recall_at_k=recall,
+        precision_at_k=precision,
+        mrr=1.0,
+        ndcg_at_k=0.95,
+        evaluated_queries=7,
+        successful_queries=7,
+        failed_queries=0,
+        mean_latency_ms=12.5,
+        query_results=(),
+        abstention_accuracy=1.0,
+        abstention_evaluated_queries=1,
+    )
+
+    quality_gate = RetrievalQualityGate.evaluate(
+        evaluation,
+        policy,
+    )
+
+    if not passed:
+        from rag.evaluation.quality_gate import RetrievalQualityGateResult
+
+        quality_gate = RetrievalQualityGateResult(
+            passed=False,
+            errors=("forced failure",),
+            metrics=quality_gate.metrics,
+            policy=policy,
+        )
+
+    lineage = RetrievalEvaluationLineage(
+        dataset_name="vehicle-retrieval",
+        dataset_version="v2",
+        evaluation_policy_name=policy.name,
+        min_recall_at_k=policy.min_recall_at_k,
+        min_precision_at_k=policy.min_precision_at_k,
+        min_mrr=policy.min_mrr,
+        min_ndcg_at_k=policy.min_ndcg_at_k,
+        max_mean_latency_ms=policy.max_mean_latency_ms,
+        min_abstention_accuracy=policy.min_abstention_accuracy,
+        evaluator_k=3,
+        min_relevance_score=0.2,
+        embedding_identity=EMBEDDING_IDENTITY,
+    )
+
+    return RetrievalEvaluationRun(
+        run_id=run_id,
+        created_at=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+        lineage=lineage,
+        evaluation=evaluation,
+        quality_gate=quality_gate,
+    )
+
+
+def _repository():
+    engine = create_engine("sqlite:///:memory:")
+
+    Base.metadata.create_all(engine)
+
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    return (
+        PostgreSQLRetrievalEvaluationRunStore(session_factory()),
+        engine,
+    )
+
+
+def test_schema_contains_evaluation_run_table() -> None:
+    repository, engine = _repository()
+
+    try:
+        assert inspect(engine).has_table("retrieval_evaluation_runs")
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_save_and_get_round_trip_preserves_release_evidence() -> None:
+    repository, engine = _repository()
+
+    try:
+        run = _run()
+
+        asyncio.run(repository.save(run))
+        restored = asyncio.run(repository.get(run.run_id))
+
+        assert restored is not None
+        assert restored.run_id == run.run_id
+        assert restored.created_at == run.created_at
+        assert restored.release_passed == run.release_passed
+
+        assert restored.lineage == run.lineage
+
+        assert restored.evaluation.recall_at_k == run.evaluation.recall_at_k
+        assert restored.evaluation.precision_at_k == run.evaluation.precision_at_k
+        assert restored.evaluation.mrr == run.evaluation.mrr
+        assert restored.evaluation.ndcg_at_k == run.evaluation.ndcg_at_k
+        assert restored.evaluation.evaluated_queries == run.evaluation.evaluated_queries
+        assert restored.evaluation.mean_latency_ms == run.evaluation.mean_latency_ms
+        assert restored.evaluation.query_results == ()
+
+        assert restored.quality_gate.passed == run.quality_gate.passed
+        assert restored.quality_gate.errors == run.quality_gate.errors
+        assert restored.quality_gate.policy == run.quality_gate.policy
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_get_missing_run_returns_none() -> None:
+    repository, engine = _repository()
+
+    try:
+        assert asyncio.run(repository.get("missing")) is None
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_save_replaces_existing_run() -> None:
+    repository, engine = _repository()
+
+    try:
+        first = _run(recall=0.8)
+        second = _run(recall=1.0)
+
+        asyncio.run(repository.save(first))
+        asyncio.run(repository.save(second))
+
+        restored = asyncio.run(repository.get(first.run_id))
+
+        assert restored is not None
+        assert restored.evaluation.recall_at_k == 1.0
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_persisted_evaluation_excludes_query_payload() -> None:
+    repository, engine = _repository()
+
+    try:
+        run = _run()
+        asyncio.run(repository.save(run))
+
+        record = repository._session.get(
+            RetrievalEvaluationRunRecord,
+            run.run_id,
+        )
+
+        assert record is not None
+
+        assert "query" not in record.evaluation
+        assert "query_results" not in record.evaluation
+        assert "retrieved_chunk_ids" not in record.evaluation
+        assert "retrieved_results" not in record.evaluation
+        assert "error_message" not in record.evaluation
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def _postgres_repository():
+    if os.getenv("RUN_POSTGRES_INTEGRATION") != "1":
+        return None, None
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except OperationalError:
+        engine.dispose()
+        raise
+
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    return PostgreSQLRetrievalEvaluationRunStore(session_factory()), engine
+
+
+def test_postgresql_save_and_get_round_trip() -> None:
+    repository, engine = _postgres_repository()
+
+    if repository is None:
+        import pytest
+
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    run_id = "postgres-integration-evaluation-run"
+
+    try:
+        assert inspect(engine).has_table("retrieval_evaluation_runs")
+
+        run = _run(run_id=run_id)
+
+        asyncio.run(repository.save(run))
+        restored = asyncio.run(repository.get(run_id))
+
+        assert restored is not None
+        assert restored.run_id == run.run_id
+
+        # PostgreSQL preserves timezone information for timestamptz.
+        assert restored.created_at.tzinfo is not None
+        assert restored.created_at == run.created_at
+
+        assert restored.release_passed == run.release_passed
+        assert restored.lineage == run.lineage
+
+        assert restored.evaluation.recall_at_k == run.evaluation.recall_at_k
+        assert restored.evaluation.precision_at_k == run.evaluation.precision_at_k
+        assert restored.evaluation.mrr == run.evaluation.mrr
+        assert restored.evaluation.ndcg_at_k == run.evaluation.ndcg_at_k
+        assert restored.evaluation.evaluated_queries == run.evaluation.evaluated_queries
+        assert restored.evaluation.successful_queries == run.evaluation.successful_queries
+        assert restored.evaluation.failed_queries == run.evaluation.failed_queries
+        assert restored.evaluation.mean_latency_ms == run.evaluation.mean_latency_ms
+        assert restored.evaluation.abstention_accuracy == run.evaluation.abstention_accuracy
+        assert (
+            restored.evaluation.abstention_evaluated_queries
+            == run.evaluation.abstention_evaluated_queries
+        )
+
+        assert restored.quality_gate.passed == run.quality_gate.passed
+        assert restored.quality_gate.errors == run.quality_gate.errors
+        assert restored.quality_gate.policy == run.quality_gate.policy
+    finally:
+        if repository is not None:
+            repository._session.execute(
+                text("DELETE FROM retrieval_evaluation_runs " "WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            )
+            repository._session.commit()
+            repository._session.close()
+
+        if engine is not None:
+            engine.dispose()
