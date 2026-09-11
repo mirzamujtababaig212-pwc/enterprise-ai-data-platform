@@ -15,6 +15,11 @@ from rag.evaluation.models import (
     RetrievalEvaluationResult,
     RetrievalQueryEvaluation,
 )
+from rag.evaluation.dataset import RetrievalEvaluationDataset
+from rag.evaluation.workflow import (
+    RetrievalEvaluationWorkflow,
+    RetrievalEvaluationWorkflowResult,
+)
 
 __all__ = [
     "RetrievalEvaluationCase",
@@ -28,4 +33,7 @@ __all__ = [
     "precision_at_k",
     "recall_at_k",
     "reciprocal_rank",
+    "RetrievalEvaluationDataset",
+    "RetrievalEvaluationWorkflow",
+    "RetrievalEvaluationWorkflowResult",
 ]
