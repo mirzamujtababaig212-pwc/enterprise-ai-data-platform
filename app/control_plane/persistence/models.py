@@ -50,6 +50,11 @@ class RetrievalEvaluationRunRecord(Base):
         JSON().with_variant(JSONB, "postgresql"),
         nullable=True,
     )
+    external_evaluations: Mapped[list[dict]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=list,
+    )
 
 
 class UsageEventRecord(Base):

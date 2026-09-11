@@ -10,6 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.control_plane.persistence.models import Base, RetrievalEvaluationRunRecord
+from rag.evaluation.external import ExternalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGate
 from rag.evaluation.run import RetrievalEvaluationRun
@@ -17,7 +18,6 @@ from rag.evaluation.stores.postgres import (
     PostgreSQLRetrievalEvaluationRunStore,
 )
 from rag.models import EmbeddingIdentity
-
 
 EMBEDDING_IDENTITY = EmbeddingIdentity(
     requested_provider="logical-provider",
@@ -94,6 +94,15 @@ def _run(
         lineage=lineage,
         evaluation=evaluation,
         quality_gate=quality_gate,
+        external_evaluations=(
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="faithfulness",
+                metrics={"faithfulness": 0.91},
+                evaluated_samples=7,
+                metadata={},
+            ),
+        ),
     )
 
 
@@ -152,6 +161,7 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
         assert restored.quality_gate.passed == run.quality_gate.passed
         assert restored.quality_gate.errors == run.quality_gate.errors
         assert restored.quality_gate.policy == run.quality_gate.policy
+        assert restored.external_evaluations == run.external_evaluations
     finally:
         repository._session.close()
         engine.dispose()
@@ -205,6 +215,16 @@ def test_persisted_evaluation_excludes_query_payload() -> None:
         assert "retrieved_chunk_ids" not in record.evaluation
         assert "retrieved_results" not in record.evaluation
         assert "error_message" not in record.evaluation
+
+        assert record.external_evaluations == [
+            {
+                "provider": "ragas",
+                "evaluator": "faithfulness",
+                "metrics": {"faithfulness": 0.91},
+                "evaluated_samples": 7,
+                "metadata": {},
+            }
+        ]
     finally:
         repository._session.close()
         engine.dispose()
@@ -288,6 +308,7 @@ def test_postgresql_save_and_get_round_trip() -> None:
         assert restored.quality_gate.passed == run.quality_gate.passed
         assert restored.quality_gate.errors == run.quality_gate.errors
         assert restored.quality_gate.policy == run.quality_gate.policy
+        assert restored.external_evaluations == run.external_evaluations
     finally:
         if repository is not None:
             repository._session.execute(

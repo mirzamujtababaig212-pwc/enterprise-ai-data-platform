@@ -14,6 +14,7 @@ from rag.evaluation.comparison.run_comparator import (
     RetrievalEvaluationMetricStatus,
     RetrievalEvaluationRunComparison,
 )
+from rag.evaluation.external import ExternalEvaluationResult
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
@@ -59,6 +60,7 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
                 record.evaluation = payload["evaluation"]
                 record.quality_gate = payload["quality_gate"]
                 record.regression = payload["regression"]
+                record.external_evaluations = payload["external_evaluations"]
 
             self._session.commit()
 
@@ -127,6 +129,7 @@ def _serialize_run(
     quality_gate["quality_gate_metrics"] = dict(run.quality_gate.metrics)
 
     regression = _serialize_regression(run.regression) if run.regression is not None else None
+    external_evaluations = [result.as_dict() for result in run.external_evaluations]
 
     return {
         "run_id": run.run_id,
@@ -138,6 +141,7 @@ def _serialize_run(
         "evaluation": evaluation,
         "quality_gate": quality_gate,
         "regression": regression,
+        "external_evaluations": external_evaluations,
     }
 
 
@@ -220,12 +224,24 @@ def _deserialize_run(
         policy=policy,
     )
 
+    external_evaluations = tuple(
+        ExternalEvaluationResult(
+            provider=data["provider"],
+            evaluator=data["evaluator"],
+            metrics=data["metrics"],
+            evaluated_samples=data["evaluated_samples"],
+            metadata=data.get("metadata"),
+        )
+        for data in (record.external_evaluations or [])
+    )
+
     run = RetrievalEvaluationRun(
         run_id=record.run_id,
         created_at=_ensure_aware(record.created_at),
         lineage=lineage,
         evaluation=evaluation,
         quality_gate=quality_gate,
+        external_evaluations=external_evaluations,
     )
 
     if record.regression is None:
@@ -240,6 +256,7 @@ def _deserialize_run(
         evaluation=run.evaluation,
         quality_gate=run.quality_gate,
         regression=regression,
+        external_evaluations=run.external_evaluations,
     )
 
 
