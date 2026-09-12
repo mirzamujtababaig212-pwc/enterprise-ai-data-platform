@@ -127,7 +127,13 @@ class EvaluationExecutionService:
 
         generated_external_evaluations = list(external_evaluations)
 
-        if self._external_evaluation_dispatcher is not None:
+        if external_evaluation_requests:
+            if self._external_evaluation_dispatcher is None:
+                raise ValueError(
+                    "external_evaluation_dispatcher is required when "
+                    "external_evaluation_requests are provided"
+                )
+
             for request in external_evaluation_requests:
                 generated_external_evaluations.append(
                     await self._external_evaluation_dispatcher.evaluate(

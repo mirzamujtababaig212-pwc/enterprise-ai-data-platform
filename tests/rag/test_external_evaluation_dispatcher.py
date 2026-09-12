@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from rag.evaluation.external.dispatcher import RagasExternalEvaluationDispatcher
 from rag.evaluation.external.models import (
     ExternalEvaluationRequest,
     ExternalEvaluationResult,
@@ -24,7 +25,6 @@ async def test_dispatcher_contract_can_execute_external_evaluation():
         provider="ragas",
         evaluator="faithfulness",
     )
-
     cases = [MagicMock(), MagicMock()]
     retriever = MagicMock()
 
@@ -44,3 +44,179 @@ async def test_dispatcher_contract_can_execute_external_evaluation():
         cases=cases,
         retriever=retriever,
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_ragas_faithfulness_to_workflow():
+    expected_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.9},
+        evaluated_samples=2,
+    )
+
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(return_value=expected_result)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        faithfulness_workflow=workflow,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
+    )
+    cases = [MagicMock(), MagicMock()]
+    retriever = MagicMock()
+
+    result = await dispatcher.evaluate(
+        request,
+        cases=cases,
+        retriever=retriever,
+    )
+
+    assert result == expected_result
+
+    workflow.evaluate.assert_awaited_once_with(
+        cases,
+        retriever=retriever,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_rejects_unsupported_external_evaluation():
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock()
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        faithfulness_workflow=workflow,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevance",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported external evaluation: ragas/answer_relevance",
+    ):
+        await dispatcher.evaluate(
+            request,
+            cases=[MagicMock()],
+            retriever=MagicMock(),
+        )
+
+    workflow.evaluate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_does_not_create_workflow_for_unsupported_evaluation():
+    factory = MagicMock()
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        faithfulness_workflow_factory=factory,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevance",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported external evaluation: ragas/answer_relevance",
+    ):
+        await dispatcher.evaluate(
+            request,
+            cases=[MagicMock()],
+            retriever=MagicMock(),
+        )
+
+    factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_lazily_creates_workflow_for_supported_evaluation():
+    expected_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.9},
+        evaluated_samples=1,
+    )
+
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(return_value=expected_result)
+
+    factory = MagicMock(return_value=workflow)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        faithfulness_workflow_factory=factory,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
+    )
+
+    cases = [MagicMock()]
+    retriever = MagicMock()
+
+    result = await dispatcher.evaluate(
+        request,
+        cases=cases,
+        retriever=retriever,
+    )
+
+    assert result == expected_result
+    factory.assert_called_once()
+    workflow.evaluate.assert_awaited_once_with(
+        cases,
+        retriever=retriever,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_reuses_lazily_created_workflow():
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(
+        side_effect=[
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="faithfulness",
+                metrics={"faithfulness": 0.9},
+                evaluated_samples=1,
+            ),
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="faithfulness",
+                metrics={"faithfulness": 0.8},
+                evaluated_samples=1,
+            ),
+        ]
+    )
+
+    factory = MagicMock(return_value=workflow)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        faithfulness_workflow_factory=factory,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
+    )
+
+    await dispatcher.evaluate(
+        request,
+        cases=[MagicMock()],
+        retriever=MagicMock(),
+    )
+    await dispatcher.evaluate(
+        request,
+        cases=[MagicMock()],
+        retriever=MagicMock(),
+    )
+
+    factory.assert_called_once()
+    assert workflow.evaluate.await_count == 2

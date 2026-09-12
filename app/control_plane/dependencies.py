@@ -23,7 +23,12 @@ from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
 
 from app.config.settings import Settings
+from rag.evaluation.external.dispatcher import (
+    ExternalEvaluationDispatcher,
+    RagasExternalEvaluationDispatcher,
+)
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
+from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
 from app.control_plane.persistence.database import get_db
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
@@ -210,10 +215,54 @@ async def close_rag_vector_store() -> None:
         await close()
 
 
+def get_external_evaluation_dispatcher() -> ExternalEvaluationDispatcher:
+    """
+    Construct a provider-neutral external evaluation dispatcher.
+
+    RAGAS remains an optional dependency, so its concrete classes and workflow
+    are imported and constructed only when a RAGAS evaluation is explicitly
+    requested.
+    """
+
+    def build_faithfulness_workflow() -> RAGGenerationEvaluationWorkflow:
+        try:
+            from rag.evaluation.external.ragas import (
+                GatewayRagasLLM,
+                RagasFaithfulnessAdapter,
+            )
+        except ImportError as exc:
+            raise RuntimeError(
+                "RAGAS external evaluation requires the optional dependency. "
+                'Install it with: pip install -e ".[ragas]"'
+            ) from exc
+
+        llm = GatewayRagasLLM(
+            _rag_chat_service,
+        )
+
+        evaluator = RagasFaithfulnessAdapter(
+            llm=llm,
+        )
+
+        return RAGGenerationEvaluationWorkflow(
+            chat_service=_rag_chat_service,
+            evaluator=evaluator,
+        )
+
+    return RagasExternalEvaluationDispatcher(
+        faithfulness_workflow_factory=build_faithfulness_workflow,
+    )
+
+
 def get_evaluation_application_service(
     db: Session = Depends(get_db),
 ) -> EvaluationApplicationService:
+    external_evaluation_dispatcher = get_external_evaluation_dispatcher()
+
     return EvaluationApplicationService(
-        execution_service=EvaluationExecutionService(session=db),
+        execution_service=EvaluationExecutionService(
+            session=db,
+            external_evaluation_dispatcher=external_evaluation_dispatcher,
+        ),
         run_store=PostgreSQLRetrievalEvaluationRunStore(db),
     )
