@@ -18,6 +18,11 @@ from app.control_plane.evaluation_service import (
     EvaluationExecutionResult,
     EvaluationExecutionService,
 )
+from rag.evaluation.run_store import RetrievalEvaluationRunStore
+
+
+class EvaluationBaselineNotFoundError(ValueError):
+    """Raised when an explicitly requested evaluation baseline is missing."""
 
 
 @dataclass(frozen=True)
@@ -48,8 +53,10 @@ class EvaluationApplicationService:
         self,
         *,
         execution_service: EvaluationExecutionService,
+        run_store: RetrievalEvaluationRunStore,
     ) -> None:
         self._execution_service = execution_service
+        self._run_store = run_store
 
     async def execute(
         self,
@@ -69,6 +76,14 @@ class EvaluationApplicationService:
         external_evaluations: tuple[ExternalEvaluationResult, ...] = (),
         external_policy: ExternalEvaluationPolicy | None = None,
     ) -> EvaluationApplicationResult:
+        baseline = None
+        if baseline_run_id is not None:
+            baseline = await self._run_store.get(baseline_run_id)
+            if baseline is None:
+                raise EvaluationBaselineNotFoundError(
+                    f"baseline evaluation run not found: {baseline_run_id}"
+                )
+
         definition = EvaluationDatasetRegistry.get(
             name=dataset_name,
             version=dataset_version,

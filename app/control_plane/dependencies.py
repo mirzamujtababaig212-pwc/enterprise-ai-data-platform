@@ -215,4 +215,5 @@ def get_evaluation_application_service(
 ) -> EvaluationApplicationService:
     return EvaluationApplicationService(
         execution_service=EvaluationExecutionService(session=db),
+        run_store=PostgreSQLRetrievalEvaluationRunStore(db),
     )

@@ -34,7 +34,10 @@ from rag.evaluation.external.release import (
     ExternalEvaluationReleaseGate,
     ExternalEvaluationReleasePolicy,
 )
-from app.control_plane.evaluation_application_service import EvaluationApplicationService
+from app.control_plane.evaluation_application_service import (
+    EvaluationApplicationService,
+    EvaluationBaselineNotFoundError,
+)
 
 router = APIRouter(
     prefix="/api/v1/evaluation",
@@ -50,22 +53,10 @@ router = APIRouter(
 async def execute_evaluation_run(
     request: EvaluationRunRequest,
     service: EvaluationApplicationService = Depends(get_evaluation_application_service),
-    run_store: RetrievalEvaluationRunStore = Depends(get_retrieval_evaluation_run_store),
     external_release_policy: ExternalEvaluationReleasePolicy = Depends(
         get_external_evaluation_release_policy
     ),
 ) -> EvaluationRunExecutionResponse:
-    baseline = None
-
-    if request.baseline_run_id is not None:
-        baseline = await run_store.get(request.baseline_run_id)
-
-        if baseline is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=("baseline evaluation run not found: " f"{request.baseline_run_id}"),
-            )
-
     try:
         evaluation_policy = RetrievalEvaluationPolicy(
             name=request.evaluation_policy.name,
@@ -105,13 +96,18 @@ async def execute_evaluation_run(
             external_release_policy=external_release_policy,
             k=request.k,
             min_relevance_score=request.min_relevance_score,
-            baseline=baseline,
+            baseline_run_id=request.baseline_run_id,
             regression_policy=regression_policy,
         )
 
     except DuplicateEvaluationRunError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except EvaluationBaselineNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     except ValueError as exc:

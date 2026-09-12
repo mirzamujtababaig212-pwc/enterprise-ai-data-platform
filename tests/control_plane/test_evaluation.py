@@ -6,7 +6,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
-from app.control_plane.evaluation_application_service import EvaluationApplicationResult
+from app.control_plane.evaluation_application_service import (
+    EvaluationApplicationResult,
+    EvaluationBaselineNotFoundError,
+)
 from app.control_plane.evaluation_service import EvaluationExecutionResult
 from app.control_plane.dependencies import (
     get_external_evaluation_release_policy,
@@ -26,9 +29,13 @@ from rag.evaluation.external import (
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
+from rag.evaluation.release import RetrievalEvaluationReleaseDecision
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
-from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
+from rag.evaluation.composite_release import (
+    CompositeEvaluationReleaseDecision,
+    CompositeEvaluationReleaseGate,
+)
 from rag.evaluation.external.release import (
     ExternalEvaluationReleaseDecision,
     ExternalEvaluationReleaseGate,
@@ -167,6 +174,40 @@ def _install_store(
 
 def teardown_function() -> None:
     app.dependency_overrides.clear()
+
+
+def _composite_release_decision(
+    run_id: str = "candidate-api",
+    passed: bool = True,
+) -> CompositeEvaluationReleaseDecision:
+    native_errors = () if passed else ("retrieval quality gate failed",)
+
+    native = RetrievalEvaluationReleaseDecision(
+        run_id=run_id,
+        passed=passed,
+        errors=native_errors,
+    )
+
+    external_policy = ExternalEvaluationReleasePolicy(
+        name="test-external-release",
+        required=False,
+    )
+
+    external = ExternalEvaluationReleaseDecision(
+        passed=True,
+        errors=(),
+        policy=external_policy,
+    )
+
+    errors = () if passed else ("native: retrieval quality gate failed",)
+
+    return CompositeEvaluationReleaseDecision(
+        run_id=run_id,
+        native=native,
+        external=external,
+        passed=passed,
+        errors=errors,
+    )
 
 
 def test_list_evaluation_runs_returns_paginated_aggregate_evidence() -> None:
@@ -982,7 +1023,7 @@ def test_execute_evaluation_run_returns_created_execution_result() -> None:
     assert call.kwargs["dataset_version"] == "v2"
     assert call.kwargs["run_id"] == "api-run-001"
     assert call.kwargs["k"] == 3
-    assert call.kwargs["baseline"] is None
+    assert call.kwargs["baseline_run_id"] is None
     assert call.kwargs["regression_policy"] is None
 
 
@@ -1024,43 +1065,22 @@ def test_execute_evaluation_run_resolves_explicit_baseline() -> None:
 
     from app.control_plane.dependencies import get_evaluation_application_service
 
-    baseline = _run(
-        "baseline-api",
-        created_at=datetime.now(UTC),
-    )
-
-    store = InMemoryRetrievalEvaluationRunStore()
-
-    async def seed() -> None:
-        await store.save(baseline)
-
-    asyncio.run(seed())
-
     application_service = Mock()
     application_service.execute = AsyncMock(
-        side_effect=lambda **kwargs: EvaluationApplicationResult(
+        return_value=EvaluationApplicationResult(
             execution=EvaluationExecutionResult(
                 run=_run(
                     "candidate-api",
                     created_at=datetime.now(UTC),
                 ),
-                release_decision=CompositeEvaluationReleaseGate.evaluate(
-                    run=kwargs["baseline"],
-                    native=RetrievalEvaluationReleaseGate.evaluate(kwargs["baseline"]),
-                    external=ExternalEvaluationReleaseGate.evaluate(
-                        quality_gate=kwargs["baseline"].external_quality_gate,
-                        policy=ExternalEvaluationReleasePolicy(
-                            name="test-external-release",
-                            required=False,
-                        ),
-                    ),
+                release_decision=_composite_release_decision(
+                    run_id="candidate-api",
                 ),
             )
         )
     )
 
     app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
-    _install_store(store)
 
     response = client.post(
         "/api/v1/evaluation/runs",
@@ -1084,9 +1104,10 @@ def test_execute_evaluation_run_resolves_explicit_baseline() -> None:
 
     assert response.status_code == 201
 
-    call = application_service.execute.await_args
+    application_service.execute.assert_awaited_once()
 
-    assert call.kwargs["baseline"] is baseline
+    call = application_service.execute.await_args
+    assert call.kwargs["baseline_run_id"] == "baseline-api"
     assert call.kwargs["regression_policy"].name == "vehicle-regression-v1"
     assert call.kwargs["regression_policy"].max_recall_at_k_degradation == 0.05
 
@@ -1097,10 +1118,13 @@ def test_execute_evaluation_run_missing_baseline_returns_404() -> None:
     from app.control_plane.dependencies import get_evaluation_application_service
 
     application_service = Mock()
-    application_service.execute = AsyncMock()
+    application_service.execute = AsyncMock(
+        side_effect=EvaluationBaselineNotFoundError(
+            "baseline evaluation run not found: missing-baseline"
+        )
+    )
 
     app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
-    _install_store(InMemoryRetrievalEvaluationRunStore())
 
     response = client.post(
         "/api/v1/evaluation/runs",
@@ -1119,7 +1143,7 @@ def test_execute_evaluation_run_missing_baseline_returns_404() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == ("baseline evaluation run not found: missing-baseline")
-    application_service.execute.assert_not_awaited()
+    application_service.execute.assert_awaited_once()
 
 
 def test_execute_evaluation_run_unknown_dataset_returns_422() -> None:
@@ -1129,11 +1153,10 @@ def test_execute_evaluation_run_unknown_dataset_returns_422() -> None:
 
     application_service = Mock()
     application_service.execute = AsyncMock(
-        side_effect=ValueError("evaluation dataset not found: name='does-not-exist', version='v1'")
+        side_effect=ValueError("evaluation dataset not found: does-not-exist:v1")
     )
 
     app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
-    _install_store(InMemoryRetrievalEvaluationRunStore())
 
     response = client.post(
         "/api/v1/evaluation/runs",
@@ -1151,6 +1174,7 @@ def test_execute_evaluation_run_unknown_dataset_returns_422() -> None:
 
     assert response.status_code == 422
     assert "evaluation dataset not found" in response.json()["detail"]
+    application_service.execute.assert_awaited_once()
 
 
 def test_execute_evaluation_run_requires_authentication() -> None:
