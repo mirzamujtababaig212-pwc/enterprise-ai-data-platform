@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from rag.evaluation.comparison.regression_policy import RetrievalRegressionPolicy
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
+from rag.evaluation.dataset_registry import EvaluationDatasetRegistry
+from rag.evaluation.evaluator import RetrievalEvaluator
+from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.composite_workflow import CompositeEvaluationWorkflow
 from rag.evaluation.external.models import ExternalEvaluationResult
 from rag.evaluation.external.policy import ExternalEvaluationPolicy
@@ -19,7 +22,8 @@ from rag.evaluation.stores.postgres import (
 from rag.evaluation.stores.release_decision import (
     PostgreSQLRetrievalEvaluationReleaseDecisionStore,
 )
-from rag.evaluation.workflow import RetrievalEvaluationWorkflowResult
+from rag.evaluation.workflow import RetrievalEvaluationWorkflow
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -55,13 +59,17 @@ class EvaluationExecutionService:
     async def execute(
         self,
         *,
-        result: RetrievalEvaluationWorkflowResult,
+        dataset_name: str,
+        dataset_version: str,
         run_id: str,
         created_at: datetime,
+        evaluation_policy: RetrievalEvaluationPolicy,
         external_release_policy: ExternalEvaluationReleasePolicy,
-        baseline=None,
+        k: int = 5,
+        min_relevance_score: float | None = None,
+        baseline: RetrievalEvaluationRun | None = None,
         baseline_run_id: str | None = None,
-        baselines=None,
+        baselines: Iterable[RetrievalEvaluationRun] | None = None,
         regression_policy: RetrievalRegressionPolicy | None = None,
         external_evaluations: tuple[ExternalEvaluationResult, ...] = (),
         external_policy: ExternalEvaluationPolicy | None = None,
@@ -79,8 +87,38 @@ class EvaluationExecutionService:
         if existing_run is not None:
             raise DuplicateEvaluationRunError(f"evaluation run already exists: {run_id}")
 
+        definition = EvaluationDatasetRegistry.get(
+            name=dataset_name,
+            version=dataset_version,
+        )
+
+        dataset = definition.build_dataset()
+
+        if dataset.name != dataset_name or dataset.version != dataset_version:
+            raise ValueError(
+                "evaluation dataset definition does not match requested "
+                f"dataset: requested={dataset_name!r}/{dataset_version!r}, "
+                f"resolved={dataset.name!r}/{dataset.version!r}"
+            )
+
+        retriever = await definition.build_retriever()
+
+        evaluator = RetrievalEvaluator(
+            retriever=retriever,
+            k=k,
+            min_relevance_score=min_relevance_score,
+            embedding_identity=definition.build_embedding_identity(),
+        )
+
+        workflow = RetrievalEvaluationWorkflow(
+            evaluator=evaluator,
+            policy=evaluation_policy,
+        )
+
+        evaluation_result = await workflow.run(dataset)
+
         workflow_result = CompositeEvaluationWorkflow.run(
-            result=result,
+            result=evaluation_result,
             run_id=run_id,
             created_at=created_at,
             external_release_policy=external_release_policy,
