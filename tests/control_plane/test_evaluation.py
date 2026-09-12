@@ -12,7 +12,11 @@ from rag.evaluation.comparison import (
     RetrievalEvaluationRunComparator,
     RetrievalRegressionPolicy,
 )
-from rag.evaluation.external import ExternalEvaluationResult
+from rag.evaluation.external import (
+    ExternalEvaluationMetricPolicy,
+    ExternalEvaluationPolicy,
+    ExternalEvaluationResult,
+)
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
@@ -209,6 +213,7 @@ def test_get_evaluation_run_returns_aggregate_evidence_only() -> None:
     assert payload["passed"] is True
     assert payload["release_passed"] is True
     assert payload["external_evaluations"] == []
+    assert payload["external_quality_gate"] is None
 
     assert "query_results" not in payload["evaluation"]
     assert "query" not in payload
@@ -237,6 +242,25 @@ def test_get_evaluation_run_exposes_external_evaluation_evidence() -> None:
             ),
         ),
     )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="production-external-rag-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+            ExternalEvaluationMetricPolicy(
+                provider="custom",
+                evaluator="answer_relevance",
+                metric_name="answer_relevance",
+                minimum_value=0.85,
+            ),
+        ),
+    )
+    run = run.with_external_quality_gate(external_policy)
 
     import asyncio
 
@@ -268,6 +292,16 @@ def test_get_evaluation_run_exposes_external_evaluation_evidence() -> None:
             "metadata": {},
         },
     ]
+
+    assert payload["external_quality_gate"] == {
+        "quality_gate_passed": True,
+        "quality_gate_policy": "production-external-rag-v1",
+        "quality_gate_errors": [],
+        "quality_gate_metrics": {
+            "ragas/faithfulness/faithfulness": 0.91,
+            "custom/answer_relevance/answer_relevance": 0.88,
+        },
+    }
 
     # External evidence is informational at this stage and must not
     # alter the native release decision.

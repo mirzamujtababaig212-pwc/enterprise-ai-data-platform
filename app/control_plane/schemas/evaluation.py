@@ -31,6 +31,7 @@ class EvaluationRunResponse(BaseModel):
     quality_gate: dict[str, Any]
     regression: dict[str, Any] | None
     external_evaluations: list[dict[str, Any]]
+    external_quality_gate: dict[str, Any] | None
     passed: bool
     release_passed: bool
 
