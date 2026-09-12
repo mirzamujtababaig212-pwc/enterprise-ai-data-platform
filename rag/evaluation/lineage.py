@@ -6,12 +6,39 @@ from rag.models import EmbeddingIdentity
 
 
 @dataclass(frozen=True)
+class RetrievalEvaluationArtifact:
+    """
+    Immutable provenance for the retrieval implementation evaluated by a run.
+
+    This describes the executable retrieval components without claiming an
+    immutable production index or artifact version.
+    """
+
+    retriever_type: str
+    vector_store_type: str
+
+    def __post_init__(self) -> None:
+        if not self.retriever_type.strip():
+            raise ValueError("retriever_type must not be empty")
+
+        if not self.vector_store_type.strip():
+            raise ValueError("vector_store_type must not be empty")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "retriever_type": self.retriever_type,
+            "vector_store_type": self.vector_store_type,
+        }
+
+
+@dataclass(frozen=True)
 class RetrievalEvaluationLineage:
     """
     Immutable provenance for a retrieval evaluation run.
 
-    This captures evaluation configuration and embedding provenance without
-    persisting query text, retrieved content, or other evaluation payloads.
+    This captures evaluation configuration, embedding provenance, and the
+    executable retrieval implementation without persisting query text,
+    retrieved content, or other evaluation payloads.
     """
 
     dataset_name: str
@@ -26,6 +53,7 @@ class RetrievalEvaluationLineage:
     evaluator_k: int
     min_relevance_score: float | None
     embedding_identity: EmbeddingIdentity | None = None
+    retrieval_artifact: RetrievalEvaluationArtifact | None = None
 
     def __post_init__(self) -> None:
         if not self.dataset_name.strip():
@@ -60,6 +88,7 @@ class RetrievalEvaluationLineage:
 
     def as_dict(self) -> dict[str, object]:
         embedding = self.embedding_identity
+        retrieval_artifact = self.retrieval_artifact
 
         return {
             "dataset_name": self.dataset_name,
@@ -78,4 +107,8 @@ class RetrievalEvaluationLineage:
             "embedding_resolved_provider": (embedding.resolved_provider if embedding else None),
             "embedding_resolved_model": (embedding.resolved_model if embedding else None),
             "embedding_dimension": embedding.dimension if embedding else None,
+            "retriever_type": (retrieval_artifact.retriever_type if retrieval_artifact else None),
+            "vector_store_type": (
+                retrieval_artifact.vector_store_type if retrieval_artifact else None
+            ),
         }

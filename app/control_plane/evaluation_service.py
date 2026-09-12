@@ -113,6 +113,7 @@ class EvaluationExecutionService:
         workflow = RetrievalEvaluationWorkflow(
             evaluator=evaluator,
             policy=evaluation_policy,
+            retrieval_artifact=definition.build_retrieval_artifact(),
         )
 
         evaluation_result = await workflow.run(dataset)

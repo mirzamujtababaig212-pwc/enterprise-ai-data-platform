@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Iterable
 from rag.evaluation.comparison import RetrievalEvaluationBaselineSelector
 from rag.evaluation.dataset import RetrievalEvaluationDataset
 from rag.evaluation.evaluator import RetrievalEvaluator
-from rag.evaluation.lineage import RetrievalEvaluationLineage
+from rag.evaluation.lineage import (
+    RetrievalEvaluationArtifact,
+    RetrievalEvaluationLineage,
+)
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.run import RetrievalEvaluationRun
@@ -113,9 +116,11 @@ class RetrievalEvaluationWorkflow:
         self,
         evaluator: RetrievalEvaluator,
         policy: RetrievalEvaluationPolicy,
+        retrieval_artifact: RetrievalEvaluationArtifact | None = None,
     ) -> None:
         self.evaluator = evaluator
         self.policy = policy
+        self.retrieval_artifact = retrieval_artifact
 
     async def run(
         self,
@@ -141,6 +146,7 @@ class RetrievalEvaluationWorkflow:
             evaluator_k=self.evaluator.k,
             min_relevance_score=self.evaluator.min_relevance_score,
             embedding_identity=self.evaluator.embedding_identity,
+            retrieval_artifact=self.retrieval_artifact,
         )
 
         return RetrievalEvaluationWorkflowResult(

@@ -33,6 +33,7 @@ def _dataset_definition():
     definition.build_dataset.return_value = dataset
     definition.build_embedding_identity.return_value = Mock()
     definition.build_retriever = AsyncMock(return_value=Mock())
+    definition.build_retrieval_artifact.return_value = Mock()
     return definition
 
 
@@ -401,6 +402,7 @@ async def test_execute_resolves_registered_dataset_before_evaluation(
     definition.build_dataset.assert_called_once()
     definition.build_retriever.assert_awaited_once()
     definition.build_embedding_identity.assert_called_once()
+    definition.build_retrieval_artifact.assert_called_once()
     workflow_run.assert_awaited_once()
 
 

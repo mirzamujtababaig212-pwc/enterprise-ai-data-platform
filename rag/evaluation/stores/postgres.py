@@ -21,7 +21,10 @@ from rag.evaluation.external import (
     ExternalEvaluationQualityGateResult,
     ExternalEvaluationResult,
 )
-from rag.evaluation.lineage import RetrievalEvaluationLineage
+from rag.evaluation.lineage import (
+    RetrievalEvaluationArtifact,
+    RetrievalEvaluationLineage,
+)
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
@@ -206,6 +209,14 @@ def _deserialize_run(
             dimension=lineage_data["embedding_dimension"],
         )
 
+    retrieval_artifact = None
+
+    if lineage_data.get("retriever_type") is not None:
+        retrieval_artifact = RetrievalEvaluationArtifact(
+            retriever_type=lineage_data["retriever_type"],
+            vector_store_type=lineage_data["vector_store_type"],
+        )
+
     lineage = RetrievalEvaluationLineage(
         dataset_name=lineage_data["dataset_name"],
         dataset_version=lineage_data["dataset_version"],
@@ -219,6 +230,7 @@ def _deserialize_run(
         evaluator_k=lineage_data["evaluator_k"],
         min_relevance_score=lineage_data["min_relevance_score"],
         embedding_identity=embedding_identity,
+        retrieval_artifact=retrieval_artifact,
     )
 
     evaluation_data = dict(record.evaluation)

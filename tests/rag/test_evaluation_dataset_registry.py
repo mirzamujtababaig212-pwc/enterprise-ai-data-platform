@@ -7,6 +7,7 @@ from rag.evaluation.dataset_registry import (
     VehicleRetrievalEvaluationDatasetDefinition,
 )
 from rag.evaluation.datasets.vehicle import VEHICLE_EMBEDDING_IDENTITY
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 
 
 def test_vehicle_dataset_definition_is_versioned() -> None:
@@ -68,3 +69,14 @@ def test_registry_rejects_unknown_dataset() -> None:
             name="vehicle-retrieval",
             version="does-not-exist",
         )
+
+
+def test_vehicle_dataset_definition_builds_retrieval_artifact() -> None:
+    definition = VehicleRetrievalEvaluationDatasetDefinition()
+
+    artifact = definition.build_retrieval_artifact()
+
+    assert artifact == RetrievalEvaluationArtifact(
+        retriever_type="SemanticRetriever",
+        vector_store_type="InMemoryVectorStore",
+    )

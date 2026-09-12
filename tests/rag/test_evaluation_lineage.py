@@ -1,6 +1,9 @@
 import pytest
 
-from rag.evaluation.lineage import RetrievalEvaluationLineage
+from rag.evaluation.lineage import (
+    RetrievalEvaluationArtifact,
+    RetrievalEvaluationLineage,
+)
 from rag.models import EmbeddingIdentity
 
 TEST_EMBEDDING_IDENTITY = EmbeddingIdentity(
@@ -26,6 +29,10 @@ def test_lineage_captures_evaluation_configuration() -> None:
         evaluator_k=3,
         min_relevance_score=0.75,
         embedding_identity=TEST_EMBEDDING_IDENTITY,
+        retrieval_artifact=RetrievalEvaluationArtifact(
+            retriever_type="SemanticRetriever",
+            vector_store_type="InMemoryVectorStore",
+        ),
     )
 
     assert lineage.dataset_name == "vehicle-retrieval"
@@ -40,6 +47,10 @@ def test_lineage_captures_evaluation_configuration() -> None:
     assert lineage.evaluator_k == 3
     assert lineage.min_relevance_score == 0.75
     assert lineage.embedding_identity == TEST_EMBEDDING_IDENTITY
+    assert lineage.retrieval_artifact == RetrievalEvaluationArtifact(
+        retriever_type="SemanticRetriever",
+        vector_store_type="InMemoryVectorStore",
+    )
 
 
 def test_lineage_as_dict_contains_policy_snapshot_and_embedding_provenance() -> None:
@@ -56,6 +67,10 @@ def test_lineage_as_dict_contains_policy_snapshot_and_embedding_provenance() -> 
         evaluator_k=3,
         min_relevance_score=0.75,
         embedding_identity=TEST_EMBEDDING_IDENTITY,
+        retrieval_artifact=RetrievalEvaluationArtifact(
+            retriever_type="SemanticRetriever",
+            vector_store_type="InMemoryVectorStore",
+        ),
     )
 
     payload = lineage.as_dict()
@@ -79,6 +94,8 @@ def test_lineage_as_dict_contains_policy_snapshot_and_embedding_provenance() -> 
     assert payload["embedding_resolved_provider"] == "openai"
     assert payload["embedding_resolved_model"] == "text-embedding-3-small"
     assert payload["embedding_dimension"] == 1536
+    assert payload["retriever_type"] == "SemanticRetriever"
+    assert payload["vector_store_type"] == "InMemoryVectorStore"
 
 
 def test_lineage_allows_missing_embedding_identity() -> None:
@@ -205,3 +222,18 @@ def test_lineage_rejects_invalid_relevance_threshold() -> None:
             evaluator_k=5,
             min_relevance_score=1.1,
         )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["retriever_type", "vector_store_type"],
+)
+def test_retrieval_evaluation_artifact_rejects_empty_fields(field: str) -> None:
+    kwargs = {
+        "retriever_type": "SemanticRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+    }
+    kwargs[field] = " "
+
+    with pytest.raises(ValueError, match=f"{field} must not be empty"):
+        RetrievalEvaluationArtifact(**kwargs)
