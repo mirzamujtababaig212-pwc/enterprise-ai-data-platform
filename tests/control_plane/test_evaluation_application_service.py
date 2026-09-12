@@ -73,16 +73,14 @@ async def test_execute_builds_registered_dataset_and_delegates_to_execution_serv
     execution_service.execute.assert_awaited_once()
 
     call = execution_service.execute.await_args
+
+    assert call.kwargs["dataset_name"] == "vehicle-retrieval"
+    assert call.kwargs["dataset_version"] == "v2"
     assert call.kwargs["run_id"] == "run-1"
     assert call.kwargs["external_release_policy"] == ExternalEvaluationReleasePolicy()
-
-    delegated_result = call.kwargs["result"]
-
-    assert delegated_result.dataset_name == "vehicle-retrieval"
-    assert delegated_result.evaluation is not None
-    assert delegated_result.quality_gate is not None
-    assert delegated_result.lineage.dataset_name == "vehicle-retrieval"
-    assert delegated_result.lineage.dataset_version == "v2"
+    assert call.kwargs["evaluation_policy"].name == "vehicle-retrieval-quality-test"
+    assert call.kwargs["k"] == 5
+    assert call.kwargs["min_relevance_score"] is None
 
 
 @pytest.mark.asyncio
@@ -244,39 +242,4 @@ async def test_execute_rejects_regression_policy_without_baseline() -> None:
         )
 
     run_store.get.assert_not_awaited()
-    execution_service.execute.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_execute_rejects_unknown_dataset_before_persistence() -> None:
-    execution_service = Mock()
-    execution_service.execute = AsyncMock()
-
-    run_store = Mock(spec=RetrievalEvaluationRunStore)
-    run_store.get = AsyncMock(return_value=None)
-
-    service = EvaluationApplicationService(
-        execution_service=execution_service,
-        run_store=run_store,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="evaluation dataset not found",
-    ):
-        await service.execute(
-            dataset_name="does-not-exist",
-            dataset_version="v1",
-            run_id="run-1",
-            created_at=datetime.now(UTC),
-            evaluation_policy=RetrievalEvaluationPolicy(
-                name="vehicle-retrieval-quality-test",
-                min_recall_at_k=1.0,
-                min_precision_at_k=0.8,
-                min_mrr=1.0,
-                min_ndcg_at_k=0.95,
-            ),
-            external_release_policy=ExternalEvaluationReleasePolicy(),
-        )
-
     execution_service.execute.assert_not_awaited()

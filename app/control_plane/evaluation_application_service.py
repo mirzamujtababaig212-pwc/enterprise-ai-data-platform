@@ -5,14 +5,11 @@ from datetime import datetime
 from typing import Iterable
 
 from rag.evaluation.comparison.regression_policy import RetrievalRegressionPolicy
-from rag.evaluation.dataset_registry import EvaluationDatasetRegistry
 from rag.evaluation.external.models import ExternalEvaluationResult
 from rag.evaluation.external.policy import ExternalEvaluationPolicy
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
-from rag.evaluation.evaluator import RetrievalEvaluator
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.run import RetrievalEvaluationRun
-from rag.evaluation.workflow import RetrievalEvaluationWorkflow
 
 from app.control_plane.evaluation_service import (
     EvaluationExecutionResult,
@@ -97,41 +94,15 @@ class EvaluationApplicationService:
                     f"baseline evaluation run not found: {baseline_run_id}"
                 )
 
-        definition = EvaluationDatasetRegistry.get(
-            name=dataset_name,
-            version=dataset_version,
-        )
-
-        dataset = definition.build_dataset()
-
-        if dataset.name != dataset_name or dataset.version != dataset_version:
-            raise ValueError(
-                "evaluation dataset definition does not match requested "
-                f"dataset: requested={dataset_name!r}/{dataset_version!r}, "
-                f"resolved={dataset.name!r}/{dataset.version!r}"
-            )
-
-        retriever = await definition.build_retriever()
-
-        evaluator = RetrievalEvaluator(
-            retriever=retriever,
-            k=k,
-            min_relevance_score=min_relevance_score,
-            embedding_identity=definition.build_embedding_identity(),
-        )
-
-        workflow = RetrievalEvaluationWorkflow(
-            evaluator=evaluator,
-            policy=evaluation_policy,
-        )
-
-        workflow_result = await workflow.run(dataset)
-
         execution = await self._execution_service.execute(
-            result=workflow_result,
+            dataset_name=dataset_name,
+            dataset_version=dataset_version,
             run_id=run_id,
             created_at=created_at,
+            evaluation_policy=evaluation_policy,
             external_release_policy=external_release_policy,
+            k=k,
+            min_relevance_score=min_relevance_score,
             baseline=baseline,
             baseline_run_id=baseline_run_id,
             baselines=baselines,
