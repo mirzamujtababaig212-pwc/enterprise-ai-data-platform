@@ -54,7 +54,16 @@ __all__ = [
     "RetrievalEvaluationRun",
 ]
 
+from .composite_workflow import (
+    CompositeEvaluationWorkflow,
+    CompositeEvaluationWorkflowResult,
+)
 from .composite_release import (  # noqa: F401
     CompositeEvaluationReleaseDecision,
     CompositeEvaluationReleaseGate,
 )
+
+__all__ += [
+    "CompositeEvaluationWorkflow",
+    "CompositeEvaluationWorkflowResult",
+]
