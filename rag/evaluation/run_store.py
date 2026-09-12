@@ -5,6 +5,10 @@ from typing import Protocol
 from rag.evaluation.run import RetrievalEvaluationRun
 
 
+class DuplicateEvaluationRunError(ValueError):
+    """Raised when an evaluation run ID already exists."""
+
+
 class RetrievalEvaluationRunStore(Protocol):
     """Persistence boundary for retrieval evaluation run artifacts."""
 

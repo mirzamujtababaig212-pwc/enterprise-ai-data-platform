@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.models import RetrievalEvaluationRunRecord
@@ -28,7 +29,10 @@ from rag.evaluation.run import (
     RetrievalEvaluationRegression,
     RetrievalEvaluationRun,
 )
-from rag.evaluation.run_store import RetrievalEvaluationRunStore
+from rag.evaluation.run_store import (
+    DuplicateEvaluationRunError,
+    RetrievalEvaluationRunStore,
+)
 from rag.models import EmbeddingIdentity
 
 
@@ -51,31 +55,34 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
         commit: bool = True,
     ) -> None:
         try:
-            record = self._session.scalar(
+            existing = self._session.scalar(
                 select(RetrievalEvaluationRunRecord).where(
                     RetrievalEvaluationRunRecord.run_id == run.run_id
                 )
             )
 
-            payload = _serialize_run(run)
+            if existing is not None:
+                raise DuplicateEvaluationRunError(f"evaluation run already exists: {run.run_id}")
 
-            if record is None:
-                self._session.add(RetrievalEvaluationRunRecord(**payload))
-            else:
-                record.created_at = payload["created_at"]
-                record.dataset_name = payload["dataset_name"]
-                record.dataset_version = payload["dataset_version"]
-                record.release_passed = payload["release_passed"]
-                record.lineage = payload["lineage"]
-                record.evaluation = payload["evaluation"]
-                record.quality_gate = payload["quality_gate"]
-                record.regression = payload["regression"]
-                record.external_evaluations = payload["external_evaluations"]
-                record.external_quality_gate = payload["external_quality_gate"]
+            payload = _serialize_run(run)
+            self._session.add(RetrievalEvaluationRunRecord(**payload))
+
+            # Flush even when commit=False so the database primary-key
+            # constraint detects concurrent duplicate run IDs before any
+            # dependent release decision is persisted.
+            self._session.flush()
 
             if commit:
                 self._session.commit()
 
+        except DuplicateEvaluationRunError:
+            self._session.rollback()
+            raise
+        except IntegrityError as exc:
+            self._session.rollback()
+            raise DuplicateEvaluationRunError(
+                f"evaluation run already exists: {run.run_id}"
+            ) from exc
         except Exception:
             self._session.rollback()
             raise

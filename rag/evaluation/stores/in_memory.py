@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
 from rag.evaluation.run import RetrievalEvaluationRun
+from rag.evaluation.run_store import DuplicateEvaluationRunError
 
 
 class InMemoryRetrievalEvaluationRunStore:
@@ -11,6 +12,9 @@ class InMemoryRetrievalEvaluationRunStore:
         self._runs: dict[str, RetrievalEvaluationRun] = {}
 
     async def save(self, run: RetrievalEvaluationRun) -> None:
+        if run.run_id in self._runs:
+            raise DuplicateEvaluationRunError(f"evaluation run already exists: {run.run_id}")
+
         self._runs[run.run_id] = run
 
     async def get(self, run_id: str) -> RetrievalEvaluationRun | None:

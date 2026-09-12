@@ -986,6 +986,39 @@ def test_execute_evaluation_run_returns_created_execution_result() -> None:
     assert call.kwargs["regression_policy"] is None
 
 
+def test_execute_evaluation_run_duplicate_run_id_returns_409() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+    from rag.evaluation.run_store import DuplicateEvaluationRunError
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        side_effect=DuplicateEvaluationRunError("evaluation run already exists: duplicate-api-run")
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+    _install_store(InMemoryRetrievalEvaluationRunStore())
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "duplicate-api-run",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == ("evaluation run already exists: duplicate-api-run")
+    application_service.execute.assert_awaited_once()
+
+
 def test_execute_evaluation_run_resolves_explicit_baseline() -> None:
     from unittest.mock import AsyncMock, Mock
 

@@ -20,7 +20,10 @@ from app.control_plane.schemas.evaluation import (
     EvaluationRunSummaryResponse,
 )
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
-from rag.evaluation.run_store import RetrievalEvaluationRunStore
+from rag.evaluation.run_store import (
+    DuplicateEvaluationRunError,
+    RetrievalEvaluationRunStore,
+)
 from rag.evaluation.release_decision_store import (
     RetrievalEvaluationReleaseDecisionStore,
 )
@@ -106,6 +109,11 @@ async def execute_evaluation_run(
             regression_policy=regression_policy,
         )
 
+    except DuplicateEvaluationRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

@@ -12,6 +12,7 @@ from rag.evaluation.external.models import ExternalEvaluationResult
 from rag.evaluation.external.policy import ExternalEvaluationPolicy
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from rag.evaluation.run import RetrievalEvaluationRun
+from rag.evaluation.run_store import DuplicateEvaluationRunError
 from rag.evaluation.stores.postgres import (
     PostgreSQLRetrievalEvaluationRunStore,
 )
@@ -73,6 +74,11 @@ class EvaluationExecutionService:
         commit=True behavior; this service explicitly suppresses those
         individual commits so the two artifacts commit together.
         """
+        existing_run = await self._run_store.get(run_id)
+
+        if existing_run is not None:
+            raise DuplicateEvaluationRunError(f"evaluation run already exists: {run_id}")
+
         workflow_result = CompositeEvaluationWorkflow.run(
             result=result,
             run_id=run_id,

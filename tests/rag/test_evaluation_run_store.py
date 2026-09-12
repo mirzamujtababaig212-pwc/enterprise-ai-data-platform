@@ -81,15 +81,22 @@ async def test_store_saves_and_retrieves_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_store_replaces_existing_run_with_same_id() -> None:
+async def test_store_rejects_duplicate_run_id_without_overwriting_existing_run() -> None:
+    from rag.evaluation.run_store import DuplicateEvaluationRunError
+
     store = InMemoryRetrievalEvaluationRunStore()
     first = _run("run-001", datetime(2026, 1, 1, tzinfo=UTC))
     second = _run("run-001", datetime(2026, 1, 2, tzinfo=UTC))
 
     await store.save(first)
-    await store.save(second)
 
-    assert await store.get("run-001") == second
+    with pytest.raises(
+        DuplicateEvaluationRunError,
+        match="evaluation run already exists: run-001",
+    ):
+        await store.save(second)
+
+    assert await store.get("run-001") == first
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 
+import pytest
+
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine, inspect, text
@@ -240,20 +242,27 @@ def test_get_missing_run_returns_none() -> None:
         engine.dispose()
 
 
-def test_save_replaces_existing_run() -> None:
+def test_save_rejects_duplicate_run_without_overwriting_existing_run() -> None:
     repository, engine = _repository()
 
     try:
+        from rag.evaluation.run_store import DuplicateEvaluationRunError
+
         first = _run(recall=0.8)
         second = _run(recall=1.0)
 
         asyncio.run(repository.save(first))
-        asyncio.run(repository.save(second))
+
+        with pytest.raises(
+            DuplicateEvaluationRunError,
+            match="evaluation run already exists: run-1",
+        ):
+            asyncio.run(repository.save(second))
 
         restored = asyncio.run(repository.get(first.run_id))
 
         assert restored is not None
-        assert restored.evaluation.recall_at_k == 1.0
+        assert restored.evaluation.recall_at_k == 0.8
     finally:
         repository._session.close()
         engine.dispose()
