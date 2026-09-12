@@ -9,6 +9,7 @@ from app.control_plane.app import app
 from app.control_plane.evaluation_application_service import (
     EvaluationApplicationResult,
     EvaluationBaselineNotFoundError,
+    EvaluationRegressionConfigurationError,
 )
 from app.control_plane.evaluation_service import EvaluationExecutionResult
 from app.control_plane.dependencies import (
@@ -1192,3 +1193,78 @@ def test_execute_evaluation_run_requires_authentication() -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_execute_evaluation_run_baseline_without_regression_policy_returns_422() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        side_effect=EvaluationRegressionConfigurationError(
+            "regression_policy must be provided when baseline_run_id is provided"
+        )
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "candidate-api",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+            },
+            "baseline_run_id": "baseline-api",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "regression_policy must be provided when baseline_run_id is provided"
+    )
+    application_service.execute.assert_awaited_once()
+
+
+def test_execute_evaluation_run_regression_policy_without_baseline_returns_422() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        side_effect=EvaluationRegressionConfigurationError(
+            "baseline_run_id must be provided when regression_policy is provided"
+        )
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "candidate-api",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+            },
+            "regression_policy": {
+                "name": "vehicle-regression-v1",
+                "max_recall_at_k_degradation": 0.05,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "baseline_run_id must be provided when regression_policy is provided"
+    )
+    application_service.execute.assert_awaited_once()
