@@ -12,10 +12,19 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.control_plane.persistence.models import Base, RetrievalEvaluationRunRecord
+from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
 from rag.evaluation.external import (
     ExternalEvaluationMetricPolicy,
     ExternalEvaluationPolicy,
     ExternalEvaluationResult,
+)
+from rag.evaluation.external.release import (
+    ExternalEvaluationReleaseGate,
+    ExternalEvaluationReleasePolicy,
+)
+from rag.evaluation.release import RetrievalEvaluationReleaseGate
+from rag.evaluation.stores.release_decision import (
+    PostgreSQLRetrievalEvaluationReleaseDecisionStore,
 )
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGate
@@ -192,6 +201,85 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
         assert restored.external_quality_gate.policy == (run.external_quality_gate.policy)
     finally:
         repository._session.close()
+        engine.dispose()
+
+
+def test_persisted_run_and_composite_decision_remain_auditable() -> None:
+    run_repository, engine = _repository()
+    decision_repository = PostgreSQLRetrievalEvaluationReleaseDecisionStore(run_repository._session)
+
+    try:
+        original = _run()
+
+        # Native retrieval evaluation passes, but the final release policy
+        # requires external evidence that is intentionally absent.
+        run = RetrievalEvaluationRun(
+            run_id="auditability-run",
+            created_at=original.created_at,
+            lineage=original.lineage,
+            evaluation=original.evaluation,
+            quality_gate=original.quality_gate,
+            regression=original.regression,
+            external_evaluations=(),
+            external_quality_gate=None,
+        )
+
+        external_release_policy = ExternalEvaluationReleasePolicy(
+            name="application-external-evaluation-release",
+            required=True,
+        )
+
+        native_decision = RetrievalEvaluationReleaseGate.evaluate(run)
+        external_decision = ExternalEvaluationReleaseGate.evaluate(
+            quality_gate=run.external_quality_gate,
+            policy=external_release_policy,
+        )
+
+        decision = CompositeEvaluationReleaseDecision(
+            run_id=run.run_id,
+            native=native_decision,
+            external=external_decision,
+            passed=native_decision.passed and external_decision.passed,
+            errors=tuple(
+                [f"native: {error}" for error in native_decision.errors]
+                + [f"external: {error}" for error in external_decision.errors]
+            ),
+        )
+
+        asyncio.run(run_repository.save(run))
+        asyncio.run(decision_repository.save(decision))
+
+        restored_run = asyncio.run(run_repository.get(run.run_id))
+        restored_decision = asyncio.run(decision_repository.get(run.run_id))
+
+        assert restored_run is not None
+        assert restored_decision is not None
+
+        # The native evaluation remains independently successful.
+        assert restored_run.release_passed is True
+        assert restored_run.external_evaluations == ()
+        assert restored_run.external_quality_gate is None
+
+        # The composite release decision remains independently explainable.
+        assert restored_decision.native.passed is True
+        assert restored_decision.external.passed is False
+        assert restored_decision.external.policy.name == ("application-external-evaluation-release")
+        assert restored_decision.external.policy.required is True
+        assert restored_decision.external.errors == (
+            "required external evaluation evidence is missing",
+        )
+
+        assert restored_decision.passed is False
+        assert restored_decision.errors == (
+            "external: required external evaluation evidence is missing",
+        )
+
+        # The persisted artifacts together explain the final release outcome
+        # without rerunning retrieval evaluation.
+        assert restored_decision.run_id == restored_run.run_id
+        assert restored_decision.native.run_id == restored_run.run_id
+    finally:
+        run_repository._session.close()
         engine.dispose()
 
 
