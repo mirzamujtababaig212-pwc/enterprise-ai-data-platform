@@ -2,7 +2,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rag.evaluation.external import ExternalEvaluationResult
+from rag.evaluation.external import (
+    ExternalEvaluationMetricPolicy,
+    ExternalEvaluationPolicy,
+    ExternalEvaluationResult,
+)
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import (
     RetrievalEvaluationResult,
@@ -373,3 +377,104 @@ def test_run_serializes_external_evaluation_evidence() -> None:
             "metadata": {},
         }
     ]
+
+
+def test_run_has_no_external_quality_gate_by_default() -> None:
+    run = _run()
+
+    assert run.external_quality_gate is None
+
+
+def test_run_can_attach_external_quality_gate_immutably() -> None:
+    run = _run().with_external_evaluation(
+        _external_faithfulness_result(),
+    )
+
+    policy = ExternalEvaluationPolicy(
+        name="ragas-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    evaluated_run = run.with_external_quality_gate(policy)
+
+    assert evaluated_run is not run
+    assert run.external_quality_gate is None
+
+    assert evaluated_run.external_quality_gate is not None
+    assert evaluated_run.external_quality_gate.passed is True
+    assert evaluated_run.external_quality_gate.metrics == {
+        "ragas/faithfulness/faithfulness": 0.91,
+    }
+
+    assert evaluated_run.passed is True
+    assert evaluated_run.release_passed is True
+
+
+def test_external_quality_gate_failure_does_not_change_release_decision() -> None:
+    run = _run().with_external_evaluation(
+        _external_faithfulness_result(),
+    )
+
+    policy = ExternalEvaluationPolicy(
+        name="ragas-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.95,
+            ),
+        ),
+    )
+
+    evaluated_run = run.with_external_quality_gate(policy)
+
+    assert evaluated_run.external_quality_gate is not None
+    assert evaluated_run.external_quality_gate.passed is False
+    assert evaluated_run.external_quality_gate.errors == (
+        "external_faithfulness=0.9100 is below required minimum 0.9500",
+    )
+
+    # External evaluation evidence is informational until explicitly
+    # integrated into the release policy.
+    assert evaluated_run.passed is True
+    assert evaluated_run.release_passed is True
+
+
+def test_run_serializes_external_quality_gate() -> None:
+    run = _run().with_external_evaluation(
+        _external_faithfulness_result(),
+    )
+
+    policy = ExternalEvaluationPolicy(
+        name="ragas-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    evaluated_run = run.with_external_quality_gate(policy)
+    payload = evaluated_run.as_dict()
+
+    assert payload["external_quality_gate"] == {
+        "quality_gate_passed": True,
+        "quality_gate_policy": "ragas-v1",
+        "quality_gate_errors": (),
+        "quality_gate_metrics": {
+            "ragas/faithfulness/faithfulness": 0.91,
+        },
+    }
+    assert payload["passed"] is True
+    assert payload["release_passed"] is True

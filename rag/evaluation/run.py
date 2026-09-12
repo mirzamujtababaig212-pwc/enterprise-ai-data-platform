@@ -13,6 +13,10 @@ if TYPE_CHECKING:
         RetrievalEvaluationRunComparison,
     )
 from rag.evaluation.external.models import ExternalEvaluationResult
+from rag.evaluation.external.policy import ExternalEvaluationPolicy
+from rag.evaluation.external.quality_gate import (
+    ExternalEvaluationQualityGateResult,
+)
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
@@ -65,6 +69,7 @@ class RetrievalEvaluationRun:
     quality_gate: RetrievalQualityGateResult
     regression: RetrievalEvaluationRegression | None = None
     external_evaluations: tuple[ExternalEvaluationResult, ...] = ()
+    external_quality_gate: ExternalEvaluationQualityGateResult | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
@@ -148,6 +153,29 @@ class RetrievalEvaluationRun:
             ),
         )
 
+    def with_external_quality_gate(
+        self,
+        policy: ExternalEvaluationPolicy,
+    ) -> RetrievalEvaluationRun:
+        """
+        Return a new immutable run with external evaluation quality evidence.
+
+        The policy is evaluated against the external evaluation evidence
+        already attached to this run. The native quality-gate and release
+        decisions remain unchanged.
+        """
+        from rag.evaluation.external.quality_gate import ExternalEvaluationQualityGate
+
+        quality_gate = ExternalEvaluationQualityGate.evaluate(
+            self.external_evaluations,
+            policy,
+        )
+
+        return replace(
+            self,
+            external_quality_gate=quality_gate,
+        )
+
     def as_dict(self) -> dict[str, object]:
         return {
             "run_id": self.run_id,
@@ -159,4 +187,9 @@ class RetrievalEvaluationRun:
             "quality_gate": self.quality_gate.as_dict(),
             "regression": (self.regression.as_dict() if self.regression is not None else None),
             "external_evaluations": [result.as_dict() for result in self.external_evaluations],
+            "external_quality_gate": (
+                self.external_quality_gate.as_dict()
+                if self.external_quality_gate is not None
+                else None
+            ),
         }
