@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.control_plane.dependencies import (
     get_external_evaluation_release_policy,
+    get_retrieval_evaluation_release_decision_store,
     get_retrieval_evaluation_run_store,
 )
 from app.control_plane.schemas.evaluation import (
@@ -15,6 +16,9 @@ from app.control_plane.schemas.evaluation import (
 )
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
 from rag.evaluation.run_store import RetrievalEvaluationRunStore
+from rag.evaluation.release_decision_store import (
+    RetrievalEvaluationReleaseDecisionStore,
+)
 from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
 from rag.evaluation.external.release import (
     ExternalEvaluationReleaseGate,
@@ -156,6 +160,9 @@ async def get_evaluation_release_decision(
 async def get_composite_evaluation_release_decision(
     run_id: str,
     store: RetrievalEvaluationRunStore = Depends(get_retrieval_evaluation_run_store),
+    decision_store: RetrievalEvaluationReleaseDecisionStore = Depends(
+        get_retrieval_evaluation_release_decision_store
+    ),
     external_policy: ExternalEvaluationReleasePolicy = Depends(
         get_external_evaluation_release_policy
     ),
@@ -168,18 +175,23 @@ async def get_composite_evaluation_release_decision(
             detail=f"evaluation run not found: {run_id}",
         )
 
-    native = RetrievalEvaluationReleaseGate.evaluate(run)
+    persisted_decision = await decision_store.get(run_id)
 
-    external = ExternalEvaluationReleaseGate.evaluate(
-        quality_gate=run.external_quality_gate,
-        policy=external_policy,
-    )
+    if persisted_decision is not None:
+        decision = persisted_decision
+    else:
+        native = RetrievalEvaluationReleaseGate.evaluate(run)
 
-    decision = CompositeEvaluationReleaseGate.evaluate(
-        run=run,
-        native=native,
-        external=external,
-    )
+        external = ExternalEvaluationReleaseGate.evaluate(
+            quality_gate=run.external_quality_gate,
+            policy=external_policy,
+        )
+
+        decision = CompositeEvaluationReleaseGate.evaluate(
+            run=run,
+            native=native,
+            external=external,
+        )
 
     return CompositeEvaluationReleaseDecisionResponse(
         run_id=decision.run_id,

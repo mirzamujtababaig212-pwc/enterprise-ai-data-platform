@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
 from rag.evaluation.run import RetrievalEvaluationRun
 
 
@@ -30,3 +31,22 @@ class InMemoryRetrievalEvaluationRunStore:
 
     async def count(self) -> int:
         return len(self._runs)
+
+
+class InMemoryRetrievalEvaluationReleaseDecisionStore:
+    """Deterministic in-memory store for composite release decisions."""
+
+    def __init__(self) -> None:
+        self._decisions: dict[str, CompositeEvaluationReleaseDecision] = {}
+
+    async def save(
+        self,
+        decision: CompositeEvaluationReleaseDecision,
+    ) -> None:
+        self._decisions[decision.run_id] = decision
+
+    async def get(
+        self,
+        run_id: str,
+    ) -> CompositeEvaluationReleaseDecision | None:
+        return self._decisions.get(run_id)

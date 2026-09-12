@@ -27,6 +27,9 @@ from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from app.control_plane.persistence.database import get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from rag.evaluation.stores.postgres import PostgreSQLRetrievalEvaluationRunStore
+from rag.evaluation.stores.release_decision import (
+    PostgreSQLRetrievalEvaluationReleaseDecisionStore,
+)
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
 from rag.stores.factory import VectorStoreFactory
 
@@ -181,6 +184,12 @@ def get_retrieval_evaluation_run_store(
     db: Session = Depends(get_db),
 ) -> PostgreSQLRetrievalEvaluationRunStore:
     return PostgreSQLRetrievalEvaluationRunStore(db)
+
+
+def get_retrieval_evaluation_release_decision_store(
+    db: Session = Depends(get_db),
+) -> PostgreSQLRetrievalEvaluationReleaseDecisionStore:
+    return PostgreSQLRetrievalEvaluationReleaseDecisionStore(db)
 
 
 def get_external_evaluation_release_policy() -> ExternalEvaluationReleasePolicy:

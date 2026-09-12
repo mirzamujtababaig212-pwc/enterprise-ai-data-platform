@@ -61,6 +61,33 @@ class RetrievalEvaluationRunRecord(Base):
     )
 
 
+class RetrievalEvaluationReleaseDecisionRecord(Base):
+    __tablename__ = "retrieval_evaluation_release_decisions"
+
+    run_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("retrieval_evaluation_runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    passed: Mapped[bool] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    errors: Mapped[list] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=list,
+    )
+    native: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+    external: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+
 class UsageEventRecord(Base):
     __tablename__ = "usage_events"
 

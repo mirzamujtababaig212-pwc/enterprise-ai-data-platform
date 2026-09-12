@@ -9,6 +9,7 @@ from app.control_plane.app import app
 from app.control_plane.dependencies import (
     get_external_evaluation_release_policy,
     get_retrieval_evaluation_run_store,
+    get_retrieval_evaluation_release_decision_store,
 )
 from rag.evaluation.comparison import (
     RetrievalEvaluationRunComparator,
@@ -26,12 +27,16 @@ from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
 from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
-from rag.evaluation.external.release import ExternalEvaluationReleaseGate
+from rag.evaluation.external.release import (
+    ExternalEvaluationReleaseDecision,
+    ExternalEvaluationReleaseGate,
+)
 from rag.evaluation.run import (
     RetrievalEvaluationRegression,
     RetrievalEvaluationRun,
 )
 from rag.evaluation.stores.in_memory import (
+    InMemoryRetrievalEvaluationReleaseDecisionStore,
     InMemoryRetrievalEvaluationRunStore,
 )
 
@@ -141,8 +146,15 @@ def _install_store(
     store: InMemoryRetrievalEvaluationRunStore,
     *,
     external_release_required: bool = False,
+    decision_store: InMemoryRetrievalEvaluationReleaseDecisionStore | None = None,
 ) -> None:
+    if decision_store is None:
+        decision_store = InMemoryRetrievalEvaluationReleaseDecisionStore()
+
     app.dependency_overrides[get_retrieval_evaluation_run_store] = lambda: store
+    app.dependency_overrides[get_retrieval_evaluation_release_decision_store] = (
+        lambda: decision_store
+    )
     app.dependency_overrides[get_external_evaluation_release_policy] = (
         lambda: ExternalEvaluationReleasePolicy(
             name="test-external-release",
@@ -825,6 +837,58 @@ def test_composite_release_matches_composite_gate_contract() -> None:
         **external_payload,
         "errors": list(expected.external.errors),
     }
+
+
+def test_composite_release_returns_persisted_decision_without_recalculation() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    decision_store = InMemoryRetrievalEvaluationReleaseDecisionStore()
+
+    run = _run(
+        "composite-persisted",
+        created_at=datetime.now(UTC),
+    )
+
+    asyncio.run(store.save(run))
+
+    native = RetrievalEvaluationReleaseGate.evaluate(run)
+    persisted_external = ExternalEvaluationReleaseDecision(
+        passed=True,
+        errors=(),
+        policy=ExternalEvaluationReleasePolicy(
+            name="historical-external-release",
+            required=False,
+        ),
+    )
+
+    persisted_decision = CompositeEvaluationReleaseGate.evaluate(
+        run=run,
+        native=native,
+        external=persisted_external,
+    )
+
+    asyncio.run(decision_store.save(persisted_decision))
+
+    _install_store(
+        store,
+        external_release_required=True,
+        decision_store=decision_store,
+    )
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-persisted/" "composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["run_id"] == "composite-persisted"
+    assert payload["passed"] is True
+    assert payload["errors"] == []
+    assert payload["external"]["passed"] is True
+    assert payload["external"]["policy"]["required"] is False
+    assert payload["external"]["policy"]["name"] == "historical-external-release"
 
 
 def test_composite_release_missing_run_returns_404() -> None:
