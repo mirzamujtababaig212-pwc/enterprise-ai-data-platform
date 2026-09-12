@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
 from app.control_plane.dependencies import (
+    get_external_evaluation_release_policy,
     get_retrieval_evaluation_run_store,
 )
 from rag.evaluation.comparison import (
@@ -15,6 +17,7 @@ from rag.evaluation.comparison import (
 from rag.evaluation.external import (
     ExternalEvaluationMetricPolicy,
     ExternalEvaluationPolicy,
+    ExternalEvaluationReleasePolicy,
     ExternalEvaluationResult,
 )
 from rag.evaluation.lineage import RetrievalEvaluationLineage
@@ -22,6 +25,8 @@ from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
+from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
+from rag.evaluation.external.release import ExternalEvaluationReleaseGate
 from rag.evaluation.run import (
     RetrievalEvaluationRegression,
     RetrievalEvaluationRun,
@@ -134,8 +139,16 @@ def _regression(
 
 def _install_store(
     store: InMemoryRetrievalEvaluationRunStore,
+    *,
+    external_release_required: bool = False,
 ) -> None:
     app.dependency_overrides[get_retrieval_evaluation_run_store] = lambda: store
+    app.dependency_overrides[get_external_evaluation_release_policy] = (
+        lambda: ExternalEvaluationReleasePolicy(
+            name="test-external-release",
+            required=external_release_required,
+        )
+    )
 
 
 def teardown_function() -> None:
@@ -190,8 +203,6 @@ def test_get_evaluation_run_returns_aggregate_evidence_only() -> None:
         "run-001",
         created_at=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
     )
-
-    import asyncio
 
     asyncio.run(store.save(run))
     _install_store(store)
@@ -261,8 +272,6 @@ def test_get_evaluation_run_exposes_external_evaluation_evidence() -> None:
         ),
     )
     run = run.with_external_quality_gate(external_policy)
-
-    import asyncio
 
     asyncio.run(store.save(run))
     _install_store(store)
@@ -378,8 +387,6 @@ def test_get_evaluation_comparison_without_regression_returns_404() -> None:
         created_at=datetime.now(UTC),
     )
 
-    import asyncio
-
     asyncio.run(store.save(run))
     _install_store(store)
 
@@ -400,8 +407,6 @@ def test_release_decision_passes_for_passing_run() -> None:
         "run-pass",
         created_at=datetime.now(UTC),
     )
-
-    import asyncio
 
     asyncio.run(store.save(run))
     _install_store(store)
@@ -427,8 +432,6 @@ def test_release_decision_fails_for_quality_gate_failure() -> None:
         passed=False,
         recall=0.5,
     )
-
-    import asyncio
 
     asyncio.run(store.save(run))
     _install_store(store)
@@ -499,8 +502,6 @@ def test_release_gate_matches_existing_release_gate_contract() -> None:
         created_at=datetime.now(UTC),
     )
 
-    import asyncio
-
     asyncio.run(store.save(run))
     _install_store(store)
 
@@ -517,3 +518,323 @@ def test_release_gate_matches_existing_release_gate_contract() -> None:
         "passed": expected.passed,
         "errors": list(expected.errors),
     }
+
+
+def test_composite_release_passes_when_external_evaluation_is_optional() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    run = _run(
+        "composite-optional-pass",
+        created_at=datetime.now(UTC),
+    )
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=False)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-optional-pass/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["run_id"] == "composite-optional-pass"
+    assert payload["passed"] is True
+    assert payload["errors"] == []
+    assert payload["native"]["passed"] is True
+    assert payload["external"]["passed"] is True
+    assert payload["external"]["errors"] == []
+    assert payload["external"]["policy"] == {
+        "name": "test-external-release",
+        "required": False,
+    }
+
+
+def test_composite_release_fails_when_required_external_evaluation_is_missing() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    run = _run(
+        "composite-required-missing",
+        created_at=datetime.now(UTC),
+    )
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=True)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-required-missing/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["passed"] is False
+    assert payload["native"]["passed"] is True
+    assert payload["external"]["passed"] is False
+    assert payload["external"]["policy"] == {
+        "name": "test-external-release",
+        "required": True,
+    }
+    assert "external: required external evaluation evidence is missing" in payload["errors"]
+
+
+def test_composite_release_passes_when_external_quality_gate_passes() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    external_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.95},
+        evaluated_samples=7,
+    )
+
+    run = _run(
+        "composite-external-pass",
+        created_at=datetime.now(UTC),
+        external_evaluations=(external_result,),
+    )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="external-quality-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    run = run.with_external_quality_gate(external_policy)
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=True)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-external-pass/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["passed"] is True
+    assert payload["errors"] == []
+    assert payload["native"]["passed"] is True
+    assert payload["external"]["passed"] is True
+    assert payload["external"]["errors"] == []
+
+
+def test_composite_release_fails_when_external_quality_gate_fails() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    external_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.75},
+        evaluated_samples=7,
+    )
+
+    run = _run(
+        "composite-external-fail",
+        created_at=datetime.now(UTC),
+        external_evaluations=(external_result,),
+    )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="external-quality-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    run = run.with_external_quality_gate(external_policy)
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=True)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-external-fail/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["passed"] is False
+    assert payload["native"]["passed"] is True
+    assert payload["external"]["passed"] is False
+    assert payload["external"]["errors"]
+    assert any(error.startswith("external: ") for error in payload["errors"])
+
+
+def test_composite_release_fails_when_native_release_fails() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    run = _run(
+        "composite-native-fail",
+        created_at=datetime.now(UTC),
+        passed=False,
+        recall=0.5,
+    )
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=False)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-native-fail/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["passed"] is False
+    assert payload["native"]["passed"] is False
+    assert "native: retrieval quality gate failed" in payload["errors"]
+    assert payload["external"]["passed"] is True
+
+
+def test_composite_release_accumulates_native_and_external_failures() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    external_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.75},
+        evaluated_samples=7,
+    )
+
+    run = _run(
+        "composite-both-fail",
+        created_at=datetime.now(UTC),
+        passed=False,
+        recall=0.5,
+        external_evaluations=(external_result,),
+    )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="external-quality-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    run = run.with_external_quality_gate(external_policy)
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=True)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-both-fail/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["passed"] is False
+    assert "native: retrieval quality gate failed" in payload["errors"]
+    assert any(error.startswith("external: ") for error in payload["errors"])
+
+
+def test_composite_release_matches_composite_gate_contract() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    external_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="faithfulness",
+        metrics={"faithfulness": 0.95},
+        evaluated_samples=7,
+    )
+
+    run = _run(
+        "composite-contract",
+        created_at=datetime.now(UTC),
+        external_evaluations=(external_result,),
+    )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="external-quality-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    run = run.with_external_quality_gate(external_policy)
+
+    asyncio.run(store.save(run))
+    _install_store(store, external_release_required=True)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/composite-contract/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    native = RetrievalEvaluationReleaseGate.evaluate(run)
+    external = ExternalEvaluationReleaseGate.evaluate(
+        quality_gate=run.external_quality_gate,
+        policy=ExternalEvaluationReleasePolicy(
+            name="test-external-release",
+            required=True,
+        ),
+    )
+    expected = CompositeEvaluationReleaseGate.evaluate(
+        run=run,
+        native=native,
+        external=external,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["run_id"] == expected.run_id
+    assert payload["passed"] == expected.passed
+    assert payload["errors"] == list(expected.errors)
+
+    native_payload = expected.native.as_dict()
+    assert payload["native"] == {
+        **native_payload,
+        "errors": list(expected.native.errors),
+    }
+
+    external_payload = expected.external.as_dict()
+    assert payload["external"] == {
+        **external_payload,
+        "errors": list(expected.external.errors),
+    }
+
+
+def test_composite_release_missing_run_returns_404() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    _install_store(store)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/missing-composite/composite-release-decision",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == ("evaluation run not found: missing-composite")

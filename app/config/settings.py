@@ -13,6 +13,7 @@ class Settings:
     default_provider: str
     log_level: str
     provider_credentials: dict[str, Any]
+    external_evaluation_release_required: bool
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -32,4 +33,13 @@ class Settings:
             ).lower(),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             provider_credentials=credentials,
+            external_evaluation_release_required=(
+                os.getenv(
+                    "EXTERNAL_EVALUATION_RELEASE_REQUIRED",
+                    "false",
+                )
+                .strip()
+                .lower()
+                in {"1", "true", "yes", "on"}
+            ),
         )

@@ -46,3 +46,11 @@ class EvaluationReleaseDecisionResponse(BaseModel):
     run_id: str
     passed: bool
     errors: list[str]
+
+
+class CompositeEvaluationReleaseDecisionResponse(BaseModel):
+    run_id: str
+    passed: bool
+    errors: list[str]
+    native: dict[str, Any]
+    external: dict[str, Any]

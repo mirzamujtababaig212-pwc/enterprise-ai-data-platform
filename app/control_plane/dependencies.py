@@ -22,6 +22,8 @@ from rag.contracts import VectorStore
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
 
+from app.config.settings import Settings
+from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from app.control_plane.persistence.database import get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from rag.evaluation.stores.postgres import PostgreSQLRetrievalEvaluationRunStore
@@ -179,6 +181,15 @@ def get_retrieval_evaluation_run_store(
     db: Session = Depends(get_db),
 ) -> PostgreSQLRetrievalEvaluationRunStore:
     return PostgreSQLRetrievalEvaluationRunStore(db)
+
+
+def get_external_evaluation_release_policy() -> ExternalEvaluationReleasePolicy:
+    settings = Settings.from_environment()
+
+    return ExternalEvaluationReleasePolicy(
+        name="application-external-evaluation-release",
+        required=settings.external_evaluation_release_required,
+    )
 
 
 async def close_rag_vector_store() -> None:

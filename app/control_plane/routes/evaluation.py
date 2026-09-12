@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-
 from app.control_plane.dependencies import (
+    get_external_evaluation_release_policy,
     get_retrieval_evaluation_run_store,
 )
 from app.control_plane.schemas.evaluation import (
+    CompositeEvaluationReleaseDecisionResponse,
     EvaluationComparisonResponse,
     EvaluationReleaseDecisionResponse,
     EvaluationRunListResponse,
@@ -14,6 +15,11 @@ from app.control_plane.schemas.evaluation import (
 )
 from rag.evaluation.release import RetrievalEvaluationReleaseGate
 from rag.evaluation.run_store import RetrievalEvaluationRunStore
+from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
+from rag.evaluation.external.release import (
+    ExternalEvaluationReleaseGate,
+    ExternalEvaluationReleasePolicy,
+)
 
 router = APIRouter(
     prefix="/api/v1/evaluation",
@@ -140,4 +146,45 @@ async def get_evaluation_release_decision(
         run_id=decision.run_id,
         passed=decision.passed,
         errors=list(decision.errors),
+    )
+
+
+@router.get(
+    "/runs/{run_id}/composite-release-decision",
+    response_model=CompositeEvaluationReleaseDecisionResponse,
+)
+async def get_composite_evaluation_release_decision(
+    run_id: str,
+    store: RetrievalEvaluationRunStore = Depends(get_retrieval_evaluation_run_store),
+    external_policy: ExternalEvaluationReleasePolicy = Depends(
+        get_external_evaluation_release_policy
+    ),
+) -> CompositeEvaluationReleaseDecisionResponse:
+    run = await store.get(run_id)
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"evaluation run not found: {run_id}",
+        )
+
+    native = RetrievalEvaluationReleaseGate.evaluate(run)
+
+    external = ExternalEvaluationReleaseGate.evaluate(
+        quality_gate=run.external_quality_gate,
+        policy=external_policy,
+    )
+
+    decision = CompositeEvaluationReleaseGate.evaluate(
+        run=run,
+        native=native,
+        external=external,
+    )
+
+    return CompositeEvaluationReleaseDecisionResponse(
+        run_id=decision.run_id,
+        passed=decision.passed,
+        errors=list(decision.errors),
+        native=decision.native.as_dict(),
+        external=decision.external.as_dict(),
     )
