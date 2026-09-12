@@ -48,7 +48,7 @@ class PostgreSQLRetrievalEvaluationReleaseDecisionStore(RetrievalEvaluationRelea
 
             if existing is not None:
                 raise DuplicateEvaluationReleaseDecisionError(
-                    "evaluation release decision already exists: " f"{decision.run_id}"
+                    f"evaluation release decision already exists: {decision.run_id}"
                 )
 
             self._session.add(RetrievalEvaluationReleaseDecisionRecord(**payload))
@@ -62,15 +62,21 @@ class PostgreSQLRetrievalEvaluationReleaseDecisionStore(RetrievalEvaluationRelea
                 self._session.commit()
 
         except DuplicateEvaluationReleaseDecisionError:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
             raise
+
         except IntegrityError as exc:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
+
             raise DuplicateEvaluationReleaseDecisionError(
-                "evaluation release decision already exists: " f"{decision.run_id}"
+                f"evaluation release decision already exists: {decision.run_id}"
             ) from exc
+
         except Exception:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
             raise
 
     async def get(

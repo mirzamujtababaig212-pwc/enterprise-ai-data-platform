@@ -65,26 +65,30 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
                 raise DuplicateEvaluationRunError(f"evaluation run already exists: {run.run_id}")
 
             payload = _serialize_run(run)
+
             self._session.add(RetrievalEvaluationRunRecord(**payload))
 
-            # Flush even when commit=False so the database primary-key
-            # constraint detects concurrent duplicate run IDs before any
-            # dependent release decision is persisted.
             self._session.flush()
 
             if commit:
                 self._session.commit()
 
         except DuplicateEvaluationRunError:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
             raise
+
         except IntegrityError as exc:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
+
             raise DuplicateEvaluationRunError(
                 f"evaluation run already exists: {run.run_id}"
             ) from exc
+
         except Exception:
-            self._session.rollback()
+            if commit:
+                self._session.rollback()
             raise
 
     async def get(self, run_id: str) -> RetrievalEvaluationRun | None:
