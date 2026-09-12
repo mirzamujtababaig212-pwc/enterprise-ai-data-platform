@@ -44,7 +44,12 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    async def save(self, run: RetrievalEvaluationRun) -> None:
+    async def save(
+        self,
+        run: RetrievalEvaluationRun,
+        *,
+        commit: bool = True,
+    ) -> None:
         try:
             record = self._session.scalar(
                 select(RetrievalEvaluationRunRecord).where(
@@ -68,7 +73,8 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
                 record.external_evaluations = payload["external_evaluations"]
                 record.external_quality_gate = payload["external_quality_gate"]
 
-            self._session.commit()
+            if commit:
+                self._session.commit()
 
         except Exception:
             self._session.rollback()

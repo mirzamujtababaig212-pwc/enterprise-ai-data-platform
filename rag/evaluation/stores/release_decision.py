@@ -32,6 +32,8 @@ class PostgreSQLRetrievalEvaluationReleaseDecisionStore(RetrievalEvaluationRelea
     async def save(
         self,
         decision: CompositeEvaluationReleaseDecision,
+        *,
+        commit: bool = True,
     ) -> None:
         try:
             payload = _serialize_decision(decision)
@@ -50,7 +52,8 @@ class PostgreSQLRetrievalEvaluationReleaseDecisionStore(RetrievalEvaluationRelea
                 record.native = payload["native"]
                 record.external = payload["external"]
 
-            self._session.commit()
+            if commit:
+                self._session.commit()
 
         except Exception:
             self._session.rollback()
