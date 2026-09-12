@@ -5,7 +5,10 @@ from datetime import datetime
 from typing import Iterable
 
 from rag.evaluation.comparison.regression_policy import RetrievalRegressionPolicy
-from rag.evaluation.external.models import ExternalEvaluationResult
+from rag.evaluation.external.models import (
+    ExternalEvaluationRequest,
+    ExternalEvaluationResult,
+)
 from rag.evaluation.external.policy import ExternalEvaluationPolicy
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from rag.evaluation.policy import RetrievalEvaluationPolicy
@@ -74,6 +77,7 @@ class EvaluationApplicationService:
         baselines: Iterable[RetrievalEvaluationRun] | None = None,
         regression_policy: RetrievalRegressionPolicy | None = None,
         external_evaluations: tuple[ExternalEvaluationResult, ...] = (),
+        external_evaluation_requests: tuple[ExternalEvaluationRequest, ...] = (),
         external_policy: ExternalEvaluationPolicy | None = None,
     ) -> EvaluationApplicationResult:
         if baseline_run_id is not None and regression_policy is None:
@@ -108,6 +112,7 @@ class EvaluationApplicationService:
             baselines=baselines,
             regression_policy=regression_policy,
             external_evaluations=external_evaluations,
+            external_evaluation_requests=external_evaluation_requests,
             external_policy=external_policy,
         )
 

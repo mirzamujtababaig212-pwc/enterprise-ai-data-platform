@@ -13,6 +13,7 @@ from app.control_plane.evaluation_application_service import (
 from app.control_plane.evaluation_service import EvaluationExecutionResult
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
+from rag.evaluation.external.models import ExternalEvaluationRequest
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.run_store import RetrievalEvaluationRunStore
@@ -243,3 +244,50 @@ async def test_execute_rejects_regression_policy_without_baseline() -> None:
 
     run_store.get.assert_not_awaited()
     execution_service.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_external_evaluation_requests_to_execution_service() -> None:
+    execution_service = Mock()
+    execution_service.execute = AsyncMock()
+
+    run = _run()
+    decision = _decision()
+
+    execution_service.execute.return_value = EvaluationExecutionResult(
+        run=run,
+        release_decision=decision,
+    )
+
+    run_store = Mock(spec=RetrievalEvaluationRunStore)
+    run_store.get = AsyncMock(return_value=None)
+
+    service = EvaluationApplicationService(
+        execution_service=execution_service,
+        run_store=run_store,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
+    )
+
+    await service.execute(
+        dataset_name="vehicle-retrieval",
+        dataset_version="v2",
+        run_id="run-1",
+        created_at=datetime.now(UTC),
+        evaluation_policy=RetrievalEvaluationPolicy(
+            name="vehicle-retrieval-quality-test",
+            min_recall_at_k=1.0,
+            min_precision_at_k=0.8,
+            min_mrr=1.0,
+            min_ndcg_at_k=0.95,
+        ),
+        external_release_policy=ExternalEvaluationReleasePolicy(),
+        external_evaluation_requests=(request,),
+    )
+
+    call = execution_service.execute.await_args
+
+    assert call.kwargs["external_evaluation_requests"] == (request,)

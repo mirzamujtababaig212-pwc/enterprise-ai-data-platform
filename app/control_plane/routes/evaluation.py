@@ -30,6 +30,7 @@ from rag.evaluation.release_decision_store import (
 from rag.evaluation.composite_release import CompositeEvaluationReleaseGate
 from rag.evaluation.comparison.regression_policy import RetrievalRegressionPolicy
 from rag.evaluation.policy import RetrievalEvaluationPolicy
+from rag.evaluation.external.models import ExternalEvaluationRequest
 from rag.evaluation.external.release import (
     ExternalEvaluationReleaseGate,
     ExternalEvaluationReleasePolicy,
@@ -98,6 +99,13 @@ async def execute_evaluation_run(
             min_relevance_score=request.min_relevance_score,
             baseline_run_id=request.baseline_run_id,
             regression_policy=regression_policy,
+            external_evaluation_requests=tuple(
+                ExternalEvaluationRequest(
+                    provider=evaluation.provider,
+                    evaluator=evaluation.evaluator,
+                )
+                for evaluation in request.external_evaluations
+            ),
         )
 
     except DuplicateEvaluationRunError as exc:

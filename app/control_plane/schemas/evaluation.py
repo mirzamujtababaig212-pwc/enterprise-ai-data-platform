@@ -80,6 +80,11 @@ class RetrievalRegressionPolicyRequest(BaseModel):
     max_abstention_accuracy_degradation: float = Field(default=0.0, ge=0.0)
 
 
+class ExternalEvaluationRequest(BaseModel):
+    provider: str = Field(min_length=1)
+    evaluator: str = Field(min_length=1)
+
+
 class EvaluationRunRequest(BaseModel):
     dataset_name: str = Field(min_length=1)
     dataset_version: str = Field(min_length=1)
@@ -89,6 +94,7 @@ class EvaluationRunRequest(BaseModel):
     min_relevance_score: float | None = None
     baseline_run_id: str | None = Field(default=None, min_length=1)
     regression_policy: RetrievalRegressionPolicyRequest | None = None
+    external_evaluations: list[ExternalEvaluationRequest] = Field(default_factory=list)
 
 
 class EvaluationRunExecutionResponse(BaseModel):

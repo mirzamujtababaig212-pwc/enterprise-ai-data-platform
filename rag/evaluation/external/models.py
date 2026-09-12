@@ -5,6 +5,18 @@ from typing import Mapping
 
 
 @dataclass(frozen=True)
+class ExternalEvaluationRequest:
+    provider: str
+    evaluator: str
+
+    def __post_init__(self) -> None:
+        if not self.provider.strip():
+            raise ValueError("provider must be non-empty")
+        if not self.evaluator.strip():
+            raise ValueError("evaluator must be non-empty")
+
+
+@dataclass(frozen=True)
 class ExternalEvaluationSample:
     """Provider-neutral sample for external evaluation frameworks."""
 

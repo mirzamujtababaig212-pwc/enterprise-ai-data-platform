@@ -14,6 +14,8 @@ from .quality_gate import (
     ExternalEvaluationQualityGate,
     ExternalEvaluationQualityGateResult,
 )
+from rag.evaluation.external.dispatcher import ExternalEvaluationDispatcher
+from rag.evaluation.external.models import ExternalEvaluationRequest
 
 __all__ = [
     "ExternalEvaluationEvaluator",
@@ -24,6 +26,8 @@ __all__ = [
     "ExternalEvaluationQualityGateResult",
     "ExternalEvaluationResult",
     "ExternalEvaluationSample",
+    "ExternalEvaluationDispatcher",
+    "ExternalEvaluationRequest",
 ]
 
 from .release import (  # noqa: F401

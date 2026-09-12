@@ -11,6 +11,7 @@ from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.run_store import DuplicateEvaluationRunError
+from rag.evaluation.external.models import ExternalEvaluationRequest
 
 
 def _evaluation_policy() -> RetrievalEvaluationPolicy:
@@ -443,7 +444,7 @@ async def test_execute_rejects_unknown_dataset_before_persistence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_runs_optional_generation_evaluation_workflow(
+async def test_execute_runs_requested_external_evaluations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = Mock()
@@ -472,8 +473,8 @@ async def test_execute_runs_optional_generation_evaluation_workflow(
         AsyncMock(return_value=Mock()),
     )
 
-    generation_workflow = Mock()
-    generation_workflow.evaluate = AsyncMock(
+    dispatcher = Mock()
+    dispatcher.evaluate = AsyncMock(
         return_value=Mock(
             provider="ragas",
             evaluator="faithfulness",
@@ -492,7 +493,12 @@ async def test_execute_runs_optional_generation_evaluation_workflow(
         session=session,
         run_store=run_store,
         release_decision_store=release_store,
-        generation_evaluation_workflow=generation_workflow,
+        external_evaluation_dispatcher=dispatcher,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
     )
 
     await service.execute(
@@ -502,10 +508,12 @@ async def test_execute_runs_optional_generation_evaluation_workflow(
         created_at=datetime.now(UTC),
         evaluation_policy=_evaluation_policy(),
         external_release_policy=ExternalEvaluationReleasePolicy(),
+        external_evaluation_requests=(request,),
     )
 
-    generation_workflow.evaluate.assert_awaited_once_with(
-        dataset.cases,
+    dispatcher.evaluate.assert_awaited_once_with(
+        request,
+        cases=dataset.cases,
         retriever=retriever,
     )
 
@@ -516,3 +524,149 @@ async def test_execute_runs_optional_generation_evaluation_workflow(
     assert len(external_evaluations) == 1
     assert external_evaluations[0].provider == "ragas"
     assert external_evaluations[0].evaluator == "faithfulness"
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_dispatch_external_evaluations_when_not_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+
+    run_store = Mock()
+    run_store.get = AsyncMock(return_value=None)
+    run_store.save = AsyncMock()
+
+    release_store = Mock()
+    release_store.save = AsyncMock()
+
+    definition = _dataset_definition()
+
+    dataset = definition.build_dataset.return_value
+    dataset.cases = (Mock(query="What powers an electric vehicle?"),)
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.EvaluationDatasetRegistry.get",
+        Mock(return_value=definition),
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.RetrievalEvaluationWorkflow.run",
+        AsyncMock(return_value=Mock()),
+    )
+
+    dispatcher = Mock()
+    dispatcher.evaluate = AsyncMock()
+
+    composite_result = _workflow_result()
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.CompositeEvaluationWorkflow.run",
+        Mock(return_value=composite_result),
+    )
+
+    service = EvaluationExecutionService(
+        session=session,
+        run_store=run_store,
+        release_decision_store=release_store,
+        external_evaluation_dispatcher=dispatcher,
+    )
+
+    await service.execute(
+        dataset_name="vehicle-retrieval",
+        dataset_version="v2",
+        run_id="run-1",
+        created_at=datetime.now(UTC),
+        evaluation_policy=_evaluation_policy(),
+        external_release_policy=ExternalEvaluationReleasePolicy(),
+        external_evaluation_requests=(),
+    )
+
+    dispatcher.evaluate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_each_requested_external_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+
+    run_store = Mock()
+    run_store.get = AsyncMock(return_value=None)
+    run_store.save = AsyncMock()
+
+    release_store = Mock()
+    release_store.save = AsyncMock()
+
+    definition = _dataset_definition()
+    dataset = definition.build_dataset.return_value
+    dataset.cases = (Mock(query="What powers an electric vehicle?"),)
+
+    retriever = definition.build_retriever.return_value
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.EvaluationDatasetRegistry.get",
+        Mock(return_value=definition),
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.RetrievalEvaluationWorkflow.run",
+        AsyncMock(return_value=Mock()),
+    )
+
+    first_request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="faithfulness",
+    )
+    second_request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevancy",
+    )
+
+    first_result = Mock(provider="ragas", evaluator="faithfulness")
+    second_result = Mock(provider="ragas", evaluator="answer_relevancy")
+
+    dispatcher = Mock()
+    dispatcher.evaluate = AsyncMock(
+        side_effect=[first_result, second_result],
+    )
+
+    composite_result = _workflow_result()
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.CompositeEvaluationWorkflow.run",
+        Mock(return_value=composite_result),
+    )
+
+    service = EvaluationExecutionService(
+        session=session,
+        run_store=run_store,
+        release_decision_store=release_store,
+        external_evaluation_dispatcher=dispatcher,
+    )
+
+    await service.execute(
+        dataset_name="vehicle-retrieval",
+        dataset_version="v2",
+        run_id="run-1",
+        created_at=datetime.now(UTC),
+        evaluation_policy=_evaluation_policy(),
+        external_release_policy=ExternalEvaluationReleasePolicy(),
+        external_evaluation_requests=(
+            first_request,
+            second_request,
+        ),
+    )
+
+    assert dispatcher.evaluate.await_count == 2
+
+    assert dispatcher.evaluate.await_args_list[0].args == (first_request,)
+    assert dispatcher.evaluate.await_args_list[0].kwargs == {
+        "cases": dataset.cases,
+        "retriever": retriever,
+    }
+
+    assert dispatcher.evaluate.await_args_list[1].args == (second_request,)
+    assert dispatcher.evaluate.await_args_list[1].kwargs == {
+        "cases": dataset.cases,
+        "retriever": retriever,
+    }
