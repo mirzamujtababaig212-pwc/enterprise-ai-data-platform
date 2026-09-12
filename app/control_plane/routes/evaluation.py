@@ -78,6 +78,7 @@ async def get_evaluation_run(
         evaluation=run.evaluation.as_dict(),
         quality_gate=run.quality_gate.as_dict(),
         regression=(run.regression.as_dict() if run.regression is not None else None),
+        external_evaluations=[result.as_dict() for result in run.external_evaluations],
         passed=run.passed,
         release_passed=run.release_passed,
     )

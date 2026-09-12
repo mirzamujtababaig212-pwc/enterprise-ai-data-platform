@@ -12,6 +12,7 @@ from rag.evaluation.comparison import (
     RetrievalEvaluationRunComparator,
     RetrievalRegressionPolicy,
 )
+from rag.evaluation.external import ExternalEvaluationResult
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
@@ -37,6 +38,7 @@ def _run(
     passed: bool = True,
     recall: float = 1.0,
     regression: RetrievalEvaluationRegression | None = None,
+    external_evaluations: tuple[ExternalEvaluationResult, ...] = (),
 ) -> RetrievalEvaluationRun:
     lineage = RetrievalEvaluationLineage(
         dataset_name="vehicle-retrieval",
@@ -85,6 +87,7 @@ def _run(
         evaluation=evaluation,
         quality_gate=quality_gate,
         regression=regression,
+        external_evaluations=external_evaluations,
     )
 
 
@@ -205,11 +208,71 @@ def test_get_evaluation_run_returns_aggregate_evidence_only() -> None:
     assert payload["quality_gate"]["quality_gate_passed"] is True
     assert payload["passed"] is True
     assert payload["release_passed"] is True
+    assert payload["external_evaluations"] == []
 
     assert "query_results" not in payload["evaluation"]
     assert "query" not in payload
     assert "chunks" not in payload
     assert "retrieved_results" not in payload
+
+
+def test_get_evaluation_run_exposes_external_evaluation_evidence() -> None:
+    store = InMemoryRetrievalEvaluationRunStore()
+    run = _run(
+        "run-external-evaluation",
+        created_at=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+        external_evaluations=(
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="faithfulness",
+                metrics={"faithfulness": 0.91},
+                evaluated_samples=7,
+                metadata={"version": "0.4.3"},
+            ),
+            ExternalEvaluationResult(
+                provider="custom",
+                evaluator="answer_relevance",
+                metrics={"answer_relevance": 0.88},
+                evaluated_samples=7,
+            ),
+        ),
+    )
+
+    import asyncio
+
+    asyncio.run(store.save(run))
+    _install_store(store)
+
+    response = client.get(
+        "/api/v1/evaluation/runs/run-external-evaluation",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["external_evaluations"] == [
+        {
+            "provider": "ragas",
+            "evaluator": "faithfulness",
+            "metrics": {"faithfulness": 0.91},
+            "evaluated_samples": 7,
+            "metadata": {"version": "0.4.3"},
+        },
+        {
+            "provider": "custom",
+            "evaluator": "answer_relevance",
+            "metrics": {"answer_relevance": 0.88},
+            "evaluated_samples": 7,
+            "metadata": {},
+        },
+    ]
+
+    # External evidence is informational at this stage and must not
+    # alter the native release decision.
+    assert payload["passed"] is True
+    assert payload["release_passed"] is True
 
 
 def test_get_missing_evaluation_run_returns_404() -> None:
