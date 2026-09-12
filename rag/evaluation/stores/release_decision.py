@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.models import (
@@ -13,6 +14,7 @@ from rag.evaluation.external.release import (
 )
 from rag.evaluation.release import RetrievalEvaluationReleaseDecision
 from rag.evaluation.release_decision_store import (
+    DuplicateEvaluationReleaseDecisionError,
     RetrievalEvaluationReleaseDecisionStore,
 )
 
@@ -38,23 +40,35 @@ class PostgreSQLRetrievalEvaluationReleaseDecisionStore(RetrievalEvaluationRelea
         try:
             payload = _serialize_decision(decision)
 
-            record = self._session.scalar(
+            existing = self._session.scalar(
                 select(RetrievalEvaluationReleaseDecisionRecord).where(
                     RetrievalEvaluationReleaseDecisionRecord.run_id == decision.run_id
                 )
             )
 
-            if record is None:
-                self._session.add(RetrievalEvaluationReleaseDecisionRecord(**payload))
-            else:
-                record.passed = payload["passed"]
-                record.errors = payload["errors"]
-                record.native = payload["native"]
-                record.external = payload["external"]
+            if existing is not None:
+                raise DuplicateEvaluationReleaseDecisionError(
+                    "evaluation release decision already exists: " f"{decision.run_id}"
+                )
+
+            self._session.add(RetrievalEvaluationReleaseDecisionRecord(**payload))
+
+            # Flush even when commit=False so the database primary-key
+            # constraint detects concurrent duplicate decisions before the
+            # surrounding transaction can persist dependent state.
+            self._session.flush()
 
             if commit:
                 self._session.commit()
 
+        except DuplicateEvaluationReleaseDecisionError:
+            self._session.rollback()
+            raise
+        except IntegrityError as exc:
+            self._session.rollback()
+            raise DuplicateEvaluationReleaseDecisionError(
+                "evaluation release decision already exists: " f"{decision.run_id}"
+            ) from exc
         except Exception:
             self._session.rollback()
             raise

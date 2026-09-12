@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
+from rag.evaluation.release_decision_store import (
+    DuplicateEvaluationReleaseDecisionError,
+)
 from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.run_store import DuplicateEvaluationRunError
 
@@ -47,6 +50,11 @@ class InMemoryRetrievalEvaluationReleaseDecisionStore:
         self,
         decision: CompositeEvaluationReleaseDecision,
     ) -> None:
+        if decision.run_id in self._decisions:
+            raise DuplicateEvaluationReleaseDecisionError(
+                "evaluation release decision already exists: " f"{decision.run_id}"
+            )
+
         self._decisions[decision.run_id] = decision
 
     async def get(

@@ -5,6 +5,10 @@ from typing import Protocol
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
 
 
+class DuplicateEvaluationReleaseDecisionError(ValueError):
+    """Raised when a release decision already exists for an evaluation run."""
+
+
 class RetrievalEvaluationReleaseDecisionStore(Protocol):
     async def save(
         self,

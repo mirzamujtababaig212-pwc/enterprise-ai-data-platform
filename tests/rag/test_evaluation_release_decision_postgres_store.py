@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
@@ -140,21 +142,30 @@ def test_get_missing_decision_returns_none() -> None:
         engine.dispose()
 
 
-def test_save_replaces_existing_decision() -> None:
+def test_save_rejects_duplicate_decision_without_overwriting_existing() -> None:
     repository, engine = _repository()
 
     try:
+        from rag.evaluation.release_decision_store import (
+            DuplicateEvaluationReleaseDecisionError,
+        )
+
         first = _decision(passed=False)
         second = _decision(passed=True)
 
         asyncio.run(repository.save(first))
-        asyncio.run(repository.save(second))
+
+        with pytest.raises(
+            DuplicateEvaluationReleaseDecisionError,
+            match="evaluation release decision already exists: run-1",
+        ):
+            asyncio.run(repository.save(second))
 
         restored = asyncio.run(repository.get(first.run_id))
 
         assert restored is not None
-        assert restored.passed is True
-        assert restored.errors == ()
+        assert restored.passed is False
+        assert restored.errors == ("external: external quality gate failed",)
     finally:
         repository._session.close()
         engine.dispose()

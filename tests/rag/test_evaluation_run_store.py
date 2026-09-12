@@ -6,9 +6,19 @@ from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
+from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
+from rag.evaluation.external.release import (
+    ExternalEvaluationReleaseDecision,
+    ExternalEvaluationReleasePolicy,
+)
+from rag.evaluation.release import RetrievalEvaluationReleaseDecision
 from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.stores.in_memory import (
+    InMemoryRetrievalEvaluationReleaseDecisionStore,
     InMemoryRetrievalEvaluationRunStore,
+)
+from rag.evaluation.release_decision_store import (
+    DuplicateEvaluationReleaseDecisionError,
 )
 
 
@@ -61,6 +71,50 @@ def _run(
         evaluation=evaluation,
         quality_gate=quality_gate,
     )
+
+
+def _release_decision(
+    *,
+    run_id: str = "run-001",
+    passed: bool = True,
+) -> CompositeEvaluationReleaseDecision:
+    native = RetrievalEvaluationReleaseDecision(
+        run_id=run_id,
+        passed=True,
+        errors=(),
+    )
+    external = ExternalEvaluationReleaseDecision(
+        passed=passed,
+        errors=() if passed else ("external quality gate failed",),
+        policy=ExternalEvaluationReleasePolicy(
+            name="test-external-release",
+            required=True,
+        ),
+    )
+    return CompositeEvaluationReleaseDecision(
+        run_id=run_id,
+        native=native,
+        external=external,
+        passed=passed,
+        errors=() if passed else ("external: external quality gate failed",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_release_decision_store_rejects_duplicate_without_overwriting() -> None:
+    store = InMemoryRetrievalEvaluationReleaseDecisionStore()
+    first = _release_decision(passed=False)
+    second = _release_decision(passed=True)
+
+    await store.save(first)
+
+    with pytest.raises(
+        DuplicateEvaluationReleaseDecisionError,
+        match="evaluation release decision already exists: run-001",
+    ):
+        await store.save(second)
+
+    assert await store.get("run-001") == first
 
 
 @pytest.mark.asyncio
