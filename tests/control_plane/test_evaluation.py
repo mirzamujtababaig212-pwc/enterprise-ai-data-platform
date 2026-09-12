@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
+from app.control_plane.evaluation_application_service import EvaluationApplicationResult
+from app.control_plane.evaluation_service import EvaluationExecutionResult
 from app.control_plane.dependencies import (
     get_external_evaluation_release_policy,
     get_retrieval_evaluation_run_store,
@@ -902,3 +904,234 @@ def test_composite_release_missing_run_returns_404() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == ("evaluation run not found: missing-composite")
+
+
+def test_execute_evaluation_run_returns_created_execution_result() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    execution_service = Mock()
+    execution_service.execute = AsyncMock()
+
+    run = _run(
+        "api-run-001",
+        created_at=datetime.now(UTC),
+    )
+
+    decision = CompositeEvaluationReleaseGate.evaluate(
+        run=run,
+        native=RetrievalEvaluationReleaseGate.evaluate(run),
+        external=ExternalEvaluationReleaseGate.evaluate(
+            quality_gate=run.external_quality_gate,
+            policy=ExternalEvaluationReleasePolicy(
+                name="test-external-release",
+                required=False,
+            ),
+        ),
+    )
+
+    execution_service.execute.return_value = EvaluationExecutionResult(
+        run=run,
+        release_decision=decision,
+    )
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        return_value=EvaluationApplicationResult(
+            execution=execution_service.execute.return_value,
+        )
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+    _install_store(InMemoryRetrievalEvaluationRunStore())
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "api-run-001",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+                "min_precision_at_k": 0.8,
+                "min_mrr": 1.0,
+                "min_ndcg_at_k": 0.95,
+            },
+            "k": 3,
+        },
+    )
+
+    assert response.status_code == 201
+
+    payload = response.json()
+
+    assert payload["run"]["run_id"] == "api-run-001"
+    assert payload["run"]["dataset_name"] == "vehicle-retrieval"
+    assert payload["run"]["dataset_version"] == "v2"
+    assert payload["run"]["passed"] is True
+    assert payload["release_decision"]["run_id"] == "api-run-001"
+    assert payload["release_decision"]["passed"] is True
+
+    application_service.execute.assert_awaited_once()
+
+    call = application_service.execute.await_args
+    assert call.kwargs["dataset_name"] == "vehicle-retrieval"
+    assert call.kwargs["dataset_version"] == "v2"
+    assert call.kwargs["run_id"] == "api-run-001"
+    assert call.kwargs["k"] == 3
+    assert call.kwargs["baseline"] is None
+    assert call.kwargs["regression_policy"] is None
+
+
+def test_execute_evaluation_run_resolves_explicit_baseline() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    baseline = _run(
+        "baseline-api",
+        created_at=datetime.now(UTC),
+    )
+
+    store = InMemoryRetrievalEvaluationRunStore()
+
+    async def seed() -> None:
+        await store.save(baseline)
+
+    asyncio.run(seed())
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        side_effect=lambda **kwargs: EvaluationApplicationResult(
+            execution=EvaluationExecutionResult(
+                run=_run(
+                    "candidate-api",
+                    created_at=datetime.now(UTC),
+                ),
+                release_decision=CompositeEvaluationReleaseGate.evaluate(
+                    run=kwargs["baseline"],
+                    native=RetrievalEvaluationReleaseGate.evaluate(kwargs["baseline"]),
+                    external=ExternalEvaluationReleaseGate.evaluate(
+                        quality_gate=kwargs["baseline"].external_quality_gate,
+                        policy=ExternalEvaluationReleasePolicy(
+                            name="test-external-release",
+                            required=False,
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+    _install_store(store)
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "candidate-api",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+            },
+            "k": 3,
+            "baseline_run_id": "baseline-api",
+            "regression_policy": {
+                "name": "vehicle-regression-v1",
+                "max_recall_at_k_degradation": 0.05,
+            },
+        },
+    )
+
+    assert response.status_code == 201
+
+    call = application_service.execute.await_args
+
+    assert call.kwargs["baseline"] is baseline
+    assert call.kwargs["regression_policy"].name == "vehicle-regression-v1"
+    assert call.kwargs["regression_policy"].max_recall_at_k_degradation == 0.05
+
+
+def test_execute_evaluation_run_missing_baseline_returns_404() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    application_service = Mock()
+    application_service.execute = AsyncMock()
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+    _install_store(InMemoryRetrievalEvaluationRunStore())
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "candidate-api",
+            "evaluation_policy": {
+                "name": "vehicle-quality-v1",
+                "min_recall_at_k": 0.9,
+            },
+            "baseline_run_id": "missing-baseline",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == ("baseline evaluation run not found: missing-baseline")
+    application_service.execute.assert_not_awaited()
+
+
+def test_execute_evaluation_run_unknown_dataset_returns_422() -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from app.control_plane.dependencies import get_evaluation_application_service
+
+    application_service = Mock()
+    application_service.execute = AsyncMock(
+        side_effect=ValueError("evaluation dataset not found: name='does-not-exist', version='v1'")
+    )
+
+    app.dependency_overrides[get_evaluation_application_service] = lambda: application_service
+    _install_store(InMemoryRetrievalEvaluationRunStore())
+
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        headers=AUTH_HEADERS,
+        json={
+            "dataset_name": "does-not-exist",
+            "dataset_version": "v1",
+            "run_id": "run-invalid-dataset",
+            "evaluation_policy": {
+                "name": "test-policy",
+                "min_recall_at_k": 0.9,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "evaluation dataset not found" in response.json()["detail"]
+
+
+def test_execute_evaluation_run_requires_authentication() -> None:
+    response = client.post(
+        "/api/v1/evaluation/runs",
+        json={
+            "dataset_name": "vehicle-retrieval",
+            "dataset_version": "v2",
+            "run_id": "unauthorized-run",
+            "evaluation_policy": {
+                "name": "test-policy",
+                "min_recall_at_k": 0.9,
+            },
+        },
+    )
+
+    assert response.status_code == 401

@@ -25,6 +25,8 @@ from tools.rag.search import RAGSearchTool
 from app.config.settings import Settings
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from app.control_plane.persistence.database import get_db
+from app.control_plane.evaluation_application_service import EvaluationApplicationService
+from app.control_plane.evaluation_service import EvaluationExecutionService
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from rag.evaluation.stores.postgres import PostgreSQLRetrievalEvaluationRunStore
 from rag.evaluation.stores.release_decision import (
@@ -206,3 +208,11 @@ async def close_rag_vector_store() -> None:
 
     if close is not None:
         await close()
+
+
+def get_evaluation_application_service(
+    db: Session = Depends(get_db),
+) -> EvaluationApplicationService:
+    return EvaluationApplicationService(
+        execution_service=EvaluationExecutionService(session=db),
+    )
