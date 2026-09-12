@@ -19,3 +19,9 @@ __all__ = [
     "ExternalEvaluationResult",
     "ExternalEvaluationSample",
 ]
+
+from .release import (  # noqa: F401
+    ExternalEvaluationReleaseDecision,
+    ExternalEvaluationReleaseGate,
+    ExternalEvaluationReleasePolicy,
+)
