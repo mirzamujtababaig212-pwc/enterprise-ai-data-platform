@@ -8,6 +8,7 @@ import pytest
 from app.control_plane.evaluation_application_service import (
     EvaluationApplicationService,
     EvaluationBaselineNotFoundError,
+    EvaluationRegressionConfigurationError,
 )
 from app.control_plane.evaluation_service import EvaluationExecutionResult
 from rag.evaluation.composite_release import CompositeEvaluationReleaseDecision
@@ -169,6 +170,80 @@ async def test_execute_rejects_missing_explicit_baseline_before_evaluation() -> 
         )
 
     run_store.get.assert_awaited_once_with("missing-baseline")
+    execution_service.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_baseline_without_regression_policy() -> None:
+    execution_service = Mock()
+    execution_service.execute = AsyncMock()
+
+    run_store = Mock(spec=RetrievalEvaluationRunStore)
+    run_store.get = AsyncMock()
+
+    service = EvaluationApplicationService(
+        execution_service=execution_service,
+        run_store=run_store,
+    )
+
+    with pytest.raises(
+        EvaluationRegressionConfigurationError,
+        match="regression_policy must be provided",
+    ):
+        await service.execute(
+            dataset_name="vehicle-retrieval",
+            dataset_version="v2",
+            run_id="run-1",
+            created_at=datetime.now(UTC),
+            evaluation_policy=RetrievalEvaluationPolicy(
+                name="vehicle-retrieval-quality-test",
+                min_recall_at_k=1.0,
+                min_precision_at_k=0.8,
+                min_mrr=1.0,
+                min_ndcg_at_k=0.95,
+            ),
+            external_release_policy=ExternalEvaluationReleasePolicy(),
+            baseline_run_id="baseline-1",
+        )
+
+    run_store.get.assert_not_awaited()
+    execution_service.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_regression_policy_without_baseline() -> None:
+    execution_service = Mock()
+    execution_service.execute = AsyncMock()
+
+    run_store = Mock(spec=RetrievalEvaluationRunStore)
+    run_store.get = AsyncMock()
+
+    service = EvaluationApplicationService(
+        execution_service=execution_service,
+        run_store=run_store,
+    )
+
+    with pytest.raises(
+        EvaluationRegressionConfigurationError,
+        match="baseline_run_id must be provided",
+    ):
+        await service.execute(
+            dataset_name="vehicle-retrieval",
+            dataset_version="v2",
+            run_id="run-1",
+            created_at=datetime.now(UTC),
+            evaluation_policy=RetrievalEvaluationPolicy(
+                name="vehicle-retrieval-quality-test",
+                min_recall_at_k=1.0,
+                min_precision_at_k=0.8,
+                min_mrr=1.0,
+                min_ndcg_at_k=0.95,
+            ),
+            external_release_policy=ExternalEvaluationReleasePolicy(),
+            regression_policy=Mock(),
+        )
+
+    run_store.get.assert_not_awaited()
     execution_service.execute.assert_not_awaited()
 
 

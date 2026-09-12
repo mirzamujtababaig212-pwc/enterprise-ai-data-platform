@@ -25,6 +25,10 @@ class EvaluationBaselineNotFoundError(ValueError):
     """Raised when an explicitly requested evaluation baseline is missing."""
 
 
+class EvaluationRegressionConfigurationError(ValueError):
+    """Raised when baseline and regression configuration are inconsistent."""
+
+
 @dataclass(frozen=True)
 class EvaluationApplicationResult:
     """Application-level evaluation execution result."""
@@ -69,13 +73,22 @@ class EvaluationApplicationService:
         external_release_policy: ExternalEvaluationReleasePolicy,
         k: int = 5,
         min_relevance_score: float | None = None,
-        baseline: RetrievalEvaluationRun | None = None,
         baseline_run_id: str | None = None,
         baselines: Iterable[RetrievalEvaluationRun] | None = None,
         regression_policy: RetrievalRegressionPolicy | None = None,
         external_evaluations: tuple[ExternalEvaluationResult, ...] = (),
         external_policy: ExternalEvaluationPolicy | None = None,
     ) -> EvaluationApplicationResult:
+        if baseline_run_id is not None and regression_policy is None:
+            raise EvaluationRegressionConfigurationError(
+                "regression_policy must be provided when baseline_run_id is provided"
+            )
+
+        if baseline_run_id is None and regression_policy is not None:
+            raise EvaluationRegressionConfigurationError(
+                "baseline_run_id must be provided when regression_policy is provided"
+            )
+
         baseline = None
         if baseline_run_id is not None:
             baseline = await self._run_store.get(baseline_run_id)
