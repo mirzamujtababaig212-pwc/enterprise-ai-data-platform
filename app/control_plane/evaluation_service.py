@@ -24,6 +24,7 @@ from rag.evaluation.stores.release_decision import (
 )
 from rag.evaluation.workflow import RetrievalEvaluationWorkflow
 from typing import Iterable
+from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
 
 
 @dataclass(frozen=True)
@@ -49,12 +50,14 @@ class EvaluationExecutionService:
         session: Session,
         run_store: PostgreSQLRetrievalEvaluationRunStore | None = None,
         release_decision_store: PostgreSQLRetrievalEvaluationReleaseDecisionStore | None = None,
+        generation_evaluation_workflow: RAGGenerationEvaluationWorkflow | None = None,
     ) -> None:
         self._session = session
         self._run_store = run_store or PostgreSQLRetrievalEvaluationRunStore(session)
         self._release_decision_store = (
             release_decision_store or PostgreSQLRetrievalEvaluationReleaseDecisionStore(session)
         )
+        self._generation_evaluation_workflow = generation_evaluation_workflow
 
     async def execute(
         self,
@@ -118,6 +121,16 @@ class EvaluationExecutionService:
 
         evaluation_result = await workflow.run(dataset)
 
+        generated_external_evaluations = list(external_evaluations)
+
+        if self._generation_evaluation_workflow is not None:
+            generated_external_evaluations.append(
+                await self._generation_evaluation_workflow.evaluate(
+                    dataset.cases,
+                    retriever=retriever,
+                )
+            )
+
         workflow_result = CompositeEvaluationWorkflow.run(
             result=evaluation_result,
             run_id=run_id,
@@ -127,7 +140,7 @@ class EvaluationExecutionService:
             baseline_run_id=baseline_run_id,
             baselines=baselines,
             regression_policy=regression_policy,
-            external_evaluations=external_evaluations,
+            external_evaluations=tuple(generated_external_evaluations),
             external_policy=external_policy,
         )
 

@@ -1,3 +1,7 @@
+from rag.evaluation.external.workflow import (
+    ExternalEvaluationEvaluator,
+    RAGGenerationEvaluationWorkflow,
+)
 from .models import (
     ExternalEvaluationResult,
     ExternalEvaluationSample,
@@ -12,6 +16,8 @@ from .quality_gate import (
 )
 
 __all__ = [
+    "ExternalEvaluationEvaluator",
+    "RAGGenerationEvaluationWorkflow",
     "ExternalEvaluationMetricPolicy",
     "ExternalEvaluationPolicy",
     "ExternalEvaluationQualityGate",

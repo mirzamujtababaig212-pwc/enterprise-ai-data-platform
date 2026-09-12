@@ -198,3 +198,68 @@ async def test_ragas_faithfulness_uses_gateway_llm() -> None:
     assert result.metrics["faithfulness"] == 1.0
 
     assert len(gateway.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_rag_generation_workflow_uses_gateway_backed_ragas_faithfulness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from rag.evaluation.external.ragas.adapter import RagasFaithfulnessAdapter
+    from rag.evaluation.external.ragas.gateway_llm import GatewayRagasLLM
+    from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
+    from rag.evaluation.models import RetrievalEvaluationCase
+
+    gateway = FaithfulnessGateway()
+    llm = GatewayRagasLLM(gateway)  # type: ignore[arg-type]
+    evaluator = RagasFaithfulnessAdapter(llm=llm)
+
+    retriever = MagicMock()
+
+    rag_query_service = MagicMock()
+    rag_query_service.query = AsyncMock(
+        return_value=MagicMock(
+            answer=("An electric vehicle is powered by electricity stored " "in a battery pack."),
+            sources=(
+                MagicMock(
+                    content=(
+                        "Electric vehicles are powered by electricity " "stored in a battery pack."
+                    )
+                ),
+            ),
+        )
+    )
+
+    monkeypatch.setattr(
+        "rag.evaluation.external.workflow.RAGQueryService",
+        MagicMock(return_value=rag_query_service),
+    )
+
+    workflow = RAGGenerationEvaluationWorkflow(
+        chat_service=MagicMock(),
+        evaluator=evaluator,
+    )
+
+    result = await workflow.evaluate(
+        (
+            RetrievalEvaluationCase(
+                query="What powers an electric vehicle?",
+                relevant_chunk_ids=("vehicle-electric-powertrain",),
+            ),
+        ),
+        retriever=retriever,
+    )
+
+    assert result.provider == "ragas"
+    assert result.evaluator == "faithfulness"
+    assert result.evaluated_samples == 1
+    assert result.metrics["faithfulness"] == 1.0
+
+    rag_query_service.query.assert_awaited_once_with(
+        "What powers an electric vehicle?",
+        top_k=5,
+        min_score=None,
+    )
+
+    assert len(gateway.calls) == 2

@@ -440,3 +440,79 @@ async def test_execute_rejects_unknown_dataset_before_persistence() -> None:
     run_store.save.assert_not_awaited()
     release_store.save.assert_not_awaited()
     session.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_runs_optional_generation_evaluation_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+
+    run_store = Mock()
+    run_store.get = AsyncMock(return_value=None)
+    run_store.save = AsyncMock()
+
+    release_store = Mock()
+    release_store.save = AsyncMock()
+
+    definition = _dataset_definition()
+
+    dataset = definition.build_dataset.return_value
+    dataset.cases = (Mock(query="What powers an electric vehicle?"),)
+
+    retriever = definition.build_retriever.return_value
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.EvaluationDatasetRegistry.get",
+        Mock(return_value=definition),
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.RetrievalEvaluationWorkflow.run",
+        AsyncMock(return_value=Mock()),
+    )
+
+    generation_workflow = Mock()
+    generation_workflow.evaluate = AsyncMock(
+        return_value=Mock(
+            provider="ragas",
+            evaluator="faithfulness",
+        )
+    )
+
+    composite_result = _workflow_result()
+
+    composite_workflow_run = Mock(return_value=composite_result)
+    monkeypatch.setattr(
+        "app.control_plane.evaluation_service.CompositeEvaluationWorkflow.run",
+        composite_workflow_run,
+    )
+
+    service = EvaluationExecutionService(
+        session=session,
+        run_store=run_store,
+        release_decision_store=release_store,
+        generation_evaluation_workflow=generation_workflow,
+    )
+
+    await service.execute(
+        dataset_name="vehicle-retrieval",
+        dataset_version="v2",
+        run_id="run-1",
+        created_at=datetime.now(UTC),
+        evaluation_policy=_evaluation_policy(),
+        external_release_policy=ExternalEvaluationReleasePolicy(),
+    )
+
+    generation_workflow.evaluate.assert_awaited_once_with(
+        dataset.cases,
+        retriever=retriever,
+    )
+
+    composite_workflow_run.assert_called_once()
+
+    external_evaluations = composite_workflow_run.call_args.kwargs["external_evaluations"]
+
+    assert len(external_evaluations) == 1
+    assert external_evaluations[0].provider == "ragas"
+    assert external_evaluations[0].evaluator == "faithfulness"
