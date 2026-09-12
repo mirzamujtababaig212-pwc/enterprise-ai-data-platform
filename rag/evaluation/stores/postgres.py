@@ -14,7 +14,12 @@ from rag.evaluation.comparison.run_comparator import (
     RetrievalEvaluationMetricStatus,
     RetrievalEvaluationRunComparison,
 )
-from rag.evaluation.external import ExternalEvaluationResult
+from rag.evaluation.external import (
+    ExternalEvaluationMetricPolicy,
+    ExternalEvaluationPolicy,
+    ExternalEvaluationQualityGateResult,
+    ExternalEvaluationResult,
+)
 from rag.evaluation.lineage import RetrievalEvaluationLineage
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
@@ -61,6 +66,7 @@ class PostgreSQLRetrievalEvaluationRunStore(RetrievalEvaluationRunStore):
                 record.quality_gate = payload["quality_gate"]
                 record.regression = payload["regression"]
                 record.external_evaluations = payload["external_evaluations"]
+                record.external_quality_gate = payload["external_quality_gate"]
 
             self._session.commit()
 
@@ -130,6 +136,13 @@ def _serialize_run(
 
     regression = _serialize_regression(run.regression) if run.regression is not None else None
     external_evaluations = [result.as_dict() for result in run.external_evaluations]
+    if run.external_quality_gate is not None:
+        external_quality_gate = run.external_quality_gate.as_dict()
+        external_quality_gate["quality_gate_policy_data"] = (
+            run.external_quality_gate.policy.as_dict()
+        )
+    else:
+        external_quality_gate = None
 
     return {
         "run_id": run.run_id,
@@ -142,6 +155,7 @@ def _serialize_run(
         "quality_gate": quality_gate,
         "regression": regression,
         "external_evaluations": external_evaluations,
+        "external_quality_gate": external_quality_gate,
     }
 
 
@@ -235,6 +249,8 @@ def _deserialize_run(
         for data in (record.external_evaluations or [])
     )
 
+    external_quality_gate = _deserialize_external_quality_gate(record.external_quality_gate)
+
     run = RetrievalEvaluationRun(
         run_id=record.run_id,
         created_at=_ensure_aware(record.created_at),
@@ -242,6 +258,7 @@ def _deserialize_run(
         evaluation=evaluation,
         quality_gate=quality_gate,
         external_evaluations=external_evaluations,
+        external_quality_gate=external_quality_gate,
     )
 
     if record.regression is None:
@@ -257,6 +274,37 @@ def _deserialize_run(
         quality_gate=run.quality_gate,
         regression=regression,
         external_evaluations=run.external_evaluations,
+        external_quality_gate=run.external_quality_gate,
+    )
+
+
+def _deserialize_external_quality_gate(
+    data: dict | None,
+) -> ExternalEvaluationQualityGateResult | None:
+    if data is None:
+        return None
+
+    policy_data = data["quality_gate_policy_data"]
+    policy = ExternalEvaluationPolicy(
+        name=policy_data["name"],
+        metrics=tuple(
+            ExternalEvaluationMetricPolicy(
+                provider=metric["provider"],
+                evaluator=metric["evaluator"],
+                metric_name=metric["metric_name"],
+                minimum_value=metric["minimum_value"],
+                maximum_value=metric["maximum_value"],
+                required=metric["required"],
+            )
+            for metric in policy_data["metrics"]
+        ),
+    )
+
+    return ExternalEvaluationQualityGateResult(
+        passed=data["quality_gate_passed"],
+        errors=tuple(data["quality_gate_errors"]),
+        metrics=dict(data["quality_gate_metrics"]),
+        policy=policy,
     )
 
 

@@ -10,7 +10,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.control_plane.persistence.models import Base, RetrievalEvaluationRunRecord
-from rag.evaluation.external import ExternalEvaluationResult
+from rag.evaluation.external import (
+    ExternalEvaluationMetricPolicy,
+    ExternalEvaluationPolicy,
+    ExternalEvaluationResult,
+)
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGate
 from rag.evaluation.run import RetrievalEvaluationRun
@@ -88,7 +92,7 @@ def _run(
         embedding_identity=EMBEDDING_IDENTITY,
     )
 
-    return RetrievalEvaluationRun(
+    run = RetrievalEvaluationRun(
         run_id=run_id,
         created_at=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
         lineage=lineage,
@@ -104,6 +108,20 @@ def _run(
             ),
         ),
     )
+
+    external_policy = ExternalEvaluationPolicy(
+        name="ragas-v1",
+        metrics=(
+            ExternalEvaluationMetricPolicy(
+                provider="ragas",
+                evaluator="faithfulness",
+                metric_name="faithfulness",
+                minimum_value=0.90,
+            ),
+        ),
+    )
+
+    return run.with_external_quality_gate(external_policy)
 
 
 def _repository():
@@ -162,6 +180,51 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
         assert restored.quality_gate.errors == run.quality_gate.errors
         assert restored.quality_gate.policy == run.quality_gate.policy
         assert restored.external_evaluations == run.external_evaluations
+
+        assert restored.external_quality_gate is not None
+        assert restored.external_quality_gate.passed is True
+        assert restored.external_quality_gate.errors == ()
+        assert restored.external_quality_gate.metrics == {
+            "ragas/faithfulness/faithfulness": 0.91,
+        }
+        assert restored.external_quality_gate.policy == (run.external_quality_gate.policy)
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_save_and_get_without_external_quality_gate_preserves_none() -> None:
+    repository, engine = _repository()
+
+    try:
+        run = _run().with_external_quality_gate(
+            ExternalEvaluationPolicy(
+                name="ragas-v1",
+                metrics=(
+                    ExternalEvaluationMetricPolicy(
+                        provider="ragas",
+                        evaluator="faithfulness",
+                        metric_name="faithfulness",
+                        minimum_value=0.90,
+                    ),
+                ),
+            )
+        )
+
+        run_without_gate = RetrievalEvaluationRun(
+            run_id="run-without-external-gate",
+            created_at=run.created_at,
+            lineage=run.lineage,
+            evaluation=run.evaluation,
+            quality_gate=run.quality_gate,
+            external_evaluations=run.external_evaluations,
+        )
+
+        asyncio.run(repository.save(run_without_gate))
+        restored = asyncio.run(repository.get(run_without_gate.run_id))
+
+        assert restored is not None
+        assert restored.external_quality_gate is None
     finally:
         repository._session.close()
         engine.dispose()
@@ -225,6 +288,28 @@ def test_persisted_evaluation_excludes_query_payload() -> None:
                 "metadata": {},
             }
         ]
+
+        assert record.external_quality_gate == {
+            "quality_gate_passed": True,
+            "quality_gate_policy": "ragas-v1",
+            "quality_gate_policy_data": {
+                "name": "ragas-v1",
+                "metrics": [
+                    {
+                        "provider": "ragas",
+                        "evaluator": "faithfulness",
+                        "metric_name": "faithfulness",
+                        "minimum_value": 0.90,
+                        "maximum_value": None,
+                        "required": True,
+                    }
+                ],
+            },
+            "quality_gate_errors": [],
+            "quality_gate_metrics": {
+                "ragas/faithfulness/faithfulness": 0.91,
+            },
+        }
     finally:
         repository._session.close()
         engine.dispose()
@@ -309,6 +394,14 @@ def test_postgresql_save_and_get_round_trip() -> None:
         assert restored.quality_gate.errors == run.quality_gate.errors
         assert restored.quality_gate.policy == run.quality_gate.policy
         assert restored.external_evaluations == run.external_evaluations
+
+        assert restored.external_quality_gate is not None
+        assert restored.external_quality_gate.passed is True
+        assert restored.external_quality_gate.errors == ()
+        assert restored.external_quality_gate.metrics == {
+            "ragas/faithfulness/faithfulness": 0.91,
+        }
+        assert restored.external_quality_gate.policy == (run.external_quality_gate.policy)
     finally:
         if repository is not None:
             repository._session.execute(
