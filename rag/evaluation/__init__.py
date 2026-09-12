@@ -53,3 +53,8 @@ __all__ = [
     "RetrievalEvaluationReleaseGate",
     "RetrievalEvaluationRun",
 ]
+
+from .composite_release import (  # noqa: F401
+    CompositeEvaluationReleaseDecision,
+    CompositeEvaluationReleaseGate,
+)
