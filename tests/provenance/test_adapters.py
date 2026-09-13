@@ -136,3 +136,49 @@ def test_fabric_source_ref_requires_table_identity():
         "object_name": "vehicle_events",
         "namespace": "Vehicle Workspace.Vehicle Lakehouse.dbo",
     }
+
+
+def test_s3_path_projects_to_source_ref():
+    from common.provenance import s3_source_ref
+
+    assert s3_source_ref("s3://enterprise-data-ai-platform/bronze/vehicle_events").to_dict() == {
+        "platform": "aws",
+        "object_type": "s3_path",
+        "object_name": "s3://enterprise-data-ai-platform/bronze/vehicle_events",
+        "namespace": "s3://enterprise-data-ai-platform",
+    }
+
+
+def test_s3_path_normalizes_trailing_slash():
+    from common.provenance import s3_source_ref
+
+    source_ref = s3_source_ref("s3://enterprise-data-ai-platform/bronze/vehicle_events/")
+
+    assert source_ref.object_name == ("s3://enterprise-data-ai-platform/bronze/vehicle_events")
+
+
+def test_s3_path_rejects_non_s3_uri():
+    import pytest
+
+    from common.provenance import s3_source_ref
+
+    with pytest.raises(ValueError, match="s3://"):
+        s3_source_ref("https://example.com/vehicle_events")
+
+
+def test_s3_path_rejects_bucket_only_uri():
+    import pytest
+
+    from common.provenance import s3_source_ref
+
+    with pytest.raises(ValueError, match="bucket and object path"):
+        s3_source_ref("s3://enterprise-data-ai-platform")
+
+
+def test_s3_path_rejects_empty_path():
+    import pytest
+
+    from common.provenance import s3_source_ref
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        s3_source_ref("   ")

@@ -56,3 +56,35 @@ def fabric_source_ref(
         object_id=metadata.table_id,
         namespace=".".join(namespace_parts) or None,
     )
+
+
+def s3_source_ref(
+    path: str,
+) -> EnterpriseSourceRef:
+    """Project an S3 dataset path into the canonical source identity."""
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("S3 path cannot be empty.")
+
+    path = path.strip()
+
+    if not path.startswith("s3://"):
+        raise ValueError("S3 path must start with s3://")
+
+    uri = path.rstrip("/")
+
+    remainder = uri[len("s3://") :]
+
+    if not remainder or "/" not in remainder:
+        raise ValueError("S3 path must include a bucket and object path.")
+
+    bucket, object_path = remainder.split("/", 1)
+
+    if not bucket or not object_path:
+        raise ValueError("S3 path must include a bucket and object path.")
+
+    return EnterpriseSourceRef(
+        platform="aws",
+        object_type="s3_path",
+        object_name=uri,
+        namespace=f"s3://{bucket}",
+    )
