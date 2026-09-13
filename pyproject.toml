@@ -48,6 +48,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.58b0",
     "structlog>=25.4",
     "qdrant-client==1.16.2",
+    "faiss-cpu==1.15.0",
     "openai>=2.53,<3",
 ]
 

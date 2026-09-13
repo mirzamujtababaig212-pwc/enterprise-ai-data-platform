@@ -2,6 +2,7 @@ import pytest
 
 from common.config.settings import Settings
 from rag.stores.factory import VectorStoreFactory
+from rag.stores.faiss import FAISSVectorStore
 from rag.stores.in_memory import InMemoryVectorStore
 from rag.stores.qdrant import QdrantVectorStore
 
@@ -50,3 +51,15 @@ def test_factory_rejects_unknown_backend(monkeypatch) -> None:
         match="Unsupported vector-store backend",
     ):
         VectorStoreFactory.create()
+
+
+def test_factory_creates_faiss(monkeypatch) -> None:
+    monkeypatch.setattr(
+        Settings.vector_store,
+        "BACKEND",
+        "faiss",
+    )
+
+    store = VectorStoreFactory.create()
+
+    assert isinstance(store, FAISSVectorStore)

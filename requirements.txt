@@ -108,3 +108,4 @@ torch==2.14.0
 
 anthropic==1.4.0
 pgvector>=0.3.6,<1.0
+faiss-cpu==1.15.0
