@@ -1,651 +1,349 @@
-from __future__ import annotations
-
-import math
-import subprocess
-import sys
-from pathlib import Path
-
-from common.logging.logger import get_logger
-from common.spark.spark_builder import SparkSessionBuilder
-
-logger = get_logger(__name__)
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-BRONZE_TABLE = "bronze.vehicle_events"
-SILVER_TABLE = "silver.vehicle_events"
-GOLD_TABLE = "gold.vehicle_metrics"
-
-
-EXPECTED_SILVER_COLUMNS = [
-    "vehicle_id",
-    "event_time",
-    "speed",
-]
-
-EXPECTED_GOLD_COLUMNS = [
-    "vehicle_id",
-    "event_count",
-    "avg_speed",
-    "min_speed",
-    "max_speed",
-    "first_event_time",
-    "last_event_time",
-]
-
-
-EXPECTED_GOLD = {
-    "V001": {
-        "event_count": 3,
-        "avg_speed": 48.166666666666664,
-        "min_speed": 45.5,
-        "max_speed": 51.8,
-    },
-    "V002": {
-        "event_count": 3,
-        "avg_speed": 34.733333333333334,
-        "min_speed": 32.1,
-        "max_speed": 36.4,
-    },
-    "V003": {
-        "event_count": 3,
-        "avg_speed": 61.5,
-        "min_speed": 59.8,
-        "max_speed": 63.5,
-    },
-    "V004": {
-        "event_count": 3,
-        "avg_speed": 25.03333333333333,
-        "min_speed": 22.4,
-        "max_speed": 27.1,
-    },
-}
-
-
-FLOAT_TOLERANCE = 1e-9
-
-
-def run_pipeline(
-    pipeline_path: Path,
-    pipeline_name: str,
-) -> None:
-
-    print("\n" + "=" * 80)
-    print(f"RUNNING {pipeline_name}")
-    print("=" * 80)
-
-    command = [
-        sys.executable,
-        str(pipeline_path),
-    ]
-
-    logger.info(
-        "Executing pipeline=%s",
-        pipeline_path,
-    )
-
-    result = subprocess.run(
-        command,
-        cwd=PROJECT_ROOT,
-        text=True,
-        capture_output=True,
-    )
-
-    print("\n--- PIPELINE STDOUT ---")
-    print(result.stdout)
-
-    if result.stderr:
-        print("\n--- PIPELINE STDERR ---")
-        print(result.stderr)
-
-    if result.returncode != 0:
-
-        raise RuntimeError(f"{pipeline_name} failed with exit code " f"{result.returncode}")
-
-    print(f"{pipeline_name} completed successfully.")
-
-
-def assert_equal(
-    actual,
-    expected,
-    message: str,
-) -> None:
-
-    if actual != expected:
-
-        raise AssertionError(f"{message}: " f"expected={expected}, " f"actual={actual}")
-
-
-def assert_float_equal(
-    actual: float,
-    expected: float,
-    message: str,
-) -> None:
-
-    if not math.isclose(
-        actual,
-        expected,
-        rel_tol=FLOAT_TOLERANCE,
-        abs_tol=FLOAT_TOLERANCE,
-    ):
-
-        raise AssertionError(f"{message}: " f"expected={expected}, " f"actual={actual}")
-
-
-def validate_silver(
-    spark,
-) -> None:
-
-    print("\n" + "=" * 80)
-    print("VALIDATING SILVER")
-    print("=" * 80)
-
-    silver_df = spark.table(SILVER_TABLE)
-
-    # ------------------------------------------------------------------
-    # Schema
-    # ------------------------------------------------------------------
-
-    actual_columns = silver_df.columns
-
-    for column in EXPECTED_SILVER_COLUMNS:
-
-        if column not in actual_columns:
-
-            raise AssertionError(f"Silver missing required column: {column}")
-
-    print("Silver required columns: PASS")
-
-    # ------------------------------------------------------------------
-    # Row count
-    # ------------------------------------------------------------------
-
-    row_count = silver_df.count()
-
-    assert_equal(
-        row_count,
-        12,
-        "Silver row count",
-    )
-
-    print("Silver row count = 12: PASS")
-
-    # ------------------------------------------------------------------
-    # Null vehicle IDs
-    # ------------------------------------------------------------------
-
-    null_vehicle_ids = silver_df.filter(silver_df.vehicle_id.isNull()).count()
-
-    assert_equal(
-        null_vehicle_ids,
-        0,
-        "Silver null vehicle IDs",
-    )
-
-    print("Silver null vehicle IDs = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Null event timestamps
-    # ------------------------------------------------------------------
-
-    null_event_times = silver_df.filter(silver_df.event_time.isNull()).count()
-
-    assert_equal(
-        null_event_times,
-        0,
-        "Silver null event times",
-    )
-
-    print("Silver null event times = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Null speeds
-    # ------------------------------------------------------------------
-
-    null_speeds = silver_df.filter(silver_df.speed.isNull()).count()
-
-    assert_equal(
-        null_speeds,
-        0,
-        "Silver null speeds",
-    )
-
-    print("Silver null speeds = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Negative speeds
-    # ------------------------------------------------------------------
-
-    negative_speeds = silver_df.filter(silver_df.speed < 0).count()
-
-    assert_equal(
-        negative_speeds,
-        0,
-        "Silver negative speeds",
-    )
-
-    print("Silver negative speeds = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Duplicate vehicle/time keys
-    # ------------------------------------------------------------------
-
-    duplicate_keys = (
-        silver_df.groupBy(
-            "vehicle_id",
+from pyspark.sql import functions as F
+
+from common.pipelines.gold_pipeline import GoldPipeline
+from common.factories.validator_factory import ValidatorFactory
+from common.transformers.silver_transformer import SilverTransformer
+from spark.transformations.silver_to_gold_transformer import SilverToGoldTransformer
+from common.pipelines.pipeline_runtime_config import PipelineRuntimeConfig
+from common.readers.delta_reader import DeltaReader
+from common.validation.noop_validator import NoOpValidator
+from common.writers.delta_writer import DeltaWriter
+
+
+def test_vehicle_pipeline_bronze_to_silver_to_gold(spark, temp_dir):
+    """
+    Validate the deterministic Bronze -> Silver -> Gold medallion path
+    using isolated temporary Delta tables.
+
+    This intentionally does not execute Kafka or persistent developer tables.
+    """
+
+    bronze_df = (
+        spark.createDataFrame(
+            [
+                (
+                    "V001",
+                    "bronze",
+                    0,
+                    0,
+                    "2026-08-12T00:00:00",
+                    '{"vehicle_id":"V001"}',
+                    "V001",
+                    "2026-08-12T00:00:00",
+                    17.5,
+                    78.2,
+                    45.5,
+                    1200,
+                    72.0,
+                    85.0,
+                    88.0,
+                    3,
+                ),
+                (
+                    "V001",
+                    "bronze",
+                    0,
+                    1,
+                    "2026-08-12T00:01:00",
+                    '{"vehicle_id":"V001"}',
+                    "V001",
+                    "2026-08-12T00:01:00",
+                    17.6,
+                    78.3,
+                    47.0,
+                    1210,
+                    71.5,
+                    84.8,
+                    88.5,
+                    3,
+                ),
+                (
+                    "V001",
+                    "bronze",
+                    0,
+                    2,
+                    "2026-08-12T00:02:00",
+                    '{"vehicle_id":"V001"}',
+                    "V001",
+                    "2026-08-12T00:02:00",
+                    17.7,
+                    78.4,
+                    51.8,
+                    1220,
+                    71.0,
+                    84.5,
+                    89.0,
+                    4,
+                ),
+                (
+                    "V002",
+                    "bronze",
+                    0,
+                    3,
+                    "2026-08-12T00:00:00",
+                    '{"vehicle_id":"V002"}',
+                    "V002",
+                    "2026-08-12T00:00:00",
+                    17.8,
+                    78.5,
+                    32.1,
+                    1100,
+                    68.0,
+                    83.0,
+                    87.0,
+                    3,
+                ),
+                (
+                    "V002",
+                    "bronze",
+                    0,
+                    4,
+                    "2026-08-12T00:01:00",
+                    '{"vehicle_id":"V002"}',
+                    "V002",
+                    "2026-08-12T00:01:00",
+                    17.9,
+                    78.6,
+                    36.4,
+                    1110,
+                    67.5,
+                    82.8,
+                    87.5,
+                    3,
+                ),
+                (
+                    "V003",
+                    "bronze",
+                    0,
+                    5,
+                    "2026-08-12T00:00:00",
+                    '{"vehicle_id":"V003"}',
+                    "V003",
+                    "2026-08-12T00:00:00",
+                    18.0,
+                    78.7,
+                    59.8,
+                    1300,
+                    55.0,
+                    81.0,
+                    90.0,
+                    4,
+                ),
+                (
+                    "V003",
+                    "bronze",
+                    0,
+                    6,
+                    "2026-08-12T00:01:00",
+                    '{"vehicle_id":"V003"}',
+                    "V003",
+                    "2026-08-12T00:01:00",
+                    18.1,
+                    78.8,
+                    61.2,
+                    1310,
+                    54.5,
+                    80.8,
+                    90.5,
+                    4,
+                ),
+                (
+                    "V003",
+                    "bronze",
+                    0,
+                    7,
+                    "2026-08-12T00:02:00",
+                    '{"vehicle_id":"V003"}',
+                    "V003",
+                    "2026-08-12T00:02:00",
+                    18.2,
+                    78.9,
+                    63.5,
+                    1320,
+                    54.0,
+                    80.5,
+                    91.0,
+                    5,
+                ),
+                (
+                    "V004",
+                    "bronze",
+                    0,
+                    8,
+                    "2026-08-12T00:00:00",
+                    '{"vehicle_id":"V004"}',
+                    "V004",
+                    "2026-08-12T00:00:00",
+                    18.3,
+                    79.0,
+                    22.4,
+                    900,
+                    80.0,
+                    86.0,
+                    85.0,
+                    2,
+                ),
+                (
+                    "V004",
+                    "bronze",
+                    0,
+                    9,
+                    "2026-08-12T00:01:00",
+                    '{"vehicle_id":"V004"}',
+                    "V004",
+                    "2026-08-12T00:01:00",
+                    18.4,
+                    79.1,
+                    25.6,
+                    910,
+                    79.5,
+                    85.8,
+                    85.5,
+                    2,
+                ),
+                (
+                    "V004",
+                    "bronze",
+                    0,
+                    10,
+                    "2026-08-12T00:02:00",
+                    '{"vehicle_id":"V004"}',
+                    "V004",
+                    "2026-08-12T00:02:00",
+                    18.5,
+                    79.2,
+                    27.1,
+                    920,
+                    79.0,
+                    85.5,
+                    86.0,
+                    3,
+                ),
+            ],
+            [
+                "kafka_key",
+                "kafka_topic",
+                "kafka_partition",
+                "kafka_offset",
+                "kafka_timestamp",
+                "raw_value",
+                "vehicle_id",
+                "event_time",
+                "latitude",
+                "longitude",
+                "speed",
+                "rpm",
+                "fuel_level",
+                "battery",
+                "engine_temperature",
+                "gear",
+            ],
+        )
+        .withColumn(
             "event_time",
+            F.to_timestamp("event_time"),
         )
-        .count()
-        .filter("count > 1")
-        .count()
+        .withColumn(
+            "kafka_timestamp",
+            F.to_timestamp("kafka_timestamp"),
+        )
+        .withColumn(
+            "ingestion_time",
+            F.to_timestamp("kafka_timestamp"),
+        )
     )
 
-    assert_equal(
-        duplicate_keys,
-        0,
-        "Silver duplicate vehicle/event-time keys",
-    )
+    # The fixture is already Bronze-shaped, so exercise the actual Silver
+    # transformation and production Silver validator contract.
+    silver_df = SilverTransformer.transform(bronze_df)
 
-    print("Silver duplicate vehicle/event-time keys = 0: PASS")
+    assert silver_df.count() == 11
 
-    # ------------------------------------------------------------------
-    # Test data check
-    # ------------------------------------------------------------------
-
-    test_rows = silver_df.filter(silver_df.vehicle_id == "TEST-001").count()
-
-    assert_equal(
-        test_rows,
-        0,
-        "Silver TEST-001 rows",
-    )
-
-    print("Silver TEST-001 rows = 0: PASS")
-
-    print("\nSILVER VALIDATION: PASSED")
-
-
-def collect_gold(
-    spark,
-) -> dict[str, dict[str, float]]:
-
-    gold_df = spark.table(GOLD_TABLE)
-
-    rows = gold_df.orderBy("vehicle_id").collect()
-
-    result: dict[str, dict[str, float]] = {}
-
-    for row in rows:
-
-        result[row["vehicle_id"]] = {
-            "event_count": row["event_count"],
-            "avg_speed": row["avg_speed"],
-            "min_speed": row["min_speed"],
-            "max_speed": row["max_speed"],
+    validator = ValidatorFactory.create(
+        {
+            "pipeline": {"class": "silver"},
+            "validator": {"type": "default"},
         }
-
-    return result
-
-
-def validate_gold(
-    spark,
-) -> None:
-
-    print("\n" + "=" * 80)
-    print("VALIDATING GOLD")
-    print("=" * 80)
-
-    gold_df = spark.table(GOLD_TABLE)
-
-    # ------------------------------------------------------------------
-    # Schema
-    # ------------------------------------------------------------------
-
-    actual_columns = gold_df.columns
-
-    for column in EXPECTED_GOLD_COLUMNS:
-
-        if column not in actual_columns:
-
-            raise AssertionError(f"Gold missing required column: {column}")
-
-    print("Gold required columns: PASS")
-
-    # ------------------------------------------------------------------
-    # Row count
-    # ------------------------------------------------------------------
-
-    row_count = gold_df.count()
-
-    assert_equal(
-        row_count,
-        4,
-        "Gold row count",
     )
 
-    print("Gold row count = 4: PASS")
+    valid_silver, invalid_silver = validator.validate(silver_df)
 
-    # ------------------------------------------------------------------
-    # Null checks
-    # ------------------------------------------------------------------
+    assert invalid_silver.count() == 0
+    assert valid_silver.count() == 11
 
-    for column in EXPECTED_GOLD_COLUMNS:
+    silver_path = f"{temp_dir}/silver/vehicle_events"
+    gold_path = f"{temp_dir}/gold/vehicle_metrics"
 
-        null_count = gold_df.filter(gold_df[column].isNull()).count()
+    silver_table = "silver.test_vehicle_pipeline_events"
+    gold_table = "gold.test_vehicle_pipeline_metrics"
 
-        assert_equal(
-            null_count,
-            0,
-            f"Gold null values in {column}",
-        )
+    DeltaWriter(
+        table=silver_table,
+        path=silver_path,
+        mode="overwrite",
+    ).write(valid_silver)
 
-        print(f"Gold null values in {column} = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Minimum-value checks
-    # ------------------------------------------------------------------
-
-    negative_event_counts = gold_df.filter(gold_df.event_count < 1).count()
-
-    assert_equal(
-        negative_event_counts,
-        0,
-        "Gold invalid event_count values",
-    )
-
-    print("Gold event_count >= 1: PASS")
-
-    for column in [
-        "avg_speed",
-        "min_speed",
-        "max_speed",
-    ]:
-
-        invalid_count = gold_df.filter(gold_df[column] < 0).count()
-
-        assert_equal(
-            invalid_count,
-            0,
-            f"Gold negative {column} values",
-        )
-
-        print(f"Gold {column} >= 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Unique vehicle IDs
-    # ------------------------------------------------------------------
-
-    duplicate_vehicle_ids = gold_df.groupBy("vehicle_id").count().filter("count > 1").count()
-
-    assert_equal(
-        duplicate_vehicle_ids,
-        0,
-        "Gold duplicate vehicle IDs",
-    )
-
-    print("Gold duplicate vehicle IDs = 0: PASS")
-
-    # ------------------------------------------------------------------
-    # Expected vehicle IDs
-    # ------------------------------------------------------------------
-
-    actual_vehicle_ids = {row["vehicle_id"] for row in gold_df.select("vehicle_id").collect()}
-
-    expected_vehicle_ids = set(EXPECTED_GOLD.keys())
-
-    assert_equal(
-        actual_vehicle_ids,
-        expected_vehicle_ids,
-        "Gold vehicle IDs",
-    )
-
-    print("Gold vehicle IDs = V001,V002,V003,V004: PASS")
-
-    # ------------------------------------------------------------------
-    # Validate metrics
-    # ------------------------------------------------------------------
-
-    actual_gold = collect_gold(spark)
-
-    for vehicle_id, expected in EXPECTED_GOLD.items():
-
-        actual = actual_gold[vehicle_id]
-
-        assert_equal(
-            actual["event_count"],
-            expected["event_count"],
-            f"{vehicle_id} event_count",
-        )
-
-        assert_float_equal(
-            actual["avg_speed"],
-            expected["avg_speed"],
-            f"{vehicle_id} avg_speed",
-        )
-
-        assert_float_equal(
-            actual["min_speed"],
-            expected["min_speed"],
-            f"{vehicle_id} min_speed",
-        )
-
-        assert_float_equal(
-            actual["max_speed"],
-            expected["max_speed"],
-            f"{vehicle_id} max_speed",
-        )
-
-        print(f"{vehicle_id} metrics: PASS")
-
-    print("\nGOLD VALIDATION: PASSED")
-
-
-def capture_current_state(
-    spark,
-) -> dict[str, object]:
-
-    silver_df = spark.table(SILVER_TABLE)
-
-    gold_df = spark.table(GOLD_TABLE)
-
-    silver_rows = [
-        (
-            row["vehicle_id"],
-            row["event_time"],
-            row["speed"],
-        )
-        for row in silver_df.collect()
-    ]
-
-    silver_rows = sorted(
-        silver_rows,
-        key=lambda row: (
-            row[0],
-            row[1],
-            row[2],
+    gold_pipeline = GoldPipeline(
+        spark=spark,
+        reader=DeltaReader(
+            path=silver_path,
+            table=silver_table,
+        ),
+        writer=DeltaWriter(
+            table=gold_table,
+            path=gold_path,
+            mode="overwrite",
+        ),
+        transformer=SilverToGoldTransformer(),
+        validator=NoOpValidator(),
+        metrics=None,
+        dlq=None,
+        config=PipelineRuntimeConfig(
+            pipeline_name="vehicle-pipeline-integration-test",
+            enable_validation=False,
+            enable_metrics=False,
+            enable_dlq=False,
         ),
     )
 
-    gold_rows = [
-        (
-            row["vehicle_id"],
-            row["event_count"],
-            row["avg_speed"],
-            row["min_speed"],
-            row["max_speed"],
-            row["first_event_time"],
-            row["last_event_time"],
-        )
-        for row in gold_df.collect()
-    ]
+    result = gold_pipeline.run_batch()
 
-    gold_rows = sorted(
-        gold_rows,
-        key=lambda row: row[0],
-    )
+    assert result["eligible_silver_rows"] == 11
+    assert result["expected_gold_rows"] == 4
+    assert result["actual_gold_rows"] == 4
+    assert result["distinct_silver_vehicles"] == 4
+    assert result["expected_event_count"] == 11
+    assert result["actual_event_count"] == 11
+    assert result["mismatched_rows"] == 0
 
-    return {
-        "silver": silver_rows,
-        "gold": gold_rows,
-    }
+    stored_gold = spark.table(gold_table)
 
+    assert stored_gold.count() == 4
 
-def validate_idempotency(
-    spark,
-) -> None:
+    actual = {row["vehicle_id"]: row.asDict() for row in stored_gold.collect()}
 
-    print("\n" + "=" * 80)
-    print("VALIDATING IDEMPOTENCY")
-    print("=" * 80)
+    assert actual["V001"]["event_count"] == 3
+    assert actual["V001"]["min_speed"] == 45.5
+    assert actual["V001"]["max_speed"] == 51.8
 
-    before = capture_current_state(spark)
+    assert actual["V002"]["event_count"] == 2
+    assert actual["V002"]["min_speed"] == 32.1
+    assert actual["V002"]["max_speed"] == 36.4
 
-    print(
-        "Current Silver rows:",
-        len(before["silver"]),
-    )
+    assert actual["V003"]["event_count"] == 3
+    assert actual["V003"]["min_speed"] == 59.8
+    assert actual["V003"]["max_speed"] == 63.5
 
-    print(
-        "Current Gold rows:",
-        len(before["gold"]),
-    )
+    assert actual["V004"]["event_count"] == 3
+    assert actual["V004"]["min_speed"] == 22.4
+    assert actual["V004"]["max_speed"] == 27.1
 
-    # ------------------------------------------------------------------
-    # Run both pipelines again
-    # ------------------------------------------------------------------
+    first_gold = [row.asDict() for row in stored_gold.orderBy("vehicle_id").collect()]
 
-    run_pipeline(
-        PROJECT_ROOT / "spark" / "batch" / "bronze_to_silver.py",
-        "Bronze → Silver Pipeline (Idempotency Run)",
-    )
+    second_result = gold_pipeline.run_batch()
 
-    run_pipeline(
-        PROJECT_ROOT / "spark" / "pipelines" / "silver_to_gold_pipeline.py",
-        "Silver → Gold Pipeline (Idempotency Run)",
-    )
+    assert second_result == result
 
-    # ------------------------------------------------------------------
-    # Capture state after second execution
-    # ------------------------------------------------------------------
+    second_gold = [row.asDict() for row in spark.table(gold_table).orderBy("vehicle_id").collect()]
 
-    after = capture_current_state(spark)
-
-    # ------------------------------------------------------------------
-    # Compare
-    # ------------------------------------------------------------------
-
-    if before["silver"] != after["silver"]:
-
-        raise AssertionError("Silver current state changed after " "re-running the pipeline.")
-
-    if before["gold"] != after["gold"]:
-
-        raise AssertionError("Gold current state changed after " "re-running the pipeline.")
-
-    print("Silver current state unchanged: PASS")
-
-    print("Gold current state unchanged: PASS")
-
-    print("IDEMPOTENCY VALIDATION: PASSED")
-
-
-def main() -> None:
-
-    print("\n" + "=" * 80)
-    print("VEHICLE DATA PIPELINE INTEGRATION TEST")
-    print("=" * 80)
-
-    # ------------------------------------------------------------------
-    # Pipeline paths
-    # ------------------------------------------------------------------
-
-    bronze_to_silver_pipeline = PROJECT_ROOT / "spark" / "batch" / "bronze_to_silver.py"
-
-    silver_to_gold_pipeline = PROJECT_ROOT / "spark" / "pipelines" / "silver_to_gold_pipeline.py"
-
-    # ------------------------------------------------------------------
-    # Verify pipeline files exist
-    # ------------------------------------------------------------------
-
-    if not bronze_to_silver_pipeline.exists():
-
-        raise FileNotFoundError(f"Pipeline not found: " f"{bronze_to_silver_pipeline}")
-
-    if not silver_to_gold_pipeline.exists():
-
-        raise FileNotFoundError(f"Pipeline not found: " f"{silver_to_gold_pipeline}")
-
-    # ------------------------------------------------------------------
-    # STEP 1: Execute Bronze → Silver
-    # ------------------------------------------------------------------
-
-    run_pipeline(
-        bronze_to_silver_pipeline,
-        "Bronze → Silver Pipeline",
-    )
-
-    # ------------------------------------------------------------------
-    # STEP 2: Execute Silver → Gold
-    # ------------------------------------------------------------------
-
-    run_pipeline(
-        silver_to_gold_pipeline,
-        "Silver → Gold Pipeline",
-    )
-
-    # ------------------------------------------------------------------
-    # STEP 3: Create validation Spark session
-    # ------------------------------------------------------------------
-
-    spark = SparkSessionBuilder.build("VehiclePipelineIntegrationTest")
-
-    try:
-
-        # --------------------------------------------------------------
-        # STEP 4: Validate Silver
-        # --------------------------------------------------------------
-
-        validate_silver(spark)
-
-        # --------------------------------------------------------------
-        # STEP 5: Validate Gold
-        # --------------------------------------------------------------
-
-        validate_gold(spark)
-
-        # --------------------------------------------------------------
-        # STEP 6: Validate idempotency
-        # --------------------------------------------------------------
-
-        validate_idempotency(spark)
-
-        # --------------------------------------------------------------
-        # STEP 7: Final validation
-        # --------------------------------------------------------------
-
-        print("\n" + "=" * 80)
-        print("VEHICLE DATA PIPELINE " "INTEGRATION TEST PASSED")
-        print("=" * 80)
-
-        print("Bronze → Silver : PASS")
-
-        print("Silver validation : PASS")
-
-        print("Silver → Gold : PASS")
-
-        print("Gold validation : PASS")
-
-        print("Gold metrics : PASS")
-
-        print("Idempotency : PASS")
-
-        print("=" * 80)
-
-    finally:
-
-        spark.stop()
-
-
-if __name__ == "__main__":
-    main()
+    assert second_gold == first_gold

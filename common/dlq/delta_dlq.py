@@ -6,4 +6,7 @@ class DeltaDLQ(BaseDLQ):
         self.table = table
 
     def write(self, df):
+        if df is None or df.isEmpty():
+            return
+
         (df.write.format("delta").mode("append").saveAsTable(self.table))

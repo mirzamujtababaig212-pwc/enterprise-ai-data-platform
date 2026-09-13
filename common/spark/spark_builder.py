@@ -13,8 +13,8 @@ class SparkSessionBuilder:
 
     Supports:
 
-    - Spark 3.5.6
-    - Delta Lake 3.3.2
+    - Spark 4.1.1
+    - Delta Lake 4.3.1
     - Spark Structured Streaming Kafka Consumer
     - Hive-compatible catalog
     - Local WSL2 execution
@@ -26,12 +26,12 @@ class SparkSessionBuilder:
     runtime configuration.
     """
 
-    SPARK_VERSION = "3.5.6"
-    SCALA_VERSION = "2.12"
+    SPARK_VERSION = "4.1.1"
+    SCALA_VERSION = "2.13"
 
-    DELTA_PACKAGE = "io.delta:delta-spark_2.12:3.3.2"
+    DELTA_PACKAGE = "io.delta:delta-spark_4.1_2.13:4.3.1"
 
-    KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6"
+    KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1"
 
     @staticmethod
     def build(
@@ -54,6 +54,7 @@ class SparkSessionBuilder:
         # ==========================================================
 
         warehouse_dir = project_root / "spark-warehouse"
+        metastore_dir = project_root / "metastore_db"
 
         warehouse_dir.mkdir(
             parents=True,
@@ -89,6 +90,10 @@ class SparkSessionBuilder:
             .config(
                 "spark.sql.catalogImplementation",
                 "hive",
+            )
+            .config(
+                "spark.hadoop.javax.jdo.option.ConnectionURL",
+                f"jdbc:derby:;databaseName={metastore_dir};create=true",
             )
             # ------------------------------------------------------
             # Delta Lake
@@ -141,8 +146,8 @@ class SparkSessionBuilder:
         # -------------------------------------------------------------
         # Kafka Structured Streaming connector
         #
-        # Spark 3.5.6
-        # Scala 2.12
+        # Spark 4.1.1
+        # Scala 2.13
         # -------------------------------------------------------------
 
         existing_packages = builder._options.get("spark.jars.packages")
