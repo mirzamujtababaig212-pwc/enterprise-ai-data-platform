@@ -220,3 +220,164 @@ async def test_dispatcher_reuses_lazily_created_workflow():
 
     factory.assert_called_once()
     assert workflow.evaluate.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_ragas_answer_relevancy_to_workflow():
+    expected_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="answer_relevancy",
+        metrics={"answer_relevancy": 0.85},
+        evaluated_samples=2,
+    )
+
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(return_value=expected_result)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        answer_relevancy_workflow=workflow,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevancy",
+    )
+    cases = [MagicMock(), MagicMock()]
+    retriever = MagicMock()
+
+    result = await dispatcher.evaluate(
+        request,
+        cases=cases,
+        retriever=retriever,
+    )
+
+    assert result == expected_result
+
+    workflow.evaluate.assert_awaited_once_with(
+        cases,
+        retriever=retriever,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_lazily_creates_answer_relevancy_workflow():
+    expected_result = ExternalEvaluationResult(
+        provider="ragas",
+        evaluator="answer_relevancy",
+        metrics={"answer_relevancy": 0.85},
+        evaluated_samples=1,
+    )
+
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(return_value=expected_result)
+
+    factory = MagicMock(return_value=workflow)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        answer_relevancy_workflow_factory=factory,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevancy",
+    )
+
+    cases = [MagicMock()]
+    retriever = MagicMock()
+
+    result = await dispatcher.evaluate(
+        request,
+        cases=cases,
+        retriever=retriever,
+    )
+
+    assert result == expected_result
+    factory.assert_called_once()
+
+    workflow.evaluate.assert_awaited_once_with(
+        cases,
+        retriever=retriever,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_reuses_lazily_created_answer_relevancy_workflow():
+    workflow = MagicMock()
+    workflow.evaluate = AsyncMock(
+        side_effect=[
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="answer_relevancy",
+                metrics={"answer_relevancy": 0.85},
+                evaluated_samples=1,
+            ),
+            ExternalEvaluationResult(
+                provider="ragas",
+                evaluator="answer_relevancy",
+                metrics={"answer_relevancy": 0.75},
+                evaluated_samples=1,
+            ),
+        ]
+    )
+
+    factory = MagicMock(return_value=workflow)
+
+    dispatcher = RagasExternalEvaluationDispatcher(
+        answer_relevancy_workflow_factory=factory,
+    )
+
+    request = ExternalEvaluationRequest(
+        provider="ragas",
+        evaluator="answer_relevancy",
+    )
+
+    await dispatcher.evaluate(
+        request,
+        cases=[MagicMock()],
+        retriever=MagicMock(),
+    )
+
+    await dispatcher.evaluate(
+        request,
+        cases=[MagicMock()],
+        retriever=MagicMock(),
+    )
+
+    factory.assert_called_once()
+    assert workflow.evaluate.await_count == 2
+
+
+def test_dispatcher_rejects_duplicate_faithfulness_configuration():
+    workflow = MagicMock()
+    factory = MagicMock()
+
+    with pytest.raises(
+        ValueError,
+        match="faithfulness_workflow and faithfulness_workflow_factory",
+    ):
+        RagasExternalEvaluationDispatcher(
+            faithfulness_workflow=workflow,
+            faithfulness_workflow_factory=factory,
+        )
+
+
+def test_dispatcher_rejects_duplicate_answer_relevancy_configuration():
+    workflow = MagicMock()
+    factory = MagicMock()
+
+    with pytest.raises(
+        ValueError,
+        match="answer_relevancy_workflow and " "answer_relevancy_workflow_factory",
+    ):
+        RagasExternalEvaluationDispatcher(
+            answer_relevancy_workflow=workflow,
+            answer_relevancy_workflow_factory=factory,
+        )
+
+
+def test_dispatcher_requires_at_least_one_workflow_configuration():
+    with pytest.raises(
+        ValueError,
+        match="At least one RAGAS evaluation workflow",
+    ):
+        RagasExternalEvaluationDispatcher()

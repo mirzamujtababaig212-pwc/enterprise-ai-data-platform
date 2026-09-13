@@ -249,8 +249,40 @@ def get_external_evaluation_dispatcher() -> ExternalEvaluationDispatcher:
             evaluator=evaluator,
         )
 
+    def build_answer_relevancy_workflow() -> RAGGenerationEvaluationWorkflow:
+        try:
+            from rag.evaluation.external.ragas import (
+                GatewayRagasEmbedding,
+                GatewayRagasLLM,
+                RagasAnswerRelevancyAdapter,
+            )
+        except ImportError as exc:
+            raise RuntimeError(
+                "RAGAS external evaluation requires the optional dependency. "
+                'Install it with: pip install -e ".[ragas]"'
+            ) from exc
+
+        llm = GatewayRagasLLM(
+            _rag_chat_service,
+        )
+
+        embeddings = GatewayRagasEmbedding(
+            _rag_embedding_service,
+        )
+
+        evaluator = RagasAnswerRelevancyAdapter(
+            llm=llm,
+            embeddings=embeddings,
+        )
+
+        return RAGGenerationEvaluationWorkflow(
+            chat_service=_rag_chat_service,
+            evaluator=evaluator,
+        )
+
     return RagasExternalEvaluationDispatcher(
         faithfulness_workflow_factory=build_faithfulness_workflow,
+        answer_relevancy_workflow_factory=build_answer_relevancy_workflow,
     )
 
 

@@ -271,3 +271,173 @@ async def test_rag_generation_workflow_uses_gateway_backed_ragas_faithfulness(
     )
 
     assert len(gateway.calls) == 2
+
+
+class FakeEmbeddingService:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.calls.append(text)
+        return [float(len(text)), 1.0]
+
+
+@pytest.mark.asyncio
+async def test_gateway_ragas_embedding_delegates_single_text() -> None:
+    from rag.evaluation.external.ragas import GatewayRagasEmbedding
+
+    service = FakeEmbeddingService()
+    embedding = GatewayRagasEmbedding(service)
+
+    result = await embedding.aembed_text("hello")
+
+    assert result == [5.0, 1.0]
+    assert service.calls == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_ragas_embedding_delegates_batch() -> None:
+    from rag.evaluation.external.ragas import GatewayRagasEmbedding
+
+    service = FakeEmbeddingService()
+    embedding = GatewayRagasEmbedding(service)
+
+    result = await embedding.aembed_texts(["one", "two"])
+
+    assert result == [[3.0, 1.0], [3.0, 1.0]]
+    assert service.calls == ["one", "two"]
+
+
+def test_gateway_ragas_embedding_rejects_sync_single_text() -> None:
+    from rag.evaluation.external.ragas import GatewayRagasEmbedding
+
+    embedding = GatewayRagasEmbedding(FakeEmbeddingService())
+
+    with pytest.raises(
+        TypeError,
+        match="GatewayRagasEmbedding is asynchronous",
+    ):
+        embedding.embed_text("hello")
+
+
+def test_gateway_ragas_embedding_rejects_sync_batch() -> None:
+    from rag.evaluation.external.ragas import GatewayRagasEmbedding
+
+    embedding = GatewayRagasEmbedding(FakeEmbeddingService())
+
+    with pytest.raises(
+        TypeError,
+        match="GatewayRagasEmbedding is asynchronous",
+    ):
+        embedding.embed_texts(["hello"])
+
+
+class AnswerRelevancyGateway:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float,
+        max_tokens: int,
+        user_id: str | None,
+        structured_output: dict[str, object] | None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "user_id": user_id,
+                "structured_output": structured_output,
+            }
+        )
+
+        assert structured_output is not None
+        assert structured_output["name"] == "AnswerRelevanceOutput"
+        assert structured_output["strict"] is True
+
+        return {
+            "reply": '{"question":"What is DELDAI?","noncommittal":0}',
+            "metrics": {},
+        }
+
+
+class AnswerRelevancyEmbeddingService:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.calls.append(text)
+        return [1.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_ragas_answer_relevancy_uses_gateway_llm_and_embeddings() -> None:
+    from rag.evaluation.external.models import ExternalEvaluationSample
+    from rag.evaluation.external.ragas import (
+        GatewayRagasEmbedding,
+        GatewayRagasLLM,
+        RagasAnswerRelevancyAdapter,
+    )
+
+    gateway = AnswerRelevancyGateway()
+    embedding_service = AnswerRelevancyEmbeddingService()
+
+    llm = GatewayRagasLLM(gateway)  # type: ignore[arg-type]
+    embeddings = GatewayRagasEmbedding(embedding_service)
+
+    adapter = RagasAnswerRelevancyAdapter(
+        llm=llm,
+        embeddings=embeddings,
+    )
+
+    result = await adapter.evaluate(
+        [
+            ExternalEvaluationSample(
+                query="What is DELDAI?",
+                retrieved_contexts=("DELDAI is an enterprise AI platform.",),
+                response="DELDAI is an enterprise AI platform.",
+            )
+        ]
+    )
+
+    assert result.provider == "ragas"
+    assert result.evaluator == "answer_relevancy"
+    assert result.evaluated_samples == 1
+    assert result.metrics["answer_relevancy"] == pytest.approx(1.0)
+
+    assert len(gateway.calls) == 3
+
+    for call in gateway.calls:
+        structured_output = call["structured_output"]
+        assert isinstance(structured_output, dict)
+        assert structured_output["name"] == "AnswerRelevanceOutput"
+        assert structured_output["strict"] is True
+        assert structured_output["schema"] == {
+            "description": "Structured output for answer relevance question generation.",
+            "properties": {
+                "question": {
+                    "description": "Question that can be answered from the response",
+                    "title": "Question",
+                    "type": "string",
+                },
+                "noncommittal": {
+                    "description": ("1 if the response is evasive/vague, 0 if it is substantive"),
+                    "title": "Noncommittal",
+                    "type": "integer",
+                },
+            },
+            "required": ["question", "noncommittal"],
+            "title": "AnswerRelevanceOutput",
+            "type": "object",
+        }
+
+    assert embedding_service.calls == [
+        "What is DELDAI?",
+        "What is DELDAI?",
+        "What is DELDAI?",
+        "What is DELDAI?",
+    ]
