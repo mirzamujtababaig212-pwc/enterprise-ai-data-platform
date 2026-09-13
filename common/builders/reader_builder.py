@@ -111,11 +111,15 @@ class ReaderBuilder:
             "parquet",
             "csv",
             "delta",
+            "s3",
         }:
 
             path = ReaderBuilder._resolve_storage_value(cfg.get("path"))
 
             if not path:
+
+                if reader_type == "s3":
+                    raise ValueError("Path is required for S3 reader.")
 
                 defaults = {
                     "parquet": Settings.storage.BRONZE_PATH,

@@ -111,3 +111,32 @@ def test_invalid_reader():
 
     with pytest.raises(ValueError):
         ReaderFactory.create(config)
+
+
+def test_create_s3():
+    from common.readers.s3_reader import S3Reader
+
+    config = {
+        "reader": {
+            "type": "s3",
+            "path": "s3://bucket/bronze/events",
+        }
+    }
+
+    reader = ReaderFactory.create(config)
+
+    assert isinstance(reader, S3Reader)
+    assert reader.path == "s3://bucket/bronze/events"
+
+
+def test_create_s3_requires_path():
+    config = {
+        "reader": {
+            "type": "s3",
+        }
+    }
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        ReaderFactory.create(config)
