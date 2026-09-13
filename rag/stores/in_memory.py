@@ -20,6 +20,18 @@ class InMemoryVectorStore:
         self,
         chunks: Sequence[EmbeddedChunk],
     ) -> None:
+        if not chunks:
+            return
+
+        dimension = len(chunks[0].embedding)
+
+        if dimension == 0:
+            raise ValueError("Embeddings must not be empty.")
+
+        for item in chunks:
+            if len(item.embedding) != dimension:
+                raise ValueError("All embeddings must have the same dimension.")
+
         for item in chunks:
             self._items[item.chunk.id] = item
 
@@ -40,6 +52,9 @@ class InMemoryVectorStore:
             return []
 
         query = tuple(float(value) for value in embedding)
+
+        if not query:
+            return []
 
         if self._items:
             stored_dimension = len(next(iter(self._items.values())).embedding)

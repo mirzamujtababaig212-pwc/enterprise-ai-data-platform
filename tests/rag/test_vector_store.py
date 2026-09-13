@@ -107,3 +107,76 @@ async def test_vector_store_filters_by_metadata():
 
     assert len(results) == 1
     assert results[0].chunk.id == "gateway"
+
+
+@pytest.mark.asyncio
+async def test_vector_store_rejects_empty_embeddings():
+    store = InMemoryVectorStore()
+
+    chunk = DocumentChunk(
+        id="empty",
+        document_id="doc-1",
+        content="test",
+    )
+
+    with pytest.raises(ValueError, match="Embeddings must not be empty"):
+        await store.upsert(
+            [
+                EmbeddedChunk(
+                    chunk=chunk,
+                    embedding=(),
+                )
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_vector_store_rejects_mixed_embedding_dimensions():
+    store = InMemoryVectorStore()
+
+    chunks = [
+        EmbeddedChunk(
+            chunk=DocumentChunk(
+                id="a",
+                document_id="doc-1",
+                content="first",
+            ),
+            embedding=(1.0, 0.0),
+        ),
+        EmbeddedChunk(
+            chunk=DocumentChunk(
+                id="b",
+                document_id="doc-1",
+                content="second",
+            ),
+            embedding=(1.0, 0.0, 0.0),
+        ),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="All embeddings must have the same dimension",
+    ):
+        await store.upsert(chunks)
+
+
+@pytest.mark.asyncio
+async def test_vector_store_returns_empty_for_empty_query_embedding():
+    store = InMemoryVectorStore()
+
+    chunk = DocumentChunk(
+        id="a",
+        document_id="doc-1",
+        content="test",
+    )
+
+    await store.upsert(
+        [
+            EmbeddedChunk(
+                chunk=chunk,
+                embedding=(1.0, 0.0),
+            )
+        ]
+    )
+
+    assert await store.search(embedding=()) == []

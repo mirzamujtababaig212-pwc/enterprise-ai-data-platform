@@ -350,3 +350,24 @@ async def test_search_preserves_embedding_identity():
 
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_create_missing_collection():
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_missing_collection",
+        )
+
+        results = await store.search(
+            embedding=(1.0, 0.0),
+            top_k=5,
+        )
+
+        assert results == []
+        assert not await client.collection_exists("test_missing_collection")
+    finally:
+        await client.close()

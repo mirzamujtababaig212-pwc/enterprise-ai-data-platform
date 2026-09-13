@@ -59,7 +59,7 @@ class QdrantVectorStore:
         points = [
             models.PointStruct(
                 id=self._point_id(item.chunk.id),
-                vector=[float(value) for value in item.embedding],
+                vector=list(item.embedding),
                 payload=self._payload(
                     item.chunk,
                     item.embedding_identity,
@@ -112,7 +112,23 @@ class QdrantVectorStore:
         if not query:
             return []
 
-        await self._ensure_collection(len(query))
+        exists = await self._client.collection_exists(self._collection_name)
+
+        if not exists:
+            return []
+
+        collection = await self._client.get_collection(self._collection_name)
+
+        configured_dimension = self._collection_dimension(collection)
+
+        if configured_dimension != len(query):
+            raise ValueError(
+                "Embedding dimensions do not match the existing "
+                f"Qdrant collection: expected {configured_dimension}, "
+                f"got {len(query)}."
+            )
+
+        self._embedding_dimension = configured_dimension
 
         query_filter = None
 
