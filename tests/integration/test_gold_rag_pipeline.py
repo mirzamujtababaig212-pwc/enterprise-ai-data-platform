@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 
 from ai_platform.llm_gateway.routing.router import Router
+from common.provenance.source import EnterpriseSourceRef
 from common.readers.delta_reader import DeltaReader
 from rag.chunking.recursive import RecursiveChunker
 from rag.embeddings.gateway import GatewayEmbeddingService
@@ -64,6 +65,23 @@ async def test_gold_vehicle_metrics_flows_into_rag_retrieval(
 
     assert len(documents) == 2
 
+    source_ref = EnterpriseSourceRef(
+        platform="delta",
+        object_type="table",
+        object_name="gold.vehicle_metrics",
+    ).to_dict()
+
+    for document in documents:
+        document.metadata["source_ref"] = source_ref
+
+    documents_by_id = {document.id: document for document in documents}
+
+    assert documents_by_id["vehicle:V001"].metadata["source_ref"] == {
+        "platform": "delta",
+        "object_type": "table",
+        "object_name": "gold.vehicle_metrics",
+    }
+
     gateway = Router()
 
     embedding_service = GatewayEmbeddingService(
@@ -102,3 +120,4 @@ async def test_gold_vehicle_metrics_flows_into_rag_retrieval(
     assert "Average speed was 48.17." in results[0].chunk.content
     assert results[0].chunk.metadata["source"] == "gold.vehicle_metrics"
     assert results[0].chunk.metadata["vehicle_id"] == "V001"
+    assert results[0].chunk.metadata["source_ref"] == source_ref
