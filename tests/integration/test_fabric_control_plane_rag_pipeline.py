@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from common.fabric.control_plane import FabricControlPlaneClient
+from common.provenance import fabric_source_ref
 from common.readers.fabric_reader import FabricReader
 from rag.chunking.recursive import RecursiveChunker
 from rag.dbt import DbtModel, DbtModelDocumentLoader
@@ -99,6 +100,15 @@ async def test_fabric_control_plane_metadata_composes_with_data_plane_rag():
     assert table_metadata.columns[1].name == "avg_speed"
     assert table_metadata.columns[1].type_name == "double"
     assert table_metadata.columns[1].nullable is True
+    source_ref = fabric_source_ref(table_metadata)
+
+    assert source_ref.to_dict() == {
+        "platform": "fabric",
+        "object_type": "table",
+        "object_name": "vehicle_events",
+        "object_id": "table-123",
+        "namespace": "VehicleWorkspace.VehicleLakehouse.dbo",
+    }
 
     model = DbtModel(
         unique_id="model.vehicle_fabric.rpt_vehicle_events",
@@ -150,6 +160,7 @@ async def test_fabric_control_plane_metadata_composes_with_data_plane_rag():
             "table_type": table_metadata.table_type,
             "format": table_metadata.format,
             "vehicle_id": row["vehicle_id"],
+            "source_ref": source_ref.to_dict(),
         },
     ).load(spark)
 
@@ -171,6 +182,13 @@ async def test_fabric_control_plane_metadata_composes_with_data_plane_rag():
     assert documents[0].metadata["table_type"] == "MANAGED"
     assert documents[0].metadata["format"] == "DELTA"
     assert documents[0].metadata["vehicle_id"] == "VH-001"
+    assert documents[0].metadata["source_ref"] == {
+        "platform": "fabric",
+        "object_type": "table",
+        "object_name": "vehicle_events",
+        "object_id": "table-123",
+        "namespace": "VehicleWorkspace.VehicleLakehouse.dbo",
+    }
 
     assert documents[0].metadata["dbt_unique_id"] == ("model.vehicle_fabric.rpt_vehicle_events")
     assert documents[0].metadata["dbt_model"] == "rpt_vehicle_events"
@@ -221,3 +239,10 @@ async def test_fabric_control_plane_metadata_composes_with_data_plane_rag():
     assert results[0].chunk.metadata["table"] == "vehicle_events"
     assert results[0].chunk.metadata["table_id"] == "table-123"
     assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_events"
+    assert results[0].chunk.metadata["source_ref"] == {
+        "platform": "fabric",
+        "object_type": "table",
+        "object_name": "vehicle_events",
+        "object_id": "table-123",
+        "namespace": "VehicleWorkspace.VehicleLakehouse.dbo",
+    }

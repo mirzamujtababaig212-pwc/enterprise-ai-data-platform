@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from common.databricks.control_plane import DatabricksControlPlaneClient
+from common.provenance import databricks_source_ref
 from common.readers.databricks_reader import DatabricksReader
 from rag.chunking.recursive import RecursiveChunker
 from rag.dbt import DbtModel, DbtModelDocumentLoader
@@ -66,6 +67,16 @@ async def test_databricks_control_plane_metadata_composes_with_data_plane_rag():
     assert table_metadata.table_id == "table-123"
     assert len(table_metadata.columns) == 2
 
+    source_ref = databricks_source_ref(table_metadata)
+
+    assert source_ref.to_dict() == {
+        "platform": "databricks",
+        "object_type": "table",
+        "object_name": "rpt_vehicle_summary",
+        "object_id": "table-123",
+        "namespace": "vehicle_platform.analytics",
+    }
+
     model = DbtModel(
         unique_id="model.vehicle_dbt.rpt_vehicle_summary",
         name="rpt_vehicle_summary",
@@ -113,6 +124,7 @@ async def test_databricks_control_plane_metadata_composes_with_data_plane_rag():
             "table_id": table_metadata.table_id,
             "table_type": table_metadata.table_type,
             "vehicle_id": row["vehicle_id"],
+            "source_ref": source_ref.to_dict(),
         },
     ).load(spark)
 
@@ -135,6 +147,13 @@ async def test_databricks_control_plane_metadata_composes_with_data_plane_rag():
     assert documents[0].metadata["table_id"] == "table-123"
     assert documents[0].metadata["table_type"] == "MANAGED"
     assert documents[0].metadata["vehicle_id"] == "VH-001"
+    assert documents[0].metadata["source_ref"] == {
+        "platform": "databricks",
+        "object_type": "table",
+        "object_name": "rpt_vehicle_summary",
+        "object_id": "table-123",
+        "namespace": "vehicle_platform.analytics",
+    }
 
     assert documents[0].metadata["dbt_unique_id"] == ("model.vehicle_dbt.rpt_vehicle_summary")
     assert documents[0].metadata["dbt_model"] == "rpt_vehicle_summary"
@@ -183,3 +202,10 @@ async def test_databricks_control_plane_metadata_composes_with_data_plane_rag():
     assert results[0].chunk.metadata["table"] == "rpt_vehicle_summary"
     assert results[0].chunk.metadata["table_id"] == "table-123"
     assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_summary"
+    assert results[0].chunk.metadata["source_ref"] == {
+        "platform": "databricks",
+        "object_type": "table",
+        "object_name": "rpt_vehicle_summary",
+        "object_id": "table-123",
+        "namespace": "vehicle_platform.analytics",
+    }

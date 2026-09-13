@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from common.builders.reader_builder import ReaderBuilder
+from common.provenance import snowflake_source_ref
 from common.readers.snowflake_reader import SnowflakeReader
 from common.snowflake.control_plane import SnowflakeControlPlaneClient
 from rag.chunking.recursive import RecursiveChunker
@@ -63,6 +64,14 @@ async def test_snowflake_control_plane_metadata_composes_with_data_plane_rag():
     assert table_metadata.columns[1].type_name == "FLOAT"
     assert table_metadata.columns[1].type_text == "FLOAT"
     assert table_metadata.columns[1].nullable is True
+    source_ref = snowflake_source_ref(table_metadata)
+
+    assert source_ref.to_dict() == {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "RPT_VEHICLE_SUMMARY",
+        "namespace": "VEHICLE_PLATFORM.PUBLIC",
+    }
 
     cursor.describe.assert_called_once_with(
         "SELECT * FROM VEHICLE_PLATFORM.PUBLIC.RPT_VEHICLE_SUMMARY"
@@ -136,6 +145,7 @@ async def test_snowflake_control_plane_metadata_composes_with_data_plane_rag():
             "table_type": table_metadata.table_type,
             "vehicle_count": row["vehicle_count"],
             "avg_speed": row["avg_speed"],
+            "source_ref": source_ref.to_dict(),
         },
     ).load(spark)
 
@@ -150,6 +160,12 @@ async def test_snowflake_control_plane_metadata_composes_with_data_plane_rag():
 
     assert documents[0].metadata["vehicle_count"] == 25
     assert documents[0].metadata["avg_speed"] == 48.17
+    assert documents[0].metadata["source_ref"] == {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "RPT_VEHICLE_SUMMARY",
+        "namespace": "VEHICLE_PLATFORM.PUBLIC",
+    }
 
     assert documents[0].metadata["dbt_model"] == "rpt_vehicle_summary"
     assert documents[0].metadata["dbt_database"] == "VEHICLE_PLATFORM"
@@ -196,3 +212,9 @@ async def test_snowflake_control_plane_metadata_composes_with_data_plane_rag():
     assert results[0].chunk.metadata["schema"] == "PUBLIC"
     assert results[0].chunk.metadata["table"] == "RPT_VEHICLE_SUMMARY"
     assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_summary"
+    assert results[0].chunk.metadata["source_ref"] == {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "RPT_VEHICLE_SUMMARY",
+        "namespace": "VEHICLE_PLATFORM.PUBLIC",
+    }
