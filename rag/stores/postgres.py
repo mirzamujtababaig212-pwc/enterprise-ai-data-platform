@@ -171,6 +171,32 @@ class PostgreSQLVectorStore:
                         RAGChunkRecord.chunk_metadata[key].as_string() == str(value)
                     )
 
+            dimensions_statement = select(RAGChunkRecord.embedding_dimension).where(
+                RAGChunkRecord.embedding.is_not(None),
+                RAGChunkRecord.embedding_dimension.is_not(None),
+            )
+
+            if metadata_filter:
+                for key, value in metadata_filter.items():
+                    dimensions_statement = dimensions_statement.where(
+                        RAGChunkRecord.chunk_metadata[key].as_string() == str(value)
+                    )
+
+            stored_dimensions = {
+                int(dimension)
+                for dimension in session.scalars(dimensions_statement.distinct()).all()
+                if dimension is not None
+            }
+
+            if stored_dimensions and len(query) not in stored_dimensions:
+                expected_dimensions = ", ".join(
+                    str(dimension) for dimension in sorted(stored_dimensions)
+                )
+                raise ValueError(
+                    "Embedding dimensions must match: "
+                    f"expected {expected_dimensions}, got {len(query)}."
+                )
+
             query_norm = math.sqrt(sum(value * value for value in query))
 
             if query_norm == 0.0:

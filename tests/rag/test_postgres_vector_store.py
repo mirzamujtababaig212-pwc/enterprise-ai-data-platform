@@ -237,3 +237,120 @@ def test_postgresql_vector_store_rejects_mixed_dimensions() -> None:
             asyncio.run(store.upsert([first, second]))
     finally:
         engine.dispose()
+
+
+def test_postgresql_vector_store_rejects_query_dimension_mismatch() -> None:
+    store, engine = _postgres_store()
+
+    if store is None:
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    document_id = "postgres-vector-query-dimension"
+    chunk = _embedded_chunk(
+        chunk_id=f"{document_id}:chunk:0",
+        document_id=document_id,
+        content="Dimension validation",
+        embedding=(1.0, 0.0, 0.0, 0.0),
+        metadata={},
+        chunk_index=0,
+    )
+
+    try:
+        _ensure_document(engine, document_id)
+
+        import asyncio
+
+        asyncio.run(store.upsert([chunk]))
+
+        with pytest.raises(ValueError, match="Embedding dimensions must match"):
+            asyncio.run(
+                store.search(
+                    embedding=(1.0, 0.0, 0.0),
+                    top_k=5,
+                )
+            )
+    finally:
+        _cleanup(engine, document_id)
+        engine.dispose()
+
+
+def test_postgresql_vector_store_returns_empty_for_empty_query_embedding() -> None:
+    store, engine = _postgres_store()
+
+    if store is None:
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    document_id = "postgres-vector-empty-query"
+    chunk = _embedded_chunk(
+        chunk_id=f"{document_id}:chunk:0",
+        document_id=document_id,
+        content="Empty query validation",
+        embedding=(1.0, 0.0, 0.0, 0.0),
+        metadata={},
+        chunk_index=0,
+    )
+
+    try:
+        _ensure_document(engine, document_id)
+
+        import asyncio
+
+        asyncio.run(store.upsert([chunk]))
+
+        assert asyncio.run(store.search(embedding=())) == []
+    finally:
+        _cleanup(engine, document_id)
+        engine.dispose()
+
+
+def test_postgresql_vector_store_upsert_replaces_existing_chunk() -> None:
+    store, engine = _postgres_store()
+
+    if store is None:
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    document_id = "postgres-vector-upsert-replace"
+    chunk_id = f"{document_id}:chunk:0"
+
+    original = _embedded_chunk(
+        chunk_id=chunk_id,
+        document_id=document_id,
+        content="Original content",
+        embedding=(1.0, 0.0, 0.0, 0.0),
+        metadata={"version": 1},
+        chunk_index=0,
+    )
+
+    replacement = _embedded_chunk(
+        chunk_id=chunk_id,
+        document_id=document_id,
+        content="Replacement content",
+        embedding=(0.0, 1.0, 0.0, 0.0),
+        metadata={"version": 2},
+        chunk_index=3,
+    )
+
+    try:
+        _ensure_document(engine, document_id)
+
+        import asyncio
+
+        asyncio.run(store.upsert([original]))
+        asyncio.run(store.upsert([replacement]))
+
+        results = asyncio.run(
+            store.search(
+                embedding=(0.0, 1.0, 0.0, 0.0),
+                top_k=5,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.id == chunk_id
+        assert results[0].chunk.content == "Replacement content"
+        assert results[0].chunk.metadata == {"version": 2}
+        assert results[0].chunk.chunk_index == 3
+        assert results[0].score == pytest.approx(1.0)
+    finally:
+        _cleanup(engine, document_id)
+        engine.dispose()
