@@ -143,7 +143,7 @@ VEHICLE_EVALUATION_CASES = (
         },
     ),
     RetrievalEvaluationCase(
-        query="How does regenerative braking recover energy?",
+        query="How does regenerative braking recover energy in an electric vehicle?",
         relevant_chunk_ids=(
             "vehicle-regenerative-braking",
             "vehicle-battery-charging",
