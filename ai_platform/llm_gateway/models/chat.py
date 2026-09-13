@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Any
 from ai_platform.llm_gateway.models.usage import UsageMetrics
 
@@ -52,6 +52,14 @@ class ChatToolDefinition(BaseModel):
         if not value.strip():
             raise ValueError("Chat tool fields must not be empty.")
         return value
+
+
+class StructuredOutput(BaseModel):
+    name: str = Field(..., min_length=1)
+    schema_: dict[str, Any] = Field(default_factory=dict, alias="schema")
+    strict: bool = True
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ChatRequest(BaseModel):
@@ -128,6 +136,8 @@ class ChatRequest(BaseModel):
             "example": "user123",
         },
     )
+
+    structured_output: StructuredOutput | None = None
 
 
 class ChatResponse(BaseModel):

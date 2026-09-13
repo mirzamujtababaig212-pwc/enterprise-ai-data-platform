@@ -22,6 +22,7 @@ class FakeGateway:
         temperature: float,
         max_tokens: int,
         user_id: str | None,
+        structured_output: dict[str, object] | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -29,6 +30,7 @@ class FakeGateway:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "user_id": user_id,
+                "structured_output": structured_output,
             }
         )
         return self.response
@@ -63,6 +65,11 @@ async def test_gateway_ragas_llm_maps_gateway_reply_to_response_model() -> None:
             "temperature": 0.0,
             "max_tokens": 4096,
             "user_id": "evaluation-user",
+            "structured_output": {
+                "name": "OutputModel",
+                "schema": OutputModel.model_json_schema(),
+                "strict": True,
+            },
         }
     ]
 
@@ -140,6 +147,7 @@ class FaithfulnessGateway:
         temperature: float,
         max_tokens: int,
         user_id: str | None,
+        structured_output: dict[str, object] | None,
     ) -> dict[str, object]:
         self.calls.append(prompt)
 

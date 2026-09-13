@@ -244,3 +244,113 @@ async def test_embeddings_success():
     )
 
     assert result == [0.1, 0.2, 0.3]
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_structured_output_to_openai():
+    response = SimpleNamespace(
+        output_text='{"answer":"Hello"}',
+        usage=SimpleNamespace(
+            input_tokens=10,
+            output_tokens=5,
+        ),
+    )
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            assert kwargs["text"] == {
+                "format": {
+                    "type": "json_schema",
+                    "name": "test_result",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "answer": {"type": "string"},
+                        },
+                        "required": ["answer"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            }
+            return response
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    provider = OpenAIProvider(
+        client=FakeClient(),
+        settings=type(
+            "TestSettings",
+            (),
+            {
+                "api_key": "test-key",
+                "model": "gpt-4.1-mini",
+                "base_url": "https://api.openai.com/v1",
+                "timeout": 60.0,
+                "max_retries": 2,
+            },
+        )(),
+    )
+
+    result = await provider.chat(
+        {
+            "prompt": "Return a result",
+            "structured_output": {
+                "name": "test_result",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "answer": {"type": "string"},
+                    },
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        }
+    )
+
+    assert result["reply"] == '{"answer":"Hello"}'
+
+
+@pytest.mark.asyncio
+async def test_chat_omits_structured_output_for_normal_request():
+    response = SimpleNamespace(
+        output_text="Hello from OpenAI",
+        usage=SimpleNamespace(
+            input_tokens=10,
+            output_tokens=5,
+        ),
+    )
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            assert "text" not in kwargs
+            return response
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    provider = OpenAIProvider(
+        client=FakeClient(),
+        settings=type(
+            "TestSettings",
+            (),
+            {
+                "api_key": "test-key",
+                "model": "gpt-4.1-mini",
+                "base_url": "https://api.openai.com/v1",
+                "timeout": 60.0,
+                "max_retries": 2,
+            },
+        )(),
+    )
+
+    result = await provider.chat(
+        {
+            "prompt": "Hello",
+        }
+    )
+
+    assert result["reply"] == "Hello from OpenAI"

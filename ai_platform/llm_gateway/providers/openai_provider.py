@@ -165,6 +165,40 @@ class OpenAIProvider(BaseProvider):
         return prompt
 
     @staticmethod
+    def _structured_output(request: dict[str, Any]) -> dict[str, Any] | None:
+        """Translate gateway structured-output metadata to OpenAI format."""
+
+        structured_output = request.get("structured_output")
+
+        if structured_output is None:
+            return None
+
+        if not isinstance(structured_output, dict):
+            raise ValueError("OpenAI structured output must be a dictionary.")
+
+        name = structured_output.get("name")
+        schema = structured_output.get("schema")
+        strict = structured_output.get("strict", True)
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("OpenAI structured output name must not be empty.")
+
+        if not isinstance(schema, dict):
+            raise ValueError("OpenAI structured output schema must be a dictionary.")
+
+        if not isinstance(strict, bool):
+            raise ValueError("OpenAI structured output strict value must be boolean.")
+
+        return {
+            "format": {
+                "type": "json_schema",
+                "name": name,
+                "schema": schema,
+                "strict": strict,
+            }
+        }
+
+    @staticmethod
     def _extract_tool_calls(
         response: Any,
     ) -> list[AgentToolCall]:
@@ -243,12 +277,14 @@ class OpenAIProvider(BaseProvider):
 
         try:
             tools = self._chat_tools(request)
+            text = self._structured_output(request)
 
             response = await self.client.responses.create(
                 model=model,
                 input=chat_input,
                 temperature=request.get("temperature", 0.7),
                 max_output_tokens=request.get("max_tokens", 1024),
+                **({"text": text} if text is not None else {}),
                 **({"tools": tools} if tools is not None else {}),
             )
 

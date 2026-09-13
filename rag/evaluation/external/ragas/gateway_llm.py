@@ -47,11 +47,18 @@ class GatewayRagasLLM(InstructorBaseRagasLLM):
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
 
+        structured_output = {
+            "name": response_model.__name__,
+            "schema": response_model.model_json_schema(),
+            "strict": True,
+        }
+
         response = await self.gateway.generate(
             prompt,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             user_id=self.user_id,
+            structured_output=structured_output,
         )
 
         reply = response.get("reply")

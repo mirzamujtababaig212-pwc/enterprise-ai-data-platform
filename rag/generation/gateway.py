@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from ai_platform.llm_gateway.routing.router import (
@@ -40,6 +41,7 @@ class GatewayChatService:
         temperature: float = 0.2,
         max_tokens: int = 1024,
         user_id: str | None = None,
+        structured_output: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not prompt.strip():
             raise ValueError("Prompt must not be empty.")
@@ -55,5 +57,8 @@ class GatewayChatService:
 
         if user_id is not None:
             request["user_id"] = user_id
+
+        if structured_output is not None:
+            request["structured_output"] = dict(structured_output)
 
         return await self.gateway_router.route_chat(request)
