@@ -58,7 +58,9 @@ class RagasFaithfulnessAdapter:
                 "Provide a metric for testing or configure a RAGAS-compatible LLM."
             )
 
-        return Faithfulness(llm=self._llm)
+        self._metric = Faithfulness(llm=self._llm)
+
+        return self._metric
 
     async def evaluate(
         self,

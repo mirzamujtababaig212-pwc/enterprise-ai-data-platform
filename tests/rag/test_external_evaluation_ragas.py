@@ -186,3 +186,33 @@ def test_ragas_adapter_requires_llm_for_real_metric() -> None:
         match="An LLM is required for RAGAS Faithfulness evaluation",
     ):
         adapter._get_metric()
+
+
+@pytest.mark.asyncio
+async def test_ragas_adapter_reuses_real_metric_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[object] = []
+
+    class FakeRealMetric(FakeFaithfulnessMetric):
+        def __init__(self) -> None:
+            super().__init__([1.0, 1.0])
+
+    fake_metric = FakeRealMetric()
+
+    def fake_faithfulness(*, llm: object) -> FakeRealMetric:
+        created.append(llm)
+        return fake_metric
+
+    monkeypatch.setattr(
+        "ragas.metrics.collections.Faithfulness",
+        fake_faithfulness,
+    )
+
+    adapter = RagasFaithfulnessAdapter(llm=object())
+
+    first = adapter._get_metric()
+    second = adapter._get_metric()
+
+    assert first is second
+    assert len(created) == 1
