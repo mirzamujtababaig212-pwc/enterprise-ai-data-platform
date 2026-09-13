@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -143,17 +144,39 @@ class QdrantVectorStore:
                 ],
             )
 
-        response = await self._client.query_points(
+        query_norm = math.sqrt(sum(value * value for value in query))
+
+        count_response = await self._client.count(
             collection_name=self._collection_name,
-            query=query,
-            query_filter=query_filter,
-            limit=top_k,
-            with_payload=True,
+            count_filter=query_filter,
+            exact=True,
         )
+        candidate_limit = max(top_k, int(count_response.count))
+
+        if query_norm == 0.0:
+            response = await self._client.scroll(
+                collection_name=self._collection_name,
+                scroll_filter=query_filter,
+                limit=candidate_limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            points = response[0]
+            point_scores = {point.id: 0.0 for point in points}
+        else:
+            response = await self._client.query_points(
+                collection_name=self._collection_name,
+                query=query,
+                query_filter=query_filter,
+                limit=candidate_limit,
+                with_payload=True,
+            )
+            points = response.points
+            point_scores = {point.id: float(point.score) for point in points}
 
         results: list[RetrievalResult] = []
 
-        for point in response.points:
+        for point in points:
             payload = point.payload or {}
 
             chunk = DocumentChunk(
@@ -180,12 +203,16 @@ class QdrantVectorStore:
             results.append(
                 RetrievalResult(
                     chunk=chunk,
-                    score=float(point.score),
+                    score=point_scores[point.id],
                     embedding_identity=embedding_identity,
                 )
             )
 
-        return results
+        results.sort(
+            key=lambda result: (-result.score, result.chunk.id),
+        )
+
+        return results[:top_k]
 
     async def _ensure_collection(self, dimension: int) -> None:
         if dimension <= 0:

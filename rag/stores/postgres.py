@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy import delete, select
@@ -159,6 +160,39 @@ class PostgreSQLVectorStore:
         session: Session = self._session_factory()
 
         try:
+            base_statement = select(RAGChunkRecord).where(
+                RAGChunkRecord.embedding.is_not(None),
+                RAGChunkRecord.embedding_dimension == len(query),
+            )
+
+            if metadata_filter:
+                for key, value in metadata_filter.items():
+                    base_statement = base_statement.where(
+                        RAGChunkRecord.chunk_metadata[key].as_string() == str(value)
+                    )
+
+            query_norm = math.sqrt(sum(value * value for value in query))
+
+            if query_norm == 0.0:
+                records = session.scalars(
+                    base_statement.order_by(RAGChunkRecord.chunk_id.asc()).limit(top_k)
+                ).all()
+
+                return [
+                    RetrievalResult(
+                        chunk=DocumentChunk(
+                            id=record.chunk_id,
+                            document_id=record.document_id,
+                            content=record.content,
+                            metadata=dict(record.chunk_metadata),
+                            chunk_index=record.chunk_index,
+                        ),
+                        score=0.0,
+                        embedding_identity=self._embedding_identity(record),
+                    )
+                    for record in records
+                ]
+
             distance = RAGChunkRecord.embedding.cosine_distance(query)
 
             statement = select(RAGChunkRecord, distance.label("distance")).where(
