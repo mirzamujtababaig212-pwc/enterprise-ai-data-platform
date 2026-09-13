@@ -132,6 +132,9 @@ class FakeRAGStateRepository:
             }
         )
 
+    def ensure_document(self, document) -> None:
+        return None
+
 
 class FakeRAGVectorStore:
     def __init__(self) -> None:

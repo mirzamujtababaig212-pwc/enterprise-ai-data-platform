@@ -107,3 +107,4 @@ pandas>=2.2,<3.0
 torch==2.14.0
 
 anthropic==1.4.0
+pgvector>=0.3.6,<1.0

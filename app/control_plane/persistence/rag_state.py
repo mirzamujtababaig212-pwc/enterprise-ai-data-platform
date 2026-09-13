@@ -96,6 +96,7 @@ class PostgreSQLRAGStateRepository:
                         chunk_index=embedded_chunk.chunk.chunk_index,
                         content=embedded_chunk.chunk.content,
                         chunk_metadata=dict(embedded_chunk.chunk.metadata),
+                        embedding=list(embedded_chunk.embedding),
                         embedding_model=(identity.resolved_model if identity is not None else None),
                         embedding_dimension=(
                             identity.dimension
@@ -165,6 +166,34 @@ class PostgreSQLRAGStateRepository:
             self._session.execute(
                 delete(RAGDocumentRecord).where(RAGDocumentRecord.document_id == document_id)
             )
+            self._session.commit()
+
+        except Exception:
+            self._session.rollback()
+            raise
+
+    def ensure_document(
+        self,
+        document: Document,
+    ) -> None:
+        try:
+            existing = self._session.scalar(
+                select(RAGDocumentRecord).where(RAGDocumentRecord.document_id == document.id)
+            )
+
+            if existing is None:
+                self._session.add(
+                    RAGDocumentRecord(
+                        document_id=document.id,
+                        content=document.content,
+                        document_metadata=dict(document.metadata),
+                    )
+                )
+                self._session.commit()
+                return
+
+            existing.content = document.content
+            existing.document_metadata = dict(document.metadata)
             self._session.commit()
 
         except Exception:

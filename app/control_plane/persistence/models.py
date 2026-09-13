@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
@@ -249,6 +250,11 @@ class RAGChunkRecord(Base):
         JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
         default=dict,
+    )
+
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(),
+        nullable=True,
     )
 
     embedding_model: Mapped[str | None] = mapped_column(

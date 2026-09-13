@@ -6,6 +6,11 @@ from rag.models import Document, DocumentChunk, EmbeddedChunk
 
 
 class RAGStateRepository(Protocol):
+    def ensure_document(
+        self,
+        document: Document,
+    ) -> None: ...
+
     def save_document(
         self,
         document: Document,
