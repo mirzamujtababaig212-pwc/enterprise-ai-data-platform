@@ -11,6 +11,8 @@ from rag.indexing import RAGIndexer
 from rag.ingestion import RAGIngestionService
 from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.in_memory import InMemoryVectorStore
+from common.databricks.metadata import DatabricksTableMetadata
+from common.provenance import databricks_source_ref
 
 
 @pytest.mark.asyncio
@@ -25,6 +27,16 @@ async def test_databricks_dbt_model_flows_through_rag_pipeline():
         materialization="table",
     )
 
+    table_metadata = DatabricksTableMetadata(
+        full_name="vehicle_platform.analytics.rpt_vehicle_summary",
+        catalog="vehicle_platform",
+        schema="analytics",
+        name="rpt_vehicle_summary",
+        table_type="MANAGED",
+        table_id="table-123",
+    )
+
+    source_ref = databricks_source_ref(table_metadata)
     reader = ReaderBuilder.build(
         {
             "reader": {
@@ -72,6 +84,7 @@ async def test_databricks_dbt_model_flows_through_rag_pipeline():
             "dataset": model.name,
             "battery_health": row["battery_health"],
             "fuel_health": row["fuel_health"],
+            "source_ref": source_ref.to_dict(),
         },
     )
 
@@ -87,6 +100,13 @@ async def test_databricks_dbt_model_flows_through_rag_pipeline():
     assert documents[0].metadata["dbt_model"] == "rpt_vehicle_summary"
     assert documents[0].metadata["dbt_database"] == "vehicle_platform"
     assert documents[0].metadata["dbt_schema"] == "analytics"
+    assert documents[0].metadata["source_ref"] == {
+        "platform": "databricks",
+        "object_type": "table",
+        "object_name": "rpt_vehicle_summary",
+        "object_id": "table-123",
+        "namespace": "vehicle_platform.analytics",
+    }
 
     vector_store = InMemoryVectorStore()
 
@@ -124,3 +144,10 @@ async def test_databricks_dbt_model_flows_through_rag_pipeline():
     assert results
     assert results[0].chunk.metadata["dbt_model"] == "rpt_vehicle_summary"
     assert results[0].chunk.metadata["source"] == "databricks"
+    assert results[0].chunk.metadata["source_ref"] == {
+        "platform": "databricks",
+        "object_type": "table",
+        "object_name": "rpt_vehicle_summary",
+        "object_id": "table-123",
+        "namespace": "vehicle_platform.analytics",
+    }
