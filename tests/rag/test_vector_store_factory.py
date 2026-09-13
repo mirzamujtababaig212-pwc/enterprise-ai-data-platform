@@ -63,3 +63,15 @@ def test_factory_creates_faiss(monkeypatch) -> None:
     store = VectorStoreFactory.create()
 
     assert isinstance(store, FAISSVectorStore)
+
+
+def test_factory_creates_explicit_backend_without_using_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        Settings.vector_store,
+        "BACKEND",
+        "in_memory",
+    )
+
+    store = VectorStoreFactory.create(backend="faiss")
+
+    assert isinstance(store, FAISSVectorStore)

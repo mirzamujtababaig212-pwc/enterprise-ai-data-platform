@@ -1,33 +1,33 @@
 import pytest
 
-from rag.evaluation.dataset import RetrievalEvaluationDataset
-from rag.evaluation.datasets.vehicle import (
-    VEHICLE_EMBEDDING_IDENTITY,
-    VehicleBenchmarkEmbeddingService,
-    vehicle_benchmark_chunks,
-    vehicle_evaluation_cases,
-)
+from rag.evaluation.dataset_registry import VehicleRetrievalEvaluationDatasetDefinition
 from rag.evaluation.evaluator import RetrievalEvaluator
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.workflow import RetrievalEvaluationWorkflow
-from rag.retrieval import SemanticRetriever
-from rag.stores import InMemoryVectorStore
 
 
 @pytest.mark.asyncio
-async def test_vehicle_benchmark_workflow_preserves_real_retrieval_lineage() -> None:
-    vector_store = InMemoryVectorStore()
-    await vector_store.upsert(vehicle_benchmark_chunks())
-
-    retriever = SemanticRetriever(
-        embedding_service=VehicleBenchmarkEmbeddingService(),
-        vector_store=vector_store,
+@pytest.mark.parametrize(
+    ("backend", "expected_vector_store_type"),
+    [
+        ("in_memory", "InMemoryVectorStore"),
+        ("faiss", "FAISSVectorStore"),
+    ],
+)
+async def test_vehicle_benchmark_workflow_preserves_real_retrieval_lineage(
+    backend: str,
+    expected_vector_store_type: str,
+) -> None:
+    definition = VehicleRetrievalEvaluationDatasetDefinition(
+        vector_store_backend=backend,
     )
+
+    retriever = await definition.build_retriever()
 
     evaluator = RetrievalEvaluator(
         retriever,
         k=3,
-        embedding_identity=VEHICLE_EMBEDDING_IDENTITY,
+        embedding_identity=definition.build_embedding_identity(),
     )
 
     policy = RetrievalEvaluationPolicy(
@@ -38,18 +38,13 @@ async def test_vehicle_benchmark_workflow_preserves_real_retrieval_lineage() -> 
         min_ndcg_at_k=0.95,
     )
 
-    dataset = RetrievalEvaluationDataset.from_cases(
-        "vehicle-retrieval",
-        vehicle_evaluation_cases(),
-        version="v2",
-    )
-
     workflow = RetrievalEvaluationWorkflow(
         evaluator=evaluator,
         policy=policy,
+        retrieval_artifact=definition.build_retrieval_artifact(),
     )
 
-    result = await workflow.run(dataset)
+    result = await workflow.run(definition.build_dataset())
 
     assert result.passed is True
     assert result.evaluation.evaluated_queries == 7
@@ -66,7 +61,11 @@ async def test_vehicle_benchmark_workflow_preserves_real_retrieval_lineage() -> 
     assert result.lineage.evaluation_policy_name == "vehicle-retrieval-quality-v2"
     assert result.lineage.evaluator_k == 3
     assert result.lineage.min_relevance_score is None
-    assert result.lineage.embedding_identity == VEHICLE_EMBEDDING_IDENTITY
+    assert result.lineage.embedding_identity == definition.build_embedding_identity()
+
+    assert result.lineage.retrieval_artifact is not None
+    assert result.lineage.retrieval_artifact.retriever_type == "SemanticRetriever"
+    assert result.lineage.retrieval_artifact.vector_store_type == expected_vector_store_type
 
     lineage = result.as_dict()["lineage"]
 
@@ -79,3 +78,5 @@ async def test_vehicle_benchmark_workflow_preserves_real_retrieval_lineage() -> 
     assert lineage["embedding_resolved_provider"] == "test-provider"
     assert lineage["embedding_resolved_model"] == "vehicle-benchmark"
     assert lineage["embedding_dimension"] == 6
+    assert lineage["retriever_type"] == "SemanticRetriever"
+    assert lineage["vector_store_type"] == expected_vector_store_type

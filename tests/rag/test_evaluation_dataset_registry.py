@@ -50,6 +50,25 @@ async def test_vehicle_dataset_definition_builds_isolated_retriever() -> None:
     assert results[0].embedding_identity == VEHICLE_EMBEDDING_IDENTITY
 
 
+@pytest.mark.asyncio
+async def test_vehicle_dataset_definition_builds_faiss_retriever() -> None:
+    definition = VehicleRetrievalEvaluationDatasetDefinition(
+        vector_store_backend="faiss",
+    )
+
+    retriever = await definition.build_retriever()
+
+    results = await retriever.retrieve(
+        "How does regenerative braking work?",
+        top_k=3,
+    )
+
+    assert results
+    assert len(results) <= 3
+    assert results[0].chunk.content
+    assert results[0].embedding_identity == VEHICLE_EMBEDDING_IDENTITY
+
+
 def test_registry_requires_explicit_dataset_and_version() -> None:
     definition = EvaluationDatasetRegistry.get(
         name="vehicle-retrieval",
@@ -79,4 +98,17 @@ def test_vehicle_dataset_definition_builds_retrieval_artifact() -> None:
     assert artifact == RetrievalEvaluationArtifact(
         retriever_type="SemanticRetriever",
         vector_store_type="InMemoryVectorStore",
+    )
+
+
+def test_vehicle_dataset_definition_builds_faiss_retrieval_artifact() -> None:
+    definition = VehicleRetrievalEvaluationDatasetDefinition(
+        vector_store_backend="faiss",
+    )
+
+    artifact = definition.build_retrieval_artifact()
+
+    assert artifact == RetrievalEvaluationArtifact(
+        retriever_type="SemanticRetriever",
+        vector_store_type="FAISSVectorStore",
     )

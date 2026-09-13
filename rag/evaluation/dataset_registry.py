@@ -14,7 +14,7 @@ from rag.evaluation.datasets.vehicle import (
 from rag.evaluation.lineage import RetrievalEvaluationArtifact
 from rag.models import EmbeddingIdentity
 from rag.retrieval import SemanticRetriever
-from rag.stores import InMemoryVectorStore
+from rag.stores import VectorStoreFactory
 
 
 class EvaluationDatasetDefinition(Protocol):
@@ -40,6 +40,7 @@ class VehicleRetrievalEvaluationDatasetDefinition:
 
     name: str = "vehicle-retrieval"
     version: str = "v2"
+    vector_store_backend: str = "in_memory"
 
     def build_dataset(self) -> RetrievalEvaluationDataset:
         return RetrievalEvaluationDataset.from_cases(
@@ -55,7 +56,9 @@ class VehicleRetrievalEvaluationDatasetDefinition:
         return VEHICLE_EMBEDDING_IDENTITY
 
     async def build_retriever(self) -> Retriever:
-        vector_store = InMemoryVectorStore()
+        vector_store = VectorStoreFactory.create(
+            backend=self.vector_store_backend,
+        )
         await vector_store.upsert(vehicle_benchmark_chunks())
 
         return SemanticRetriever(
@@ -66,7 +69,9 @@ class VehicleRetrievalEvaluationDatasetDefinition:
     def build_retrieval_artifact(self) -> RetrievalEvaluationArtifact:
         return RetrievalEvaluationArtifact(
             retriever_type="SemanticRetriever",
-            vector_store_type="InMemoryVectorStore",
+            vector_store_type=VectorStoreFactory.type_name(
+                self.vector_store_backend,
+            ),
         )
 
 

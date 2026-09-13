@@ -20,8 +20,27 @@ class VectorStoreFactory:
     """
 
     @staticmethod
-    def create() -> VectorStore:
-        backend = Settings.vector_store.BACKEND
+    def type_name(backend: str) -> str:
+        backend = backend.strip().lower()
+
+        type_names = {
+            "in_memory": "InMemoryVectorStore",
+            "faiss": "FAISSVectorStore",
+            "qdrant": "QdrantVectorStore",
+            "postgres": "PostgreSQLVectorStore",
+        }
+
+        try:
+            return type_names[backend]
+        except KeyError as exc:
+            raise ValueError(
+                "Unsupported vector-store backend: "
+                f"{backend!r}. Expected 'in_memory', 'faiss', 'qdrant', or 'postgres'."
+            ) from exc
+
+    @staticmethod
+    def create(backend: str | None = None) -> VectorStore:
+        backend = Settings.vector_store.BACKEND if backend is None else backend.strip().lower()
 
         if backend == "in_memory":
             return InMemoryVectorStore()
