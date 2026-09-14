@@ -1,0 +1,40 @@
+FROM python:3.12-slim
+
+LABEL maintainer="Mirza Mujtaba Baig"
+LABEL application="Enterprise AI Platform AWS Batch"
+LABEL version="1.0.0"
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV ENTERPRISE_AI_PLATFORM_ROOT=/app
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+WORKDIR /app
+
+RUN useradd \
+    --create-home \
+    --shell /usr/sbin/nologin \
+    appuser
+
+RUN apt-get update && \
+    apt-get install -y \
+        openjdk-21-jdk \
+        curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements/aws-batch.txt ./requirements/aws-batch.txt
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements/aws-batch.txt
+
+COPY common ./common
+COPY spark ./spark
+COPY config ./config
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+CMD ["python", "spark/batch/ingest/batch_to_bronze.py"]

@@ -1,0 +1,6 @@
+boto3
+botocore
+python-dotenv
+PyYAML
+pyspark==4.1.1
+delta-spark==4.3.1
