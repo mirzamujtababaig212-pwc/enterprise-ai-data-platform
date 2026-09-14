@@ -27,7 +27,7 @@ class FakeBuilder:
 
 @patch("common.spark.spark_builder.configure_spark_with_delta_pip")
 @patch("common.spark.spark_builder.SparkSession")
-def test_build_configures_s3a_dependencies_after_delta(
+def test_build_configures_s3a_dependencies_without_kafka_by_default(
     mock_spark,
     mock_delta,
     tmp_path,
@@ -47,12 +47,11 @@ def test_build_configures_s3a_dependencies_after_delta(
     result = SparkSessionBuilder.build("S3ARegressionTest")
 
     expected_packages = (
-        f"{SparkSessionBuilder.DELTA_PACKAGE},"
-        f"{SparkSessionBuilder.HADOOP_AWS_PACKAGE},"
-        f"{SparkSessionBuilder.KAFKA_PACKAGE}"
+        f"{SparkSessionBuilder.DELTA_PACKAGE}," f"{SparkSessionBuilder.HADOOP_AWS_PACKAGE}"
     )
 
     assert delta_configured_builder._options["spark.jars.packages"] == expected_packages
+    assert SparkSessionBuilder.KAFKA_PACKAGE not in expected_packages
 
     assert "spark.hadoop.fs.s3a.aws.credentials.provider" in delta_configured_builder._options
 
@@ -67,12 +66,69 @@ def test_build_configures_s3a_dependencies_after_delta(
         if key == "spark.jars.packages"
     ]
 
+    assert package_calls == [expected_packages]
+
+    mock_delta.assert_called_once_with(builder)
+    assert result == delta_configured_builder._spark
+    assert delta_configured_builder.get_or_create_calls == 1
+    delta_configured_builder._spark.sparkContext.setLogLevel.assert_called_once_with("WARN")
+
+    assert delta_configured_builder._options["spark.hadoop.fs.s3a.impl"] == (
+        "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    )
+
+
+@patch("common.spark.spark_builder.configure_spark_with_delta_pip")
+@patch("common.spark.spark_builder.SparkSession")
+def test_build_adds_kafka_when_explicitly_enabled(
+    mock_spark,
+    mock_delta,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(tmp_path))
+
+    builder = FakeBuilder()
+    mock_spark.builder = builder
+
+    delta_configured_builder = FakeBuilder()
+    delta_configured_builder._options = {
+        "spark.jars.packages": SparkSessionBuilder.DELTA_PACKAGE,
+    }
+    mock_delta.return_value = delta_configured_builder
+
+    SparkSessionBuilder.build(
+        "KafkaRegressionTest",
+        include_kafka=True,
+    )
+
+    expected_base_packages = (
+        f"{SparkSessionBuilder.DELTA_PACKAGE}," f"{SparkSessionBuilder.HADOOP_AWS_PACKAGE}"
+    )
+    expected_packages = f"{expected_base_packages},{SparkSessionBuilder.KAFKA_PACKAGE}"
+
+    assert delta_configured_builder._options["spark.jars.packages"] == expected_packages
+
+    assert delta_configured_builder._options["spark.hadoop.fs.s3a.impl"] == (
+        "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    )
+
+    assert delta_configured_builder._options["spark.hadoop.fs.s3a.aws.credentials.provider"] == (
+        "org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider,"
+        "software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider"
+    )
+
+    package_calls = [
+        value
+        for key, value in delta_configured_builder.config_calls
+        if key == "spark.jars.packages"
+    ]
+
     assert package_calls == [
-        (f"{SparkSessionBuilder.DELTA_PACKAGE}," f"{SparkSessionBuilder.HADOOP_AWS_PACKAGE}"),
+        expected_base_packages,
         expected_packages,
     ]
 
     mock_delta.assert_called_once_with(builder)
-    assert result == delta_configured_builder._spark
     assert delta_configured_builder.get_or_create_calls == 1
     delta_configured_builder._spark.sparkContext.setLogLevel.assert_called_once_with("WARN")

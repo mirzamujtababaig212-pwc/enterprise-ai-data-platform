@@ -3,7 +3,10 @@ from common.spark.spark_builder import SparkSessionBuilder
 
 
 def main():
-    spark = SparkSessionBuilder.build("KafkaToBronzeStreaming")
+    spark = SparkSessionBuilder.build(
+        "KafkaToBronzeStreaming",
+        include_kafka=True,
+    )
 
     try:
         PipelineRunner.run(

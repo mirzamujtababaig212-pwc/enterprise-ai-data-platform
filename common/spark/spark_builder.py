@@ -38,6 +38,7 @@ class SparkSessionBuilder:
     @staticmethod
     def build(
         app_name: str = "EnterpriseAIPlatform",
+        include_kafka: bool = False,
     ) -> SparkSession:
 
         # ==========================================================
@@ -167,30 +168,39 @@ class SparkSessionBuilder:
         # Local development uses the shared AWS CLI profile. AWS-hosted
         # runtimes can fall back to their attached IAM role credentials.
         builder = builder.config(
+            "spark.hadoop.fs.s3a.impl",
+            "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        )
+
+        builder = builder.config(
             "spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider,"
             "software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider",
         )
 
         # ==========================================================
-        # Kafka Structured Streaming connector
+        # Optional Kafka Structured Streaming connector
         #
         # Spark 4.1.1
         # Scala 2.13
+        #
+        # Kafka is intentionally opt-in. Batch and Delta-based
+        # streaming workloads do not require the Kafka connector.
         # ==========================================================
 
-        existing_packages = builder._options.get("spark.jars.packages")
-        kafka_package = SparkSessionBuilder.KAFKA_PACKAGE
+        if include_kafka:
+            existing_packages = builder._options.get("spark.jars.packages")
+            kafka_package = SparkSessionBuilder.KAFKA_PACKAGE
 
-        if existing_packages:
-            packages = f"{existing_packages},{kafka_package}"
-        else:
-            packages = kafka_package
+            if existing_packages:
+                packages = f"{existing_packages},{kafka_package}"
+            else:
+                packages = kafka_package
 
-        builder = builder.config(
-            "spark.jars.packages",
-            packages,
-        )
+            builder = builder.config(
+                "spark.jars.packages",
+                packages,
+            )
 
         # ==========================================================
         # CREATE SESSION
