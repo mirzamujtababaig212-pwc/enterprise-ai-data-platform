@@ -21,6 +21,7 @@ class FakeBuilder:
         return self
 
     def getOrCreate(self):
+        self.get_or_create_calls = getattr(self, "get_or_create_calls", 0) + 1
         return self._spark
 
 
@@ -73,5 +74,5 @@ def test_build_configures_s3a_dependencies_after_delta(
 
     mock_delta.assert_called_once_with(builder)
     assert result == delta_configured_builder._spark
-    delta_configured_builder.getOrCreate.assert_called_once_with()
+    assert delta_configured_builder.get_or_create_calls == 1
     delta_configured_builder._spark.sparkContext.setLogLevel.assert_called_once_with("WARN")
