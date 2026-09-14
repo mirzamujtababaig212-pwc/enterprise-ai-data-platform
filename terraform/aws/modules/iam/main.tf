@@ -64,32 +64,6 @@ resource "aws_iam_role_policy" "ecs_task_platform_access" {
 
     Statement = [
       {
-        Sid    = "SecretsManagerAccess"
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
-        ]
-        Resource = [
-          var.provider_credentials_secret_arn,
-          var.gateway_api_key_secret_arn
-        ]
-      },
-      {
-        Sid    = "SSMParameterAccess"
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
-        ]
-        Resource = [
-          var.environment_parameter_arn,
-          var.log_level_parameter_arn,
-          var.default_provider_parameter_arn
-        ]
-      },
-      {
         Sid    = "S3PlatformAccess"
         Effect = "Allow"
         Action = [
