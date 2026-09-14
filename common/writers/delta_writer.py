@@ -95,12 +95,12 @@ class DeltaWriter(BaseWriter):
         compatible with the canonical storage configuration.
         """
 
-        from common.config.storage import StorageConfig
+        from common.config.settings import Settings
 
         mapping = {
-            StorageConfig.BRONZE_TABLE: StorageConfig.BRONZE_PATH,
-            StorageConfig.SILVER_TABLE: StorageConfig.SILVER_PATH,
-            StorageConfig.GOLD_TABLE: StorageConfig.GOLD_PATH,
+            Settings.storage.BRONZE_TABLE: Settings.storage.BRONZE_PATH,
+            Settings.storage.SILVER_TABLE: Settings.storage.SILVER_PATH,
+            Settings.storage.GOLD_TABLE: Settings.storage.GOLD_PATH,
         }
 
         if table not in mapping:

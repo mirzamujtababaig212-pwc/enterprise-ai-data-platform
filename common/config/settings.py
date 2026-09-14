@@ -15,7 +15,7 @@ class Settings:
     kafka = KafkaConfig
     spark = SparkConfig
     env = Environment
-    storage = StorageConfig
+    storage = StorageConfig()
     snowflake = SnowflakeConfig
     databricks = DatabricksConfig
     fabric = FabricConfig
