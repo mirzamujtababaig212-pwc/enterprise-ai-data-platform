@@ -4,6 +4,7 @@ from common.databricks.metadata import DatabricksTableMetadata
 from common.fabric.metadata import FabricTableMetadata
 from common.provenance.source import EnterpriseSourceRef
 from common.snowflake.metadata import SnowflakeTableMetadata
+from common.aws.metadata import AwsGlueTableMetadata
 
 
 def databricks_source_ref(
@@ -87,4 +88,16 @@ def s3_source_ref(
         object_type="s3_path",
         object_name=uri,
         namespace=f"s3://{bucket}",
+    )
+
+
+def aws_glue_source_ref(
+    metadata: AwsGlueTableMetadata,
+) -> EnterpriseSourceRef:
+    """Project AWS Glue table metadata into the canonical source identity."""
+    return EnterpriseSourceRef(
+        platform="aws",
+        object_type="table",
+        object_name=metadata.name,
+        namespace=metadata.database_name,
     )
