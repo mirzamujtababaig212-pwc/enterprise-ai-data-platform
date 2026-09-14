@@ -31,6 +31,8 @@ class SparkSessionBuilder:
 
     DELTA_PACKAGE = "io.delta:delta-spark_4.1_2.13:4.3.1"
 
+    HADOOP_AWS_PACKAGE = "org.apache.hadoop:hadoop-aws:3.4.2"
+
     KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1"
 
     @staticmethod
@@ -143,15 +145,41 @@ class SparkSessionBuilder:
 
         builder = configure_spark_with_delta_pip(builder)
 
-        # -------------------------------------------------------------
+        # ==========================================================
+        # AWS S3A DEPENDENCY
+        # ==========================================================
+
+        # Delta configuration sets spark.jars.packages, so Hadoop AWS
+        # must be appended after configure_spark_with_delta_pip().
+        existing_packages = builder._options.get("spark.jars.packages")
+        hadoop_aws_package = SparkSessionBuilder.HADOOP_AWS_PACKAGE
+
+        if existing_packages:
+            packages = f"{existing_packages},{hadoop_aws_package}"
+        else:
+            packages = hadoop_aws_package
+
+        builder = builder.config(
+            "spark.jars.packages",
+            packages,
+        )
+
+        # Local development uses the shared AWS CLI profile. AWS-hosted
+        # runtimes can fall back to their attached IAM role credentials.
+        builder = builder.config(
+            "spark.hadoop.fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider,"
+            "software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider",
+        )
+
+        # ==========================================================
         # Kafka Structured Streaming connector
         #
         # Spark 4.1.1
         # Scala 2.13
-        # -------------------------------------------------------------
+        # ==========================================================
 
         existing_packages = builder._options.get("spark.jars.packages")
-
         kafka_package = SparkSessionBuilder.KAFKA_PACKAGE
 
         if existing_packages:
