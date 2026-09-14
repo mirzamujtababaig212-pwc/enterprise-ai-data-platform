@@ -25,17 +25,18 @@ def local_mlflow_environment():
         "http://localhost:9000",
     )
 
-    if not os.environ.get("AWS_ACCESS_KEY_ID"):
-        os.environ["AWS_ACCESS_KEY_ID"] = os.getenv(
-            "MINIO_ROOT_USER",
-            "minio",
-        )
+    if os.getenv("RUN_AWS_INTEGRATION") != "1":
+        if not os.environ.get("AWS_ACCESS_KEY_ID"):
+            os.environ["AWS_ACCESS_KEY_ID"] = os.getenv(
+                "MINIO_ROOT_USER",
+                "minio",
+            )
 
-    if not os.environ.get("AWS_SECRET_ACCESS_KEY"):
-        os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv(
-            "MINIO_ROOT_PASSWORD",
-            "minio123",
-        )
+        if not os.environ.get("AWS_SECRET_ACCESS_KEY"):
+            os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv(
+                "MINIO_ROOT_PASSWORD",
+                "minio123",
+            )
 
     os.environ.setdefault(
         "AWS_DEFAULT_REGION",
