@@ -519,3 +519,79 @@ async def test_route_chat_discovers_provider_when_not_requested(
         model="gpt-4o",
         requested_provider=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_route_chat_with_bedrock_provider():
+    from ai_platform.llm_gateway.config.bedrock_settings import BedrockSettings
+    from ai_platform.llm_gateway.providers.bedrock_provider import BedrockProvider
+
+    client = MagicMock()
+    client.converse.return_value = {
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"text": "Hello from mocked Bedrock."},
+                ],
+            }
+        },
+        "usage": {
+            "inputTokens": 5,
+            "outputTokens": 4,
+        },
+        "stopReason": "end_turn",
+    }
+
+    provider = BedrockProvider(
+        client=client,
+        settings=BedrockSettings(
+            region="us-east-1",
+            chat_model="amazon.nova-micro-v1:0",
+        ),
+    )
+    provider.name = "bedrock"
+
+    routing_resolver = MagicMock()
+    routing_resolver.is_logical_model.return_value = False
+    routing_resolver.resolve.return_value = [provider]
+
+    router = Router(
+        routing_resolver=routing_resolver,
+    )
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_chat",
+    ) as validate_chat:
+        result = await router.route_chat_with_metadata(
+            {
+                "provider": "bedrock",
+                "model": "bedrock-chat",
+                "prompt": "Hello",
+            }
+        )
+
+    validate_chat.assert_called_once_with(
+        "bedrock",
+        "bedrock-chat",
+    )
+
+    routing_resolver.resolve.assert_called_once_with(
+        capability="chat",
+        model="bedrock-chat",
+        requested_provider="bedrock",
+    )
+
+    client.converse.assert_called_once()
+    kwargs = client.converse.call_args.kwargs
+
+    assert kwargs["modelId"] == "amazon.nova-micro-v1:0"
+    assert kwargs["messages"] == [
+        {
+            "role": "user",
+            "content": [{"text": "Hello"}],
+        }
+    ]
+    assert result.provider_name == "bedrock"
+    assert result.model_name == "bedrock-chat"
+    assert result.response["reply"] == "Hello from mocked Bedrock."
