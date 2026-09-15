@@ -38,6 +38,34 @@ def provider(client, settings):
     )
 
 
+def test_provider_uses_boto3_credential_chain_without_static_credentials(monkeypatch):
+    settings = BedrockSettings(
+        region="us-east-1",
+        chat_model="amazon.nova-micro-v1:0",
+        embedding_model="amazon.titan-embed-text-v2:0",
+        embedding_dimensions=1024,
+        embedding_normalize=True,
+    )
+    client = Mock()
+    boto3_client = Mock(return_value=client)
+
+    monkeypatch.setattr(
+        "ai_platform.llm_gateway.providers.bedrock_provider.boto3.client",
+        boto3_client,
+    )
+
+    provider = BedrockProvider(
+        settings=settings,
+    )
+
+    assert provider.client is client
+    boto3_client.assert_called_once()
+    assert boto3_client.call_args.args == ("bedrock-runtime",)
+    assert boto3_client.call_args.kwargs["region_name"] == "us-east-1"
+    assert "aws_access_key_id" not in boto3_client.call_args.kwargs
+    assert "aws_secret_access_key" not in boto3_client.call_args.kwargs
+
+
 @pytest.mark.asyncio
 async def test_chat(provider, client):
     client.converse.return_value = {

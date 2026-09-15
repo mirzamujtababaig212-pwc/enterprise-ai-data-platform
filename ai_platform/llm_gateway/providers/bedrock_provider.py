@@ -51,19 +51,24 @@ class BedrockProvider(BaseProvider):
         self.client = client
 
         if self.client is None:
-            if not self.settings.access_key_id or not self.settings.secret_access_key:
-                self.client = None
-            else:
-                self.client = boto3.client(
-                    "bedrock-runtime",
-                    region_name=self.settings.region,
+            client_kwargs = {
+                "region_name": self.settings.region,
+                "config": boto3.session.Config(
+                    connect_timeout=self.settings.timeout,
+                    read_timeout=self.settings.timeout,
+                ),
+            }
+
+            if self.settings.access_key_id and self.settings.secret_access_key:
+                client_kwargs.update(
                     aws_access_key_id=self.settings.access_key_id,
                     aws_secret_access_key=self.settings.secret_access_key,
-                    config=boto3.session.Config(
-                        connect_timeout=self.settings.timeout,
-                        read_timeout=self.settings.timeout,
-                    ),
                 )
+
+            self.client = boto3.client(
+                "bedrock-runtime",
+                **client_kwargs,
+            )
 
     def _require_client(self) -> Any:
         if self.client is None:
