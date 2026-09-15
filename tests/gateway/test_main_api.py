@@ -102,6 +102,42 @@ def test_embeddings_success(mock_embeddings):
     assert body["metrics"]["tokens_out"] == 3
 
 
+@patch(
+    "ai_platform.llm_gateway.api.main.router.route_embeddings",
+    new_callable=AsyncMock,
+)
+def test_embeddings_bedrock_success(mock_embeddings):
+
+    mock_embeddings.return_value = [0.1, 0.2, 0.3]
+
+    response = client.post(
+        "/v1/embeddings",
+        headers=HEADERS,
+        json={
+            "provider": "bedrock",
+            "model": "bedrock-embedding",
+            "text": "Hello",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["vector"] == [0.1, 0.2, 0.3]
+    assert body["metrics"]["tokens_in"] == 1
+    assert body["metrics"]["tokens_out"] == 3
+    assert body["metrics"]["status"] == "success"
+
+    mock_embeddings.assert_awaited_once_with(
+        {
+            "provider": "bedrock",
+            "model": "bedrock-embedding",
+            "text": "Hello",
+        }
+    )
+
+
 ###########################################################################
 # Embeddings ValueError
 ###########################################################################
