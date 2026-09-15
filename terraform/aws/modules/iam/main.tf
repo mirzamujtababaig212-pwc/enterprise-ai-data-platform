@@ -94,6 +94,83 @@ resource "aws_iam_role_policy" "ecs_task_platform_access" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_bedrock_access" {
+  name = "${var.project_name}-${var.environment}-ecs-task-bedrock-access"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "BedrockInvokeModels"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = var.bedrock_invoke_resource_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "ecs_batch_task" {
+  name = "${var.project_name}-${var.environment}-ecs-batch-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_batch_task_data_access" {
+  name = "${var.project_name}-${var.environment}-ecs-batch-task-data-access"
+  role = aws_iam_role.ecs_batch_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "S3DataBucketAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = var.data_bucket_arn
+      },
+      {
+        Sid    = "S3DataObjectAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${var.data_bucket_arn}/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "ecs_execution_platform_access" {
   name = "${var.project_name}-${var.environment}-ecs-execution-platform-access"
   role = aws_iam_role.ecs_execution.id
@@ -128,4 +205,35 @@ resource "aws_iam_role_policy" "ecs_execution_platform_access" {
       }
     ]
   })
+}
+
+resource "aws_iam_role" "ecs_batch_execution" {
+  name = "${var.project_name}-${var.environment}-ecs-batch-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_batch_execution" {
+  role       = aws_iam_role.ecs_batch_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }

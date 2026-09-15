@@ -86,3 +86,35 @@ variable "desired_count" {
   type        = number
   default     = 1
 }
+
+variable "batch_execution_role_arn" {
+  description = "ARN of the dedicated ECS batch task execution role."
+  type        = string
+}
+
+variable "batch_task_role_arn" {
+  description = "ARN of the dedicated ECS batch task role."
+  type        = string
+}
+
+variable "batch_container_image" {
+  description = "Immutable container image for ECS batch tasks."
+  type        = string
+}
+
+variable "batch_data_bucket_name" {
+  description = "Canonical enterprise data S3 bucket used by ECS batch tasks."
+  type        = string
+}
+
+variable "batch_cpu" {
+  description = "CPU units for ECS batch tasks."
+  type        = number
+  default     = 1024
+}
+
+variable "batch_memory" {
+  description = "Memory in MiB for ECS batch tasks."
+  type        = number
+  default     = 4096
+}

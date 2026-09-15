@@ -91,7 +91,7 @@ resource "aws_ecs_task_definition" "gateway" {
         },
 
         {
-          name  = "S3_BUCKET"
+          name  = "AWS_S3_BUCKET"
           value = var.s3_bucket_name
         },
 
@@ -163,6 +163,79 @@ resource "aws_ecs_task_definition" "gateway" {
         timeout     = 10
         retries     = 3
         startPeriod = 60
+      }
+    }
+  ])
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+  }
+}
+
+
+resource "aws_cloudwatch_log_group" "batch" {
+  name              = "/ecs/${var.project_name}/${var.environment}/batch"
+  retention_in_days = 14
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+  }
+}
+
+resource "aws_ecs_task_definition" "batch" {
+  family                   = "${var.project_name}-${var.environment}-batch"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+
+  cpu    = var.batch_cpu
+  memory = var.batch_memory
+
+  execution_role_arn = var.batch_execution_role_arn
+  task_role_arn      = var.batch_task_role_arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "eai-batch"
+      image     = var.batch_container_image
+      essential = true
+
+      environment = [
+        {
+          name  = "APP_ENV"
+          value = "aws"
+        },
+
+        {
+          name  = "AWS_REGION"
+          value = var.aws_region
+        },
+
+        {
+          name  = "AWS_S3_BUCKET"
+          value = var.batch_data_bucket_name
+        }
+      ]
+
+      command = [
+        "python",
+        "spark/batch/ingest/batch_to_bronze.py"
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.batch.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "batch"
+        }
       }
     }
   ])

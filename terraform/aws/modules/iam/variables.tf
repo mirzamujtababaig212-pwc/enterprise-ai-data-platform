@@ -13,6 +13,11 @@ variable "s3_bucket_arn" {
   type        = string
 }
 
+variable "data_bucket_arn" {
+  description = "ARN of the canonical enterprise data S3 bucket used by ECS batch tasks."
+  type        = string
+}
+
 variable "provider_credentials_secret_arn" {
   description = "ARN of the Secrets Manager secret containing LLM provider credentials."
   type        = string
@@ -41,4 +46,16 @@ variable "kms_key_arn" {
 variable "gateway_api_key_secret_arn" {
   description = "ARN of the gateway API key secret."
   type        = string
+}
+
+variable "bedrock_model_arns" {
+  description = "Bedrock foundation-model ARNs that the gateway ECS task may invoke."
+  type        = list(string)
+  default     = []
+}
+
+variable "bedrock_invoke_resource_arns" {
+  description = "Bedrock foundation-model and inference-profile ARNs that the gateway ECS task may invoke."
+  type        = list(string)
+  default     = []
 }
