@@ -277,11 +277,68 @@ def test_vehicle_pipeline_bronze_to_silver_to_gold(spark, temp_dir):
     silver_table = "silver.test_vehicle_pipeline_events"
     gold_table = "gold.test_vehicle_pipeline_metrics"
 
-    DeltaWriter(
+    silver_writer = DeltaWriter(
         table=silver_table,
         path=silver_path,
-        mode="overwrite",
-    ).write(valid_silver)
+        mode="merge",
+        merge_keys=[
+            "vehicle_id",
+            "event_time",
+        ],
+    )
+
+    silver_writer.write(valid_silver)
+
+    first_silver = spark.read.format("delta").load(silver_path)
+
+    assert first_silver.count() == 11
+    assert (
+        first_silver.select(
+            "vehicle_id",
+            "event_time",
+        )
+        .distinct()
+        .count()
+        == 11
+    )
+
+    silver_writer.write(valid_silver)
+
+    updated_silver = valid_silver.withColumn(
+        "speed",
+        F.when(
+            (F.col("vehicle_id") == "V001")
+            & (F.col("event_time") == F.to_timestamp(F.lit("2026-08-12 00:00:00"))),
+            F.lit(99.9),
+        ).otherwise(F.col("speed")),
+    )
+
+    silver_writer.write(updated_silver)
+
+    second_silver = spark.read.format("delta").load(silver_path)
+
+    assert second_silver.count() == 11
+    assert (
+        second_silver.select(
+            "vehicle_id",
+            "event_time",
+        )
+        .distinct()
+        .count()
+        == 11
+    )
+
+    updated_row = (
+        second_silver.filter(
+            (F.col("vehicle_id") == "V001")
+            & (F.col("event_time") == F.to_timestamp(F.lit("2026-08-12 00:00:00")))
+        )
+        .select("speed")
+        .collect()
+    )
+
+    assert len(updated_row) == 1
+    assert updated_row[0]["speed"] == 99.9
 
     gold_pipeline = GoldPipeline(
         spark=spark,
@@ -323,8 +380,8 @@ def test_vehicle_pipeline_bronze_to_silver_to_gold(spark, temp_dir):
     actual = {row["vehicle_id"]: row.asDict() for row in stored_gold.collect()}
 
     assert actual["V001"]["event_count"] == 3
-    assert actual["V001"]["min_speed"] == 45.5
-    assert actual["V001"]["max_speed"] == 51.8
+    assert actual["V001"]["min_speed"] == 47.0
+    assert actual["V001"]["max_speed"] == 99.9
 
     assert actual["V002"]["event_count"] == 2
     assert actual["V002"]["min_speed"] == 32.1

@@ -10,7 +10,10 @@ writer:
   type: delta
   table: SILVER_TABLE
   path: SILVER_PATH
-  mode: append
+  mode: merge
+  merge_keys:
+    - vehicle_id
+    - event_time
 
 runtime:
   checkpoint: SILVER_CHECKPOINT

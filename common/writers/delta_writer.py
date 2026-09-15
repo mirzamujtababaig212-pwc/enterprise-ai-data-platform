@@ -4,6 +4,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from delta.tables import DeltaTable
+
 from common.logging.logger import get_logger
 from common.writers.base_writer import BaseWriter
 
@@ -24,6 +26,7 @@ class DeltaWriter(BaseWriter):
 
     VALID_MODES = {
         "append",
+        "merge",
         "overwrite",
     }
 
@@ -34,6 +37,7 @@ class DeltaWriter(BaseWriter):
         mode: str = "append",
         checkpoint: str | None = None,
         output_mode: str | None = None,
+        merge_keys: list[str] | None = None,
     ) -> None:
 
         if not table or not table.strip():
@@ -49,6 +53,20 @@ class DeltaWriter(BaseWriter):
         self.path = self._normalize_path(path) if path else self._resolve_default_path(self.table)
 
         self.mode = mode
+
+        if merge_keys is not None:
+            merge_keys = [str(key).strip() for key in merge_keys if str(key).strip()]
+
+        if mode == "merge" and not merge_keys:
+            raise ValueError("Delta merge mode requires at least one merge key.")
+
+        if mode != "merge" and merge_keys:
+            raise ValueError("Delta merge keys are only valid with merge mode.")
+
+        if merge_keys and len(merge_keys) != len(set(merge_keys)):
+            raise ValueError("Delta merge keys must be unique.")
+
+        self.merge_keys = merge_keys or []
 
         self.checkpoint = self._normalize_path(checkpoint) if checkpoint else None
 
@@ -143,23 +161,69 @@ class DeltaWriter(BaseWriter):
             self.mode,
         )
 
-        writer = df.write.format("delta").mode(self.mode)
+        if self.mode == "merge":
+            self._merge_batch(df)
+        else:
+            writer = df.write.format("delta").mode(self.mode)
 
-        writer = writer.option(
-            "overwriteSchema",
-            "true",
-        )
+            writer = writer.option(
+                "overwriteSchema",
+                "true",
+            )
 
-        # Prefer path-based writing because the platform
-        # has canonical storage paths.
-        writer.save(str(self.path))
+            # Prefer path-based writing because the platform
+            # has canonical storage paths.
+            writer.save(str(self.path))
 
-        self._register_table(df.sparkSession)
+            self._register_table(df.sparkSession)
 
         logger.info(
             "Delta batch write completed in %.2f sec",
             time.time() - start,
         )
+
+    def _merge_batch(self, df):
+        spark = df.sparkSession
+        path = str(self.path)
+
+        if not DeltaTable.isDeltaTable(spark, path):
+            logger.info(
+                "Delta merge target does not exist; " "initializing table=%s",
+                self.table,
+            )
+
+            (df.write.format("delta").mode("append").option("overwriteSchema", "true").save(path))
+
+            self._register_table(spark)
+            return
+
+        merge_condition = " AND ".join(
+            f"target.`{key}` = source.`{key}`" for key in self.merge_keys
+        )
+
+        logger.info(
+            "Executing Delta MERGE table=%s keys=%s",
+            self.table,
+            self.merge_keys,
+        )
+
+        target = DeltaTable.forPath(
+            spark,
+            path,
+        )
+
+        (
+            target.alias("target")
+            .merge(
+                df.alias("source"),
+                merge_condition,
+            )
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+
+        self._register_table(spark)
 
     # ==============================================================
     # STREAMING
@@ -180,6 +244,9 @@ class DeltaWriter(BaseWriter):
         Explicit checkpoint takes precedence over the
         checkpoint configured on the writer.
         """
+
+        if self.mode == "merge":
+            raise ValueError("Delta merge mode is only supported for batch writes.")
 
         effective_checkpoint = checkpoint or (str(self.checkpoint) if self.checkpoint else None)
 
@@ -242,15 +309,70 @@ class DeltaWriter(BaseWriter):
     # CATALOG
     # ==============================================================
 
+    @staticmethod
+    def _extract_catalog_location(rows) -> str | None:
+        for row in rows:
+            col_name = getattr(row, "col_name", None)
+
+            if col_name == "Location":
+                return getattr(row, "data_type", None)
+
+        return None
+
+    @staticmethod
+    def _locations_match(expected, actual) -> bool:
+        expected = str(expected).rstrip("/")
+        actual = str(actual).rstrip("/")
+
+        if expected == actual:
+            return True
+
+        if expected.startswith("s3://") and actual.startswith("s3a://"):
+            return expected[5:] == actual[6:]
+
+        if expected.startswith("s3a://") and actual.startswith("s3://"):
+            return expected[6:] == actual[5:]
+
+        expected_local = (
+            Path(expected[5:]).resolve()
+            if expected.startswith("file:")
+            else Path(expected).resolve() if "://" not in expected else None
+        )
+
+        actual_local = Path(actual[5:]).resolve() if actual.startswith("file:") else None
+
+        if expected_local is not None and actual_local is not None:
+            return expected_local == actual_local
+
+        return False
+
     def _register_table(
         self,
         spark,
     ):
-
         if spark.catalog.tableExists(self.table):
+            rows = spark.sql(f"DESCRIBE EXTENDED {self.table}").collect()
+
+            catalog_location = self._extract_catalog_location(rows)
+
+            if not catalog_location:
+                raise RuntimeError(
+                    "Delta catalog location could not be determined " f"for table '{self.table}'."
+                )
+
+            if not self._locations_match(
+                self.path,
+                catalog_location,
+            ):
+                raise RuntimeError(
+                    "Delta catalog location mismatch for "
+                    f"table '{self.table}': "
+                    f"expected '{self.path}', "
+                    f"catalog points to '{catalog_location}'."
+                )
 
             logger.info(
-                "Catalog table already exists: %s",
+                "Catalog table already exists at expected location: %s",
                 self.table,
             )
 

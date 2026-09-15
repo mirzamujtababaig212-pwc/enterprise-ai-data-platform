@@ -258,3 +258,33 @@ def test_snowflake_writer_requires_table():
         match="Snowflake writer requires a table",
     ):
         WriterBuilder.build(config)
+
+
+def test_build_delta_merge_with_keys():
+    config = {
+        "writer": {
+            "type": "delta",
+            "table": "silver.vehicle",
+            "path": "/tmp/delta/silver",
+            "mode": "merge",
+            "merge_keys": [
+                "vehicle_id",
+                "event_time",
+            ],
+        }
+    }
+
+    writer = WriterBuilder.build(config)
+
+    assert isinstance(
+        writer,
+        DeltaWriter,
+    )
+
+    assert writer.table == "silver.vehicle"
+    assert str(writer.path) == "/tmp/delta/silver"
+    assert writer.mode == "merge"
+    assert writer.merge_keys == [
+        "vehicle_id",
+        "event_time",
+    ]

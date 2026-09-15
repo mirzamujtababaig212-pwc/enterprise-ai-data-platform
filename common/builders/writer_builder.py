@@ -105,12 +105,15 @@ class WriterBuilder:
                 "append",
             )
 
+            merge_keys = cfg.get("merge_keys")
+
             return writer_cls(
                 table=table,
                 path=path,
                 mode=mode,
                 checkpoint=checkpoint,
                 output_mode=output_mode,
+                merge_keys=merge_keys,
             )
 
         # ==========================================================
