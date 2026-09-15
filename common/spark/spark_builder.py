@@ -56,8 +56,10 @@ class SparkSessionBuilder:
         # SPARK WAREHOUSE
         # ==========================================================
 
-        warehouse_dir = project_root / "spark-warehouse"
-        metastore_dir = project_root / "metastore_db"
+        environment = os.environ.get("APP_ENV", "DEV").strip().lower()
+
+        warehouse_dir = project_root / "spark-warehouse" / environment
+        metastore_dir = project_root / "metastore_db" / environment
 
         warehouse_dir.mkdir(
             parents=True,

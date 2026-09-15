@@ -132,3 +132,59 @@ def test_build_adds_kafka_when_explicitly_enabled(
     mock_delta.assert_called_once_with(builder)
     assert delta_configured_builder.get_or_create_calls == 1
     delta_configured_builder._spark.sparkContext.setLogLevel.assert_called_once_with("WARN")
+
+
+@patch("common.spark.spark_builder.configure_spark_with_delta_pip")
+@patch("common.spark.spark_builder.SparkSession")
+def test_build_isolates_dev_warehouse_and_metastore(
+    mock_spark,
+    mock_delta,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "dev")
+
+    builder = FakeBuilder()
+    mock_spark.builder = builder
+
+    delta_configured_builder = FakeBuilder()
+    delta_configured_builder._options = {
+        "spark.jars.packages": SparkSessionBuilder.DELTA_PACKAGE,
+    }
+    mock_delta.return_value = delta_configured_builder
+
+    SparkSessionBuilder.build("DevCatalogIsolationTest")
+
+    assert builder._options["spark.sql.warehouse.dir"] == str(tmp_path / "spark-warehouse" / "dev")
+    assert builder._options["spark.hadoop.javax.jdo.option.ConnectionURL"] == (
+        f"jdbc:derby:;databaseName={tmp_path / 'metastore_db' / 'dev'};create=true"
+    )
+
+
+@patch("common.spark.spark_builder.configure_spark_with_delta_pip")
+@patch("common.spark.spark_builder.SparkSession")
+def test_build_isolates_aws_warehouse_and_metastore(
+    mock_spark,
+    mock_delta,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "aws")
+
+    builder = FakeBuilder()
+    mock_spark.builder = builder
+
+    delta_configured_builder = FakeBuilder()
+    delta_configured_builder._options = {
+        "spark.jars.packages": SparkSessionBuilder.DELTA_PACKAGE,
+    }
+    mock_delta.return_value = delta_configured_builder
+
+    SparkSessionBuilder.build("AwsCatalogIsolationTest")
+
+    assert builder._options["spark.sql.warehouse.dir"] == str(tmp_path / "spark-warehouse" / "aws")
+    assert builder._options["spark.hadoop.javax.jdo.option.ConnectionURL"] == (
+        f"jdbc:derby:;databaseName={tmp_path / 'metastore_db' / 'aws'};create=true"
+    )
