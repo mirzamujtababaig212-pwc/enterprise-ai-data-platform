@@ -46,6 +46,55 @@ def test_chat_endpoint_success():
     assert body["metrics"]["status"] == "success"
 
 
+def test_chat_endpoint_bedrock_success():
+
+    fake_response = {
+        "reply": "Hello from Bedrock",
+        "usage": {
+            "tokens_in": 6,
+            "tokens_out": 4,
+        },
+    }
+
+    with patch(
+        "ai_platform.llm_gateway.api.main.router.route_chat",
+        new=AsyncMock(return_value=fake_response),
+    ) as mock_route_chat:
+        response = client.post(
+            "/v1/chat",
+            headers=HEADERS,
+            json={
+                "provider": "bedrock",
+                "model": "bedrock-chat",
+                "prompt": "Hello",
+            },
+        )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["reply"] == "Hello from Bedrock"
+    assert body["metrics"]["tokens_in"] == 6
+    assert body["metrics"]["tokens_out"] == 4
+    assert body["metrics"]["status"] == "success"
+
+    mock_route_chat.assert_awaited_once_with(
+        {
+            "provider": "bedrock",
+            "model": "bedrock-chat",
+            "prompt": "Hello",
+            "temperature": 0.7,
+            "max_tokens": 1024,
+            "stream": False,
+            "messages": None,
+            "tools": None,
+            "user_id": None,
+            "structured_output": None,
+        }
+    )
+
+
 def test_chat_without_api_key():
 
     response = client.post(
