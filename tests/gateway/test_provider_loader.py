@@ -46,6 +46,19 @@ def test_load_providers_success(mock_enabled):
 
 
 ###############################################################################
+# Bedrock provider mapping
+###############################################################################
+
+
+def test_bedrock_provider_mapping():
+
+    from ai_platform.llm_gateway.providers.bedrock_provider import BedrockProvider
+    from ai_platform.llm_gateway.providers.provider_loader import PROVIDER_CLASSES
+
+    assert PROVIDER_CLASSES["bedrock"] is BedrockProvider
+
+
+###############################################################################
 # No providers configured
 ###############################################################################
 
