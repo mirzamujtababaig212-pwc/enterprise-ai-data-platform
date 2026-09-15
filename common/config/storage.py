@@ -38,19 +38,26 @@ class StorageConfig:
     ) -> None:
         self.environment = (environment or os.getenv("APP_ENV", "DEV")).strip().lower()
 
-        self.project_root = Path(
-            project_root
-            if project_root is not None
-            else os.getenv(
-                "ENTERPRISE_AI_PLATFORM_ROOT",
-                "/app",
-            )
-        )
+        self.project_root = self._resolve_project_root(project_root)
 
         if self.environment == "aws":
             self._configure_aws()
         else:
             self._configure_local()
+
+    @staticmethod
+    def _resolve_project_root(
+        project_root: str | Path | None,
+    ) -> Path:
+        if project_root is not None:
+            return Path(project_root)
+
+        configured_root = os.getenv("ENTERPRISE_AI_PLATFORM_ROOT")
+
+        if configured_root:
+            return Path(configured_root)
+
+        return Path(__file__).resolve().parents[2]
 
     # ==============================================================
     # LOCAL STORAGE
@@ -90,24 +97,34 @@ class StorageConfig:
         if not isinstance(storage, dict):
             raise ValueError("AWS environment configuration requires a storage mapping.")
 
-        required = (
-            "raw",
-            "bronze",
-            "silver",
-            "gold",
-            "checkpoints",
-        )
+        bucket = os.getenv("AWS_S3_BUCKET")
 
-        missing = [key for key in required if not storage.get(key)]
+        if bucket:
+            base_uri = f"s3a://{bucket}"
+            raw = f"{base_uri}/raw"
+            bronze = f"{base_uri}/bronze"
+            silver = f"{base_uri}/silver"
+            gold = f"{base_uri}/gold"
+            checkpoints = f"{base_uri}/checkpoints"
+        else:
+            required = (
+                "raw",
+                "bronze",
+                "silver",
+                "gold",
+                "checkpoints",
+            )
 
-        if missing:
-            raise ValueError("AWS storage configuration is missing: " + ", ".join(missing))
+            missing = [key for key in required if not storage.get(key)]
 
-        raw = self._to_s3a_uri(storage["raw"])
-        bronze = self._to_s3a_uri(storage["bronze"])
-        silver = self._to_s3a_uri(storage["silver"])
-        gold = self._to_s3a_uri(storage["gold"])
-        checkpoints = self._to_s3a_uri(storage["checkpoints"])
+            if missing:
+                raise ValueError("AWS storage configuration is missing: " + ", ".join(missing))
+
+            raw = self._to_s3a_uri(storage["raw"])
+            bronze = self._to_s3a_uri(storage["bronze"])
+            silver = self._to_s3a_uri(storage["silver"])
+            gold = self._to_s3a_uri(storage["gold"])
+            checkpoints = self._to_s3a_uri(storage["checkpoints"])
 
         self.BATCH_INPUT_PATH = raw
         self.BATCH_BRONZE_PATH = bronze

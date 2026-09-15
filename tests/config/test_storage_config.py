@@ -9,9 +9,11 @@ def test_storage_config_defaults_to_local(monkeypatch):
 
     config = StorageConfig()
 
-    assert config.BRONZE_PATH == "/app/data/delta/bronze/vehicle_events"
-    assert config.SILVER_PATH == "/app/data/delta/silver/vehicle_events"
-    assert config.GOLD_PATH == "/app/data/delta/gold/vehicle_metrics"
+    root = Path(__file__).resolve().parents[2]
+
+    assert config.BRONZE_PATH == str(root / "data" / "delta" / "bronze" / "vehicle_events")
+    assert config.SILVER_PATH == str(root / "data" / "delta" / "silver" / "vehicle_events")
+    assert config.GOLD_PATH == str(root / "data" / "delta" / "gold" / "vehicle_metrics")
 
 
 def test_storage_config_aws_uses_s3a_paths(monkeypatch):
@@ -63,3 +65,31 @@ def test_storage_config_local_root_remains_supported(monkeypatch, tmp_path):
         Path(tmp_path) / "data" / "delta" / "silver" / "vehicle_events"
     )
     assert config.GOLD_PATH == str(Path(tmp_path) / "data" / "delta" / "gold" / "vehicle_metrics")
+
+
+def test_storage_config_aws_uses_runtime_bucket_override(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "AWS")
+    monkeypatch.setenv(
+        "AWS_S3_BUCKET",
+        "enterprise-ai-platform-dev-123456789012",
+    )
+
+    config = StorageConfig()
+
+    assert config.BATCH_INPUT_PATH == ("s3a://enterprise-ai-platform-dev-123456789012/raw")
+
+    assert config.BRONZE_PATH == (
+        "s3a://enterprise-ai-platform-dev-123456789012/" "bronze/vehicle_events"
+    )
+
+    assert config.SILVER_PATH == (
+        "s3a://enterprise-ai-platform-dev-123456789012/" "silver/vehicle_events"
+    )
+
+    assert config.GOLD_PATH == (
+        "s3a://enterprise-ai-platform-dev-123456789012/" "gold/vehicle_metrics"
+    )
+
+    assert config.BRONZE_CHECKPOINT == (
+        "s3a://enterprise-ai-platform-dev-123456789012/" "checkpoints/bronze_streaming"
+    )

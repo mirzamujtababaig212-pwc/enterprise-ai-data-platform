@@ -5,8 +5,11 @@ from common.pipelines.base_pipeline import (
 from common.pipelines.pipeline_runtime_config import (
     PipelineRuntimeConfig,
 )
-from common.readers.parquet_reader import (
-    ParquetReader,
+from common.readers.csv_reader import (
+    CSVReader,
+)
+from spark.schemas.bronze_schema import (
+    bronze_schema,
 )
 from common.transformers.batch_bronze_transformer import (
     BatchBronzeTransformer,
@@ -29,7 +32,10 @@ class BatchToBronzePipeline(BasePipeline):
 
     def __init__(self, spark):
 
-        reader = ParquetReader(path=Settings.storage.BATCH_INPUT_PATH)
+        reader = CSVReader(
+            path=Settings.storage.RAW_VEHICLE_DATA_PATH,
+            schema=bronze_schema,
+        )
 
         transformer = BatchBronzeTransformer()
 
