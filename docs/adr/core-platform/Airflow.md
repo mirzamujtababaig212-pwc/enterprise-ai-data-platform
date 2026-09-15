@@ -93,6 +93,8 @@ Disadvantages
 Apache Airflow is selected as the enterprise workflow orchestration platform because it provides mature scheduling, dependency management, operational visibility, and broad integration with the 
 technologies used throughout the Enterprise AI Platform.
 Airflow orchestrates workflows but does not replace event streaming. Kafka remains responsible for real-time event distribution, while Airflow coordinates scheduled and long-running processes.
+
+For cloud-specific execution planes, managed orchestration services may be used where appropriate. In the AWS execution plane, AWS Step Functions may orchestrate AWS-native ECS/Fargate batch pipelines while Apache Airflow remains the enterprise-wide, cloud-agnostic orchestration standard.
 ---
 # Architecture Impact
 Airflow orchestrates:
@@ -188,7 +190,11 @@ Rejected because Apache Airflow provides a more mature ecosystem and stronger al
 ### Dagster
 Rejected because the planned platform prioritizes a proven orchestration engine with broader industry adoption.
 ### AWS Step Functions
-Rejected because the Enterprise AI Platform targets a cloud-agnostic architecture rather than a provider-specific implementation.
+Not selected as the enterprise-wide workflow orchestration platform because it is AWS-specific and therefore does not satisfy the platform's cloud-portability requirement.
+
+AWS Step Functions may nevertheless be used within the AWS execution plane for AWS-native batch workflows where its managed orchestration and native ECS integration provide operational benefits.
+
+This does not replace Apache Airflow as the platform-level orchestration standard.
 ---
 # Future Considerations
 Potential future enhancements include:
