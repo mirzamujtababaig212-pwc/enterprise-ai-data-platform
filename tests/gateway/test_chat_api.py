@@ -178,3 +178,45 @@ def test_models():
     body = response.json()
 
     assert "openai" in body
+
+
+def test_chat_endpoint_bedrock_streaming_success():
+    async def fake_route_stream(request):
+        assert request == {
+            "prompt": "Hello",
+            "messages": None,
+            "tools": None,
+            "provider": "bedrock",
+            "model": "bedrock-chat",
+            "temperature": 0.7,
+            "max_tokens": 1024,
+            "stream": True,
+            "user_id": None,
+            "structured_output": None,
+        }
+        yield "Hello "
+        yield "from Bedrock."
+
+    with patch(
+        "ai_platform.llm_gateway.api.main.router.route_stream",
+        side_effect=fake_route_stream,
+    ) as mock_route_stream:
+        response = client.post(
+            "/v1/chat",
+            headers=HEADERS,
+            json={
+                "provider": "bedrock",
+                "model": "bedrock-chat",
+                "prompt": "Hello",
+                "stream": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+
+    assert response.text == ("data: Hello \n\n" "data: from Bedrock.\n\n" "data: [DONE]\n\n")
+
+    mock_route_stream.assert_called_once()
