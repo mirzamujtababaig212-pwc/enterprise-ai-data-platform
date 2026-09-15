@@ -595,3 +595,79 @@ async def test_route_chat_with_bedrock_provider():
     assert result.provider_name == "bedrock"
     assert result.model_name == "bedrock-chat"
     assert result.response["reply"] == "Hello from mocked Bedrock."
+
+
+@pytest.mark.asyncio
+async def test_route_embeddings_with_bedrock_provider():
+    import io
+    import json
+
+    from ai_platform.llm_gateway.config.bedrock_settings import BedrockSettings
+    from ai_platform.llm_gateway.providers.bedrock_provider import BedrockProvider
+
+    client = MagicMock()
+    client.invoke_model.return_value = {
+        "body": io.BytesIO(
+            json.dumps(
+                {
+                    "embedding": [0.1, 0.2, 0.3],
+                    "inputTextTokenCount": 2,
+                }
+            ).encode()
+        )
+    }
+
+    provider = BedrockProvider(
+        client=client,
+        settings=BedrockSettings(
+            region="us-east-1",
+            embedding_model="amazon.titan-embed-text-v2:0",
+            embedding_dimensions=1024,
+            embedding_normalize=True,
+        ),
+    )
+    provider.name = "bedrock"
+
+    routing_resolver = MagicMock()
+    routing_resolver.is_logical_model.return_value = False
+    routing_resolver.resolve.return_value = [provider]
+
+    router = Router(
+        routing_resolver=routing_resolver,
+    )
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_embeddings",
+    ) as validate_embeddings:
+        result = await router.route_embeddings_with_metadata(
+            {
+                "provider": "bedrock",
+                "model": "bedrock-embedding",
+                "text": "Hello",
+            }
+        )
+
+    validate_embeddings.assert_called_once_with(
+        "bedrock",
+        "bedrock-embedding",
+    )
+
+    routing_resolver.resolve.assert_called_once_with(
+        capability="embeddings",
+        model="bedrock-embedding",
+        requested_provider="bedrock",
+    )
+
+    client.invoke_model.assert_called_once()
+    kwargs = client.invoke_model.call_args.kwargs
+
+    assert kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+    assert json.loads(kwargs["body"]) == {
+        "inputText": "Hello",
+        "dimensions": 1024,
+        "normalize": True,
+    }
+
+    assert result.provider_name == "bedrock"
+    assert result.model_name == "bedrock-embedding"
+    assert result.response == [0.1, 0.2, 0.3]
