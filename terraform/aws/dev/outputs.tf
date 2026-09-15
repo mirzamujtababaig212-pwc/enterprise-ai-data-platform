@@ -67,3 +67,18 @@ output "gateway_url" {
   description = "LLM Gateway URL."
   value       = "http://${module.alb.alb_dns_name}"
 }
+
+output "batch_pipeline_state_machine_arn" {
+  description = "ARN of the AWS Bronze-Silver-Gold Step Functions state machine."
+  value       = module.step_functions.state_machine_arn
+}
+
+output "batch_pipeline_notification_topic_arn" {
+  description = "ARN of the SNS topic used by the AWS Bronze-Silver-Gold pipeline."
+  value       = module.step_functions.notification_topic_arn
+}
+
+output "batch_pipeline_log_group_name" {
+  description = "CloudWatch log group for AWS Bronze-Silver-Gold Step Functions execution logs."
+  value       = module.step_functions.log_group_name
+}

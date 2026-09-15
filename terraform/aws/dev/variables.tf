@@ -24,5 +24,5 @@ variable "image_tag" {
 variable "ecs_desired_count" {
   description = "Number of ECS gateway tasks to run."
   type        = number
-  default     = 1
+  default     = 0
 }
