@@ -242,6 +242,7 @@ def main() -> None:
         model_uri=training_result.model_uri,
         model_name=MODEL_NAME,
         run_id=training_result.run_id,
+        metadata=training_result.metadata,
     )
 
     print()
