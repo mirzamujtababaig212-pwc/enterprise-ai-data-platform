@@ -671,3 +671,88 @@ async def test_route_embeddings_with_bedrock_provider():
     assert result.provider_name == "bedrock"
     assert result.model_name == "bedrock-embedding"
     assert result.response == [0.1, 0.2, 0.3]
+
+
+@pytest.mark.asyncio
+async def test_route_stream_with_bedrock_provider():
+    from ai_platform.llm_gateway.config.bedrock_settings import BedrockSettings
+    from ai_platform.llm_gateway.providers.bedrock_provider import BedrockProvider
+
+    client = MagicMock()
+    client.converse_stream.return_value = {
+        "stream": iter(
+            [
+                {
+                    "contentBlockDelta": {
+                        "delta": {
+                            "text": "Hello ",
+                        }
+                    }
+                },
+                {
+                    "contentBlockDelta": {
+                        "delta": {
+                            "text": "from Bedrock.",
+                        }
+                    }
+                },
+            ]
+        )
+    }
+
+    provider = BedrockProvider(
+        client=client,
+        settings=BedrockSettings(
+            region="us-east-1",
+            chat_model="amazon.nova-micro-v1:0",
+        ),
+    )
+    provider.name = "bedrock"
+
+    routing_resolver = MagicMock()
+    routing_resolver.resolve.return_value = [provider]
+
+    router = Router(
+        routing_resolver=routing_resolver,
+    )
+
+    with patch(
+        "ai_platform.llm_gateway.routing.router.capability_service.validate_stream",
+    ) as validate_stream:
+        chunks = []
+
+        async for chunk in router.route_stream(
+            {
+                "provider": "bedrock",
+                "model": "bedrock-chat",
+                "prompt": "Hello",
+            }
+        ):
+            chunks.append(chunk)
+
+    validate_stream.assert_called_once_with(
+        "bedrock",
+        "bedrock-chat",
+    )
+
+    routing_resolver.resolve.assert_called_once_with(
+        capability="stream",
+        model="bedrock-chat",
+        requested_provider="bedrock",
+    )
+
+    client.converse_stream.assert_called_once()
+    kwargs = client.converse_stream.call_args.kwargs
+
+    assert kwargs["modelId"] == "amazon.nova-micro-v1:0"
+    assert kwargs["messages"] == [
+        {
+            "role": "user",
+            "content": [{"text": "Hello"}],
+        }
+    ]
+
+    assert chunks == [
+        "Hello ",
+        "from Bedrock.",
+    ]
