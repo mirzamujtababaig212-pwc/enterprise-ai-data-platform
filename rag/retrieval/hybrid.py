@@ -9,15 +9,21 @@ from rag.governance import GovernancePolicy
 from rag.models import RetrievalResult
 
 DEFAULT_RRF_K = 60
+DEFAULT_SEMANTIC_WEIGHT = 1.0
+DEFAULT_LEXICAL_WEIGHT = 0.5
 
 
 class HybridRetriever:
     """
-    Fuse semantic and lexical retrieval using Reciprocal Rank Fusion.
+    Fuse semantic and lexical retrieval using weighted Reciprocal Rank Fusion.
 
     Component retrievers are queried independently and their ranked results
     are combined by rank rather than raw score, because semantic and lexical
     score scales are not directly comparable.
+
+    semantic_weight and lexical_weight control each retriever's contribution
+    to the fused RRF score. Component min_score filtering is applied before
+    fusion; min_score is not a threshold on the final fused RRF score.
     """
 
     def __init__(
@@ -27,6 +33,8 @@ class HybridRetriever:
         *,
         candidate_k: int = 5,
         rrf_k: int = DEFAULT_RRF_K,
+        semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
+        lexical_weight: float = DEFAULT_LEXICAL_WEIGHT,
     ) -> None:
         if candidate_k <= 0:
             raise ValueError("candidate_k must be greater than zero.")
@@ -34,10 +42,21 @@ class HybridRetriever:
         if rrf_k <= 0:
             raise ValueError("rrf_k must be greater than zero.")
 
+        if semantic_weight < 0:
+            raise ValueError("semantic_weight must be greater than or equal to zero.")
+
+        if lexical_weight < 0:
+            raise ValueError("lexical_weight must be greater than or equal to zero.")
+
+        if semantic_weight == 0 and lexical_weight == 0:
+            raise ValueError("At least one retrieval weight must be greater than zero.")
+
         self.semantic_retriever = semantic_retriever
         self.lexical_retriever = lexical_retriever
         self.candidate_k = candidate_k
         self.rrf_k = rrf_k
+        self.semantic_weight = semantic_weight
+        self.lexical_weight = lexical_weight
 
     async def retrieve(
         self,
@@ -77,11 +96,11 @@ class HybridRetriever:
         result_by_chunk_id: dict[str, RetrievalResult] = {}
 
         for rank, result in enumerate(semantic_results, start=1):
-            fused_scores[result.chunk.id] += 1.0 / (self.rrf_k + rank)
+            fused_scores[result.chunk.id] += self.semantic_weight / (self.rrf_k + rank)
             result_by_chunk_id.setdefault(result.chunk.id, result)
 
         for rank, result in enumerate(lexical_results, start=1):
-            fused_scores[result.chunk.id] += 1.0 / (self.rrf_k + rank)
+            fused_scores[result.chunk.id] += self.lexical_weight / (self.rrf_k + rank)
             result_by_chunk_id.setdefault(result.chunk.id, result)
 
         fused_results = [

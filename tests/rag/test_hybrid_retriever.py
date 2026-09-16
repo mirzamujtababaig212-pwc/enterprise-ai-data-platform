@@ -73,15 +73,57 @@ async def test_hybrid_retriever_fuses_overlapping_results_with_rrf():
 
     assert [result.chunk.id for result in results] == [
         "shared",
-        "lexical-only",
         "semantic-only",
-        "lexical-third",
+        "semantic-third",
+        "lexical-only",
     ]
 
-    expected_shared = (1 / 61) + (1 / 62)
+    expected_shared = (1 / 61) + (0.5 / 62)
     assert results[0].score == pytest.approx(expected_shared)
 
     assert len(results) == 4
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retriever_uses_default_weights():
+    semantic = FakeRetriever([_result("semantic", 0.9)])
+    lexical = FakeRetriever([_result("lexical", 0.8)])
+
+    retriever = HybridRetriever(semantic, lexical)
+
+    assert retriever.semantic_weight == 1.0
+    assert retriever.lexical_weight == 0.5
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retriever_applies_custom_weights():
+    semantic = FakeRetriever(
+        [
+            _result("semantic", 0.9),
+        ]
+    )
+    lexical = FakeRetriever(
+        [
+            _result("lexical", 0.8),
+        ]
+    )
+
+    retriever = HybridRetriever(
+        semantic,
+        lexical,
+        semantic_weight=2.0,
+        lexical_weight=0.25,
+        rrf_k=60,
+    )
+
+    results = await retriever.retrieve(
+        "vehicle",
+        top_k=2,
+    )
+
+    assert results[0].chunk.id == "semantic"
+    assert results[0].score == pytest.approx(2.0 / 61)
+    assert results[1].score == pytest.approx(0.25 / 61)
 
 
 @pytest.mark.asyncio
@@ -180,6 +222,8 @@ async def test_hybrid_retriever_is_deterministic_for_equal_fused_scores():
         semantic,
         lexical,
         candidate_k=2,
+        semantic_weight=1.0,
+        lexical_weight=1.0,
     )
 
     results = await retriever.retrieve(
@@ -200,6 +244,20 @@ async def test_hybrid_retriever_rejects_invalid_arguments():
 
     with pytest.raises(ValueError, match="rrf_k"):
         HybridRetriever(semantic, lexical, rrf_k=0)
+
+    with pytest.raises(ValueError, match="semantic_weight"):
+        HybridRetriever(semantic, lexical, semantic_weight=-0.1)
+
+    with pytest.raises(ValueError, match="lexical_weight"):
+        HybridRetriever(semantic, lexical, lexical_weight=-0.1)
+
+    with pytest.raises(ValueError, match="At least one retrieval weight"):
+        HybridRetriever(
+            semantic,
+            lexical,
+            semantic_weight=0.0,
+            lexical_weight=0.0,
+        )
 
     retriever = HybridRetriever(semantic, lexical)
 
