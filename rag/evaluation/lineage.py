@@ -6,6 +6,40 @@ from rag.models import EmbeddingIdentity
 
 
 @dataclass(frozen=True)
+class HybridRetrievalConfiguration:
+    """Immutable configuration provenance for weighted hybrid retrieval."""
+
+    candidate_k: int
+    rrf_k: int
+    semantic_weight: float
+    lexical_weight: float
+
+    def __post_init__(self) -> None:
+        if self.candidate_k <= 0:
+            raise ValueError("candidate_k must be greater than zero")
+
+        if self.rrf_k <= 0:
+            raise ValueError("rrf_k must be greater than zero")
+
+        if self.semantic_weight < 0.0:
+            raise ValueError("semantic_weight must be greater than or equal to zero")
+
+        if self.lexical_weight < 0.0:
+            raise ValueError("lexical_weight must be greater than or equal to zero")
+
+        if self.semantic_weight == 0.0 and self.lexical_weight == 0.0:
+            raise ValueError("At least one retrieval weight must be greater than zero")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "candidate_k": self.candidate_k,
+            "rrf_k": self.rrf_k,
+            "semantic_weight": self.semantic_weight,
+            "lexical_weight": self.lexical_weight,
+        }
+
+
+@dataclass(frozen=True)
 class RetrievalEvaluationArtifact:
     """
     Immutable provenance for the retrieval implementation evaluated by a run.
@@ -16,6 +50,7 @@ class RetrievalEvaluationArtifact:
 
     retriever_type: str
     vector_store_type: str
+    hybrid_configuration: HybridRetrievalConfiguration | None = None
 
     def __post_init__(self) -> None:
         if not self.retriever_type.strip():
@@ -28,6 +63,11 @@ class RetrievalEvaluationArtifact:
         return {
             "retriever_type": self.retriever_type,
             "vector_store_type": self.vector_store_type,
+            "hybrid_configuration": (
+                self.hybrid_configuration.as_dict()
+                if self.hybrid_configuration is not None
+                else None
+            ),
         }
 
 
@@ -110,5 +150,11 @@ class RetrievalEvaluationLineage:
             "retriever_type": (retrieval_artifact.retriever_type if retrieval_artifact else None),
             "vector_store_type": (
                 retrieval_artifact.vector_store_type if retrieval_artifact else None
+            ),
+            "hybrid_configuration": (
+                retrieval_artifact.hybrid_configuration.as_dict()
+                if retrieval_artifact is not None
+                and retrieval_artifact.hybrid_configuration is not None
+                else None
             ),
         }

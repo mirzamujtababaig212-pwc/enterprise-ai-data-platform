@@ -135,6 +135,13 @@ async def test_vehicle_quality_benchmark_workflow_preserves_hybrid_lineage() -> 
     assert result.lineage.retrieval_artifact.retriever_type == "HybridRetriever"
     assert result.lineage.retrieval_artifact.vector_store_type == "InMemoryVectorStore"
 
+    hybrid_configuration = result.lineage.retrieval_artifact.hybrid_configuration
+    assert hybrid_configuration is not None
+    assert hybrid_configuration.candidate_k == 5
+    assert hybrid_configuration.rrf_k == 60
+    assert hybrid_configuration.semantic_weight == 1.0
+    assert hybrid_configuration.lexical_weight == 0.5
+
     lineage = result.as_dict()["lineage"]
 
     assert lineage["dataset_name"] == "vehicle-retrieval-quality"
@@ -148,3 +155,9 @@ async def test_vehicle_quality_benchmark_workflow_preserves_hybrid_lineage() -> 
     assert lineage["embedding_dimension"] == 20
     assert lineage["retriever_type"] == "HybridRetriever"
     assert lineage["vector_store_type"] == "InMemoryVectorStore"
+    assert lineage["hybrid_configuration"] == {
+        "candidate_k": 5,
+        "rrf_k": 60,
+        "semantic_weight": 1.0,
+        "lexical_weight": 0.5,
+    }

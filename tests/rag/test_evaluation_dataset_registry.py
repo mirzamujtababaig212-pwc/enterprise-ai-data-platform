@@ -149,6 +149,12 @@ def test_vehicle_quality_dataset_definition_builds_hybrid_artifact() -> None:
     assert artifact.retriever_type == "HybridRetriever"
     assert artifact.vector_store_type == "InMemoryVectorStore"
 
+    assert artifact.hybrid_configuration is not None
+    assert artifact.hybrid_configuration.candidate_k == 5
+    assert artifact.hybrid_configuration.rrf_k == 60
+    assert artifact.hybrid_configuration.semantic_weight == 1.0
+    assert artifact.hybrid_configuration.lexical_weight == 0.5
+
 
 def test_registry_resolves_vehicle_quality_dataset_definition() -> None:
     definition = EvaluationDatasetRegistry.get(

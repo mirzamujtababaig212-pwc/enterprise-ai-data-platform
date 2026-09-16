@@ -1,6 +1,7 @@
 import pytest
 
 from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
     RetrievalEvaluationArtifact,
     RetrievalEvaluationLineage,
 )
@@ -13,6 +14,92 @@ TEST_EMBEDDING_IDENTITY = EmbeddingIdentity(
     resolved_model="text-embedding-3-small",
     dimension=1536,
 )
+
+
+def test_hybrid_retrieval_configuration_captures_fusion_parameters() -> None:
+    configuration = HybridRetrievalConfiguration(
+        candidate_k=5,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    assert configuration.candidate_k == 5
+    assert configuration.rrf_k == 60
+    assert configuration.semantic_weight == 1.0
+    assert configuration.lexical_weight == 0.5
+    assert configuration.as_dict() == {
+        "candidate_k": 5,
+        "rrf_k": 60,
+        "semantic_weight": 1.0,
+        "lexical_weight": 0.5,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("candidate_k", 0, "candidate_k must be greater than zero"),
+        ("rrf_k", 0, "rrf_k must be greater than zero"),
+        ("semantic_weight", -0.1, "semantic_weight must be greater than or equal to zero"),
+        ("lexical_weight", -0.1, "lexical_weight must be greater than or equal to zero"),
+    ],
+)
+def test_hybrid_retrieval_configuration_rejects_invalid_parameters(
+    field: str,
+    value: float | int,
+    message: str,
+) -> None:
+    values = {
+        "candidate_k": 5,
+        "rrf_k": 60,
+        "semantic_weight": 1.0,
+        "lexical_weight": 0.5,
+    }
+    values[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        HybridRetrievalConfiguration(**values)
+
+
+def test_hybrid_retrieval_configuration_rejects_zero_weights() -> None:
+    with pytest.raises(
+        ValueError,
+        match="At least one retrieval weight must be greater than zero",
+    ):
+        HybridRetrievalConfiguration(
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=0.0,
+            lexical_weight=0.0,
+        )
+
+
+def test_retrieval_artifact_preserves_hybrid_configuration() -> None:
+    configuration = HybridRetrievalConfiguration(
+        candidate_k=5,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=configuration,
+    )
+
+    assert artifact.hybrid_configuration == configuration
+    assert artifact.as_dict() == {
+        "retriever_type": "HybridRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+        "hybrid_configuration": {
+            "candidate_k": 5,
+            "rrf_k": 60,
+            "semantic_weight": 1.0,
+            "lexical_weight": 0.5,
+        },
+    }
 
 
 def test_lineage_captures_evaluation_configuration() -> None:
@@ -96,6 +183,7 @@ def test_lineage_as_dict_contains_policy_snapshot_and_embedding_provenance() -> 
     assert payload["embedding_dimension"] == 1536
     assert payload["retriever_type"] == "SemanticRetriever"
     assert payload["vector_store_type"] == "InMemoryVectorStore"
+    assert payload["hybrid_configuration"] is None
 
 
 def test_lineage_allows_missing_embedding_identity() -> None:

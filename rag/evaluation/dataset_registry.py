@@ -17,7 +17,10 @@ from rag.evaluation.datasets.vehicle_retrieval_quality import (
     vehicle_quality_benchmark_chunks,
     vehicle_quality_evaluation_cases,
 )
-from rag.evaluation.lineage import RetrievalEvaluationArtifact
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RetrievalEvaluationArtifact,
+)
 from rag.models import EmbeddingIdentity
 from rag.retrieval import (
     HybridRetriever,
@@ -92,6 +95,12 @@ class VehicleRetrievalQualityEvaluationDatasetDefinition:
         return RetrievalEvaluationArtifact(
             retriever_type="HybridRetriever",
             vector_store_type="InMemoryVectorStore",
+            hybrid_configuration=HybridRetrievalConfiguration(
+                candidate_k=5,
+                rrf_k=60,
+                semantic_weight=1.0,
+                lexical_weight=0.5,
+            ),
         )
 
 

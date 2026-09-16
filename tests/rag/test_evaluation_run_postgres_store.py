@@ -135,6 +135,36 @@ def _run(
     return run.with_external_quality_gate(external_policy)
 
 
+def _hybrid_run(run_id: str = "hybrid-run-1") -> RetrievalEvaluationRun:
+    from dataclasses import replace
+
+    from rag.evaluation.lineage import (
+        HybridRetrievalConfiguration,
+        RetrievalEvaluationArtifact,
+    )
+
+    run = _run(run_id=run_id)
+
+    hybrid_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        ),
+    )
+
+    return replace(
+        run,
+        lineage=replace(
+            run.lineage,
+            retrieval_artifact=hybrid_artifact,
+        ),
+    )
+
+
 def _repository():
     engine = create_engine("sqlite:///:memory:")
 
@@ -199,6 +229,34 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
             "ragas/faithfulness/faithfulness": 0.91,
         }
         assert restored.external_quality_gate.policy == (run.external_quality_gate.policy)
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_save_and_get_round_trip_preserves_hybrid_retrieval_configuration() -> None:
+    repository, engine = _repository()
+
+    try:
+        run = _hybrid_run()
+
+        asyncio.run(repository.save(run))
+        restored = asyncio.run(repository.get(run.run_id))
+
+        assert restored is not None
+        assert restored.lineage == run.lineage
+
+        artifact = restored.lineage.retrieval_artifact
+        assert artifact is not None
+        assert artifact.retriever_type == "HybridRetriever"
+        assert artifact.vector_store_type == "InMemoryVectorStore"
+
+        configuration = artifact.hybrid_configuration
+        assert configuration is not None
+        assert configuration.candidate_k == 5
+        assert configuration.rrf_k == 60
+        assert configuration.semantic_weight == 1.0
+        assert configuration.lexical_weight == 0.5
     finally:
         repository._session.close()
         engine.dispose()
@@ -443,6 +501,51 @@ def _postgres_repository():
     )
 
     return PostgreSQLRetrievalEvaluationRunStore(session_factory()), engine
+
+
+def test_postgresql_hybrid_retrieval_configuration_round_trip() -> None:
+    repository, engine = _postgres_repository()
+
+    if repository is None:
+        import pytest
+
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    run_id = "postgres-integration-hybrid-evaluation-run"
+
+    try:
+        assert inspect(engine).has_table("retrieval_evaluation_runs")
+
+        run = _hybrid_run(run_id=run_id)
+
+        asyncio.run(repository.save(run))
+        restored = asyncio.run(repository.get(run_id))
+
+        assert restored is not None
+        assert restored.lineage == run.lineage
+
+        artifact = restored.lineage.retrieval_artifact
+        assert artifact is not None
+        assert artifact.retriever_type == "HybridRetriever"
+        assert artifact.vector_store_type == "InMemoryVectorStore"
+
+        configuration = artifact.hybrid_configuration
+        assert configuration is not None
+        assert configuration.candidate_k == 5
+        assert configuration.rrf_k == 60
+        assert configuration.semantic_weight == 1.0
+        assert configuration.lexical_weight == 0.5
+    finally:
+        if repository is not None:
+            repository._session.execute(
+                text("DELETE FROM retrieval_evaluation_runs " "WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            )
+            repository._session.commit()
+            repository._session.close()
+
+        if engine is not None:
+            engine.dispose()
 
 
 def test_postgresql_save_and_get_round_trip() -> None:

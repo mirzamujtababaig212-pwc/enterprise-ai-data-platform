@@ -22,6 +22,7 @@ from rag.evaluation.external import (
     ExternalEvaluationResult,
 )
 from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
     RetrievalEvaluationArtifact,
     RetrievalEvaluationLineage,
 )
@@ -212,9 +213,21 @@ def _deserialize_run(
     retrieval_artifact = None
 
     if lineage_data.get("retriever_type") is not None:
+        hybrid_configuration_data = lineage_data.get("hybrid_configuration")
+
+        hybrid_configuration = None
+        if hybrid_configuration_data is not None:
+            hybrid_configuration = HybridRetrievalConfiguration(
+                candidate_k=hybrid_configuration_data["candidate_k"],
+                rrf_k=hybrid_configuration_data["rrf_k"],
+                semantic_weight=hybrid_configuration_data["semantic_weight"],
+                lexical_weight=hybrid_configuration_data["lexical_weight"],
+            )
+
         retrieval_artifact = RetrievalEvaluationArtifact(
             retriever_type=lineage_data["retriever_type"],
             vector_store_type=lineage_data["vector_store_type"],
+            hybrid_configuration=hybrid_configuration,
         )
 
     lineage = RetrievalEvaluationLineage(
