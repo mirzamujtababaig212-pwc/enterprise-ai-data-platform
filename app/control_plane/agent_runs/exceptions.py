@@ -4,3 +4,7 @@ class DuplicateAgentRunError(ValueError):
 
 class AgentRunNotFoundError(LookupError):
     """Raised when an agent run cannot be found for an update."""
+
+
+class InvalidAgentRunTransitionError(ValueError):
+    """Raised when an agent run lifecycle transition is not allowed."""

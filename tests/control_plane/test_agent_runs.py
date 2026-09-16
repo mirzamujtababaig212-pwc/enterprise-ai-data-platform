@@ -2,6 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.control_plane.agent_runs.exceptions import (
+    InvalidAgentRunTransitionError,
+)
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.repository import AgentRunRepository
 
@@ -54,6 +57,61 @@ def test_agent_run_accepts_session_and_user_identity() -> None:
 
     assert run.session_id == "session-123"
     assert run.user_id == "user-456"
+
+
+def test_agent_run_allows_valid_lifecycle_transitions() -> None:
+    run = make_run()
+
+    running = run.transition_to(AgentRunStatus.RUNNING)
+    completed = running.transition_to(AgentRunStatus.COMPLETED)
+
+    assert run.status is AgentRunStatus.PENDING
+    assert running.status is AgentRunStatus.RUNNING
+    assert completed.status is AgentRunStatus.COMPLETED
+
+
+def test_agent_run_allows_running_to_failed_transition() -> None:
+    run = make_run()
+
+    failed = run.transition_to(AgentRunStatus.RUNNING).transition_to(AgentRunStatus.FAILED)
+
+    assert failed.status is AgentRunStatus.FAILED
+
+
+@pytest.mark.parametrize(
+    ("current_status", "target_status"),
+    [
+        (AgentRunStatus.PENDING, AgentRunStatus.COMPLETED),
+        (AgentRunStatus.PENDING, AgentRunStatus.FAILED),
+        (AgentRunStatus.RUNNING, AgentRunStatus.PENDING),
+        (AgentRunStatus.COMPLETED, AgentRunStatus.PENDING),
+        (AgentRunStatus.COMPLETED, AgentRunStatus.RUNNING),
+        (AgentRunStatus.COMPLETED, AgentRunStatus.FAILED),
+        (AgentRunStatus.FAILED, AgentRunStatus.PENDING),
+        (AgentRunStatus.FAILED, AgentRunStatus.RUNNING),
+        (AgentRunStatus.FAILED, AgentRunStatus.COMPLETED),
+    ],
+)
+def test_agent_run_rejects_invalid_lifecycle_transitions(
+    current_status: AgentRunStatus,
+    target_status: AgentRunStatus,
+) -> None:
+    run = make_run(status=current_status)
+
+    with pytest.raises(
+        InvalidAgentRunTransitionError,
+        match=rf"{current_status.value} -> {target_status.value}",
+    ):
+        run.transition_to(target_status)
+
+
+def test_agent_run_transition_does_not_mutate_original() -> None:
+    run = make_run()
+
+    transitioned = run.transition_to(AgentRunStatus.RUNNING)
+
+    assert run.status is AgentRunStatus.PENDING
+    assert transitioned.status is AgentRunStatus.RUNNING
 
 
 @pytest.mark.parametrize(

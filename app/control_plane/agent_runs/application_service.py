@@ -42,9 +42,8 @@ class AgentRunApplicationService:
         self._repository.create(run)
 
         started_at = datetime.now(UTC)
-        run = run.model_copy(
+        run = run.transition_to(AgentRunStatus.RUNNING).model_copy(
             update={
-                "status": AgentRunStatus.RUNNING,
                 "started_at": started_at,
             }
         )
@@ -57,9 +56,8 @@ class AgentRunApplicationService:
             )
         except Exception as exc:
             failed_at = datetime.now(UTC)
-            failed_run = run.model_copy(
+            failed_run = run.transition_to(AgentRunStatus.FAILED).model_copy(
                 update={
-                    "status": AgentRunStatus.FAILED,
                     "completed_at": failed_at,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc),
@@ -69,9 +67,8 @@ class AgentRunApplicationService:
             raise
 
         completed_at = datetime.now(UTC)
-        completed_run = run.model_copy(
+        completed_run = run.transition_to(AgentRunStatus.COMPLETED).model_copy(
             update={
-                "status": AgentRunStatus.COMPLETED,
                 "completed_at": completed_at,
                 "output": response.output,
             }

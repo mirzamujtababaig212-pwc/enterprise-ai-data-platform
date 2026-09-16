@@ -6,12 +6,29 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.control_plane.agent_runs.exceptions import (
+    InvalidAgentRunTransitionError,
+)
+
 
 class AgentRunStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+_ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] = {
+    AgentRunStatus.PENDING: frozenset({AgentRunStatus.RUNNING}),
+    AgentRunStatus.RUNNING: frozenset(
+        {
+            AgentRunStatus.COMPLETED,
+            AgentRunStatus.FAILED,
+        }
+    ),
+    AgentRunStatus.COMPLETED: frozenset(),
+    AgentRunStatus.FAILED: frozenset(),
+}
 
 
 class AgentRunExecutionResult(BaseModel):
@@ -36,3 +53,13 @@ class AgentRun(BaseModel):
 
     output: Any | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def transition_to(self, status: AgentRunStatus) -> "AgentRun":
+        allowed_statuses = _ALLOWED_AGENT_RUN_TRANSITIONS[self.status]
+
+        if status not in allowed_statuses:
+            raise InvalidAgentRunTransitionError(
+                f"invalid agent run transition: " f"{self.status.value} -> {status.value}"
+            )
+
+        return self.model_copy(update={"status": status})
