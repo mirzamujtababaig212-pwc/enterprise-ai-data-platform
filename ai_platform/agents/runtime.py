@@ -10,6 +10,7 @@ from ai_platform.agents.llm_context import (
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.llm_messages import AgentMessage
 from ai_platform.agents.tool_context import AgentToolContext
+from memory.context.builder import MemoryContextBuilder
 from tools.contracts import ToolRegistry
 from tools.execution.service import ToolExecutionService
 
@@ -39,6 +40,7 @@ class AgentRuntime:
         tool_registry: ToolRegistry | None = None,
         tool_execution_service: ToolExecutionService | None = None,
         llm_gateway: LLMGateway | None = None,
+        memory_context_builder: MemoryContextBuilder | None = None,
     ) -> None:
         self._registry = registry
         self._tool_registry = tool_registry
@@ -54,6 +56,7 @@ class AgentRuntime:
 
         self._tool_registry = tool_registry
         self._llm_gateway = llm_gateway if llm_gateway is not None else UnavailableLLMGateway()
+        self._memory_context_builder = memory_context_builder
 
     async def run(
         self,
@@ -110,6 +113,19 @@ class AgentRuntime:
                     agent.definition,
                 )
 
+        memory_context = None
+
+        if request.memory_namespace is not None:
+            if self._memory_context_builder is None:
+                raise RuntimeError(
+                    f"Agent '{agent_name}' requested memory but no "
+                    "MemoryContextBuilder is configured."
+                )
+
+            memory_context = await self._memory_context_builder.build(
+                request.memory_namespace,
+            )
+
         llm_context = AgentLLMContext(
             self._llm_gateway,
             agent.definition.llm_config,
@@ -120,6 +136,7 @@ class AgentRuntime:
             tools=tool_context,
             llm=llm_context,
             history=history,
+            memory=memory_context,
         )
 
         response = await agent.run(context)

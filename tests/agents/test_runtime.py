@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ai_platform.agents.execution import AgentExecutionContext
+from memory.context.builder import MemoryContext
 from ai_platform.agents.models import (
     AgentDefinition,
     AgentRequest,
@@ -36,6 +37,7 @@ class FakeAgent:
         self.run_count = 0
         self.last_request: AgentRequest | None = None
         self.last_history = ()
+        self.last_memory = None
 
     @property
     def definition(self) -> AgentDefinition:
@@ -48,12 +50,78 @@ class FakeAgent:
         self.run_count += 1
         self.last_request = context.request
         self.last_history = context.history
+        self.last_memory = context.memory
 
         return AgentResponse(
             agent_name=self.definition.name,
             output=self._output,
             session_id=context.session_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_builds_memory_context_for_requested_namespace():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent()
+    await registry.register(agent)
+
+    class TrackingMemoryBuilder:
+        def __init__(self) -> None:
+            self.requested_namespace = None
+
+        async def build(self, namespace: str) -> MemoryContext:
+            self.requested_namespace = namespace
+            return MemoryContext(
+                working=(),
+                semantic=(),
+                episodic=(),
+            )
+
+    builder = TrackingMemoryBuilder()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=builder,
+    )
+
+    await runtime.run(
+        "test-agent",
+        AgentRequest(
+            input="Use memory.",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert builder.requested_namespace == "project-a"
+    assert isinstance(agent.last_memory, MemoryContext)
+    assert agent.last_memory.is_empty
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_memory_without_configured_builder():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="requested memory but no MemoryContextBuilder is configured",
+    ):
+        await runtime.run(
+            "test-agent",
+            AgentRequest(
+                input="Use memory.",
+                memory_namespace="project-a",
+            ),
+        )
+
+    assert agent.run_count == 0
 
 
 @pytest.mark.asyncio

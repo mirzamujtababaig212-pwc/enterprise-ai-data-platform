@@ -5,6 +5,7 @@ from ai_platform.agents.llm_messages import (
     AgentMessage,
     tool_result_message,
 )
+from memory.context.builder import MemoryContext
 from ai_platform.agents.tool_calls import (
     AgentToolCall,
     AgentToolResult,
@@ -33,11 +34,13 @@ class AgentExecutionContext:
         tools: AgentToolContext,
         llm: AgentLLMContext,
         history: tuple[AgentMessage, ...] = (),
+        memory: MemoryContext | None = None,
     ) -> None:
         self.request = request
         self.tools = tools
         self.llm = llm
         self.history = history
+        self.memory = memory
 
         for message in self.history:
             if not isinstance(message, AgentMessage):
@@ -106,6 +109,10 @@ class AgentExecutionContext:
     @property
     def governance_policy(self) -> GovernancePolicy | None:
         return self.request.governance_policy
+
+    @property
+    def memory_namespace(self) -> str | None:
+        return self.request.memory_namespace
 
     async def execute_tool_calls(
         self,

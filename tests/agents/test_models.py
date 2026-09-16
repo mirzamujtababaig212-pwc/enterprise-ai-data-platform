@@ -147,6 +147,7 @@ def test_agent_request_accepts_valid_input():
         input="Find the latest ingestion failures.",
         session_id="session-123",
         user_id="user-456",
+        memory_namespace="tenant-123",
         metadata={
             "source": "api",
         },
@@ -155,6 +156,7 @@ def test_agent_request_accepts_valid_input():
     assert request.input == ("Find the latest ingestion failures.")
     assert request.session_id == "session-123"
     assert request.user_id == "user-456"
+    assert request.memory_namespace == "tenant-123"
     assert request.metadata == {
         "source": "api",
     }
@@ -168,6 +170,7 @@ def test_agent_request_allows_optional_context():
     assert request.input == "Hello agent."
     assert request.session_id is None
     assert request.user_id is None
+    assert request.memory_namespace is None
     assert request.metadata == {}
 
 
@@ -200,6 +203,17 @@ def test_agent_request_rejects_empty_user_id():
         AgentRequest(
             input="Hello agent.",
             user_id="",
+        )
+
+
+def test_agent_request_rejects_empty_memory_namespace():
+    with pytest.raises(
+        ValueError,
+        match="memory_namespace must not be empty",
+    ):
+        AgentRequest(
+            input="Hello agent.",
+            memory_namespace="",
         )
 
 

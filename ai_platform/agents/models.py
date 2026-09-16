@@ -86,6 +86,7 @@ class AgentRequest:
 
     session_id: str | None = None
     user_id: str | None = None
+    memory_namespace: str | None = None
     governance_policy: GovernancePolicy | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -99,6 +100,9 @@ class AgentRequest:
 
         if self.user_id is not None and not self.user_id.strip():
             raise ValueError("Agent request user_id must not be empty when provided.")
+
+        if self.memory_namespace is not None and not self.memory_namespace.strip():
+            raise ValueError("Agent request memory_namespace must not be empty when provided.")
 
         object.__setattr__(
             self,

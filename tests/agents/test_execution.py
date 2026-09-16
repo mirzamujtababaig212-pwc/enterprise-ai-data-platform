@@ -18,6 +18,7 @@ from ai_platform.agents.llm_messages import (
     user_message,
 )
 from rag.governance import GovernancePolicy
+from memory.context.builder import MemoryContext
 
 
 class FakeGateway:
@@ -70,6 +71,46 @@ def make_context(
         tools=tools,
         llm=llm,
     )
+
+
+@pytest.mark.asyncio
+async def test_execution_context_defaults_to_no_memory() -> None:
+    context = make_context()
+
+    assert context.memory is None
+
+
+@pytest.mark.asyncio
+async def test_execution_context_preserves_memory_context() -> None:
+    memory = MemoryContext(
+        working=(),
+        semantic=(),
+        episodic=(),
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Use available memory.",
+            memory_namespace="project-a",
+        ),
+        tools=make_context().tools,
+        llm=make_context().llm,
+        memory=memory,
+    )
+
+    assert context.memory is memory
+
+
+@pytest.mark.asyncio
+async def test_execution_context_exposes_memory_namespace() -> None:
+    context = make_context(
+        AgentRequest(
+            input="Use project memory.",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert context.memory_namespace == "project-a"
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,8 @@ from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
 from ml.inference import VehicleRiskPredictor
+from memory import InMemoryMemoryStore, MemoryService
+from memory.context import MemoryContextBuilder
 from rag.embeddings.gateway import GatewayEmbeddingService
 from rag.generation.gateway import GatewayChatService
 from rag.indexing import RAGIndexer
@@ -45,10 +47,15 @@ _llm_router = Router()
 _agent_registry = InMemoryAgentRegistry()
 _tool_registry = InMemoryToolRegistry()
 
+_memory_store = InMemoryMemoryStore()
+_memory_service = MemoryService(_memory_store)
+_memory_context_builder = MemoryContextBuilder(_memory_service)
+
 _agent_runtime = AgentRuntime(
     _agent_registry,
     tool_registry=_tool_registry,
     llm_gateway=_llm_router,
+    memory_context_builder=_memory_context_builder,
 )
 
 _agent_initialization_lock = asyncio.Lock()
