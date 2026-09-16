@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
+from sqlalchemy import column, func, select
+from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.orm import Session
+
+from app.control_plane.persistence.database import SessionLocal
+from app.control_plane.persistence.models import RAGChunkRecord
 from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
 
@@ -182,3 +189,135 @@ class InMemoryLexicalRetriever:
             filtered,
             key=lambda result: (-result.score, result.chunk.id),
         )[:top_k]
+
+
+class PostgreSQLLexicalRetriever:
+    """
+    PostgreSQL full-text-search retriever over the authoritative rag_chunks table.
+
+    PostgreSQL ranks matching chunks with ts_rank_cd and normalizes the
+    resulting scores to [0, 1] for the current query, matching the score
+    contract of InMemoryLexicalRetriever.
+    """
+
+    def __init__(
+        self,
+        session_factory: Callable[[], Session] = SessionLocal,
+    ) -> None:
+        self._session_factory = session_factory
+
+    @staticmethod
+    def _build_metadata_filter(
+        *,
+        metadata_filter: Mapping[str, object] | None,
+        governance_policy: GovernancePolicy | None,
+    ) -> dict[str, object] | None:
+        if metadata_filter is None and governance_policy is None:
+            return None
+
+        effective_filter = dict(metadata_filter or {})
+
+        if governance_policy is None:
+            return effective_filter
+
+        policy_filter = governance_policy.to_metadata_filter()
+
+        for key, policy_value in policy_filter.items():
+            if key in effective_filter and effective_filter[key] != policy_value:
+                raise ValueError(
+                    f"Metadata filter conflicts with governance policy for key '{key}'."
+                )
+
+            effective_filter[key] = policy_value
+
+        return effective_filter
+
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        min_score: float | None = None,
+        metadata_filter: Mapping[str, object] | None = None,
+        governance_policy: GovernancePolicy | None = None,
+    ) -> Sequence[RetrievalResult]:
+        if not query.strip():
+            raise ValueError("Query must not be empty.")
+
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero.")
+
+        if min_score is not None and not -1.0 <= min_score <= 1.0:
+            raise ValueError("min_score must be between -1.0 and 1.0.")
+
+        effective_metadata_filter = self._build_metadata_filter(
+            metadata_filter=metadata_filter,
+            governance_policy=governance_policy,
+        )
+
+        return await asyncio.to_thread(
+            self._retrieve_sync,
+            query,
+            top_k,
+            min_score,
+            effective_metadata_filter,
+        )
+
+    def _retrieve_sync(
+        self,
+        query: str,
+        top_k: int,
+        min_score: float | None,
+        metadata_filter: Mapping[str, object] | None,
+    ) -> list[RetrievalResult]:
+        session: Session = self._session_factory()
+
+        try:
+            content_tsv = column("content_tsv", TSVECTOR())
+            tsquery = func.websearch_to_tsquery("simple", query)
+            rank = func.ts_rank_cd(content_tsv, tsquery)
+
+            statement = select(RAGChunkRecord, rank.label("rank")).where(
+                content_tsv.op("@@")(tsquery)
+            )
+
+            if metadata_filter:
+                for key, value in metadata_filter.items():
+                    statement = statement.where(
+                        RAGChunkRecord.chunk_metadata[key].as_string() == str(value)
+                    )
+
+            rows = session.execute(statement).all()
+
+            if not rows:
+                return []
+
+            max_rank = max(float(rank_value) for _, rank_value in rows)
+
+            if max_rank <= 0.0:
+                return []
+
+            results = [
+                RetrievalResult(
+                    chunk=DocumentChunk(
+                        id=record.chunk_id,
+                        document_id=record.document_id,
+                        content=record.content,
+                        metadata=dict(record.chunk_metadata),
+                        chunk_index=record.chunk_index,
+                    ),
+                    score=float(rank_value) / max_rank,
+                )
+                for record, rank_value in rows
+            ]
+
+            filtered = [
+                result for result in results if min_score is None or result.score >= min_score
+            ]
+
+            return sorted(
+                filtered,
+                key=lambda result: (-result.score, result.chunk.id),
+            )[:top_k]
+
+        finally:
+            session.close()
