@@ -9,7 +9,11 @@ from ai_platform.agents.models import (
     AgentResponse,
 )
 
-from app.control_plane.agent_runs.models import AgentRunExecutionResult
+from app.control_plane.agent_runs.models import (
+    AgentRun,
+    AgentRunExecutionResult,
+    AgentRunStatus,
+)
 
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.routes.agents import router
@@ -19,9 +23,30 @@ class FakeAgentRunApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, AgentRequest]] = []
         self.runs = {}
+        self.list_calls = []
 
     def get_run(self, run_id: str):
         return self.runs.get(run_id)
+
+    def list_runs(
+        self,
+        *,
+        agent_name=None,
+        session_id=None,
+        user_id=None,
+        status=None,
+        limit=100,
+    ):
+        self.list_calls.append(
+            {
+                "agent_name": agent_name,
+                "session_id": session_id,
+                "user_id": user_id,
+                "status": status,
+                "limit": limit,
+            }
+        )
+        return list(self.runs.values())[:limit]
 
     async def execute(
         self,
@@ -160,6 +185,97 @@ async def test_agent_runtime_initializes_rag_enabled_agent() -> None:
     tools = await dependencies._tool_registry.list_tools()
 
     assert any(tool.name == "rag.search" for tool in tools)
+
+
+def test_list_agent_runs_returns_runs_and_applies_filters() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-1"] = AgentRun(
+        run_id="run-1",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+        session_id="session-123",
+        output="completed",
+        metadata={"source": "test"},
+    )
+
+    response = client.get(
+        "/api/v1/agents/runs",
+        params={
+            "agent_name": "enterprise-analyst",
+            "session_id": "session-123",
+            "user_id": "user-123",
+            "status": "completed",
+            "limit": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "runs": [
+            {
+                "run_id": "run-1",
+                "agent_name": "enterprise-analyst",
+                "status": "completed",
+                "session_id": "session-123",
+                "started_at": None,
+                "completed_at": None,
+                "output": "completed",
+                "metadata": {"source": "test"},
+            }
+        ],
+    }
+
+    assert service.list_calls == [
+        {
+            "agent_name": "enterprise-analyst",
+            "session_id": "session-123",
+            "user_id": "user-123",
+            "status": AgentRunStatus.COMPLETED,
+            "limit": 25,
+        }
+    ]
+
+
+def test_list_agent_runs_defaults_to_limit_100() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get("/api/v1/agents/runs")
+
+    assert response.status_code == 200
+    assert response.json() == {"runs": []}
+    assert service.list_calls == [
+        {
+            "agent_name": None,
+            "session_id": None,
+            "user_id": None,
+            "status": None,
+            "limit": 100,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"status": "unknown"},
+        {"limit": 0},
+        {"limit": 101},
+    ],
+)
+def test_list_agent_runs_rejects_invalid_query_parameters(params) -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs",
+        params=params,
+    )
+
+    assert response.status_code == 422
+    assert service.list_calls == []
 
 
 def test_get_agent_run_returns_detail() -> None:

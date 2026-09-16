@@ -311,3 +311,45 @@ def test_get_run_returns_none_for_missing_run() -> None:
 
     assert result is None
     repository.get.assert_called_once_with("missing-run")
+
+
+def test_list_runs_delegates_filters_and_limit() -> None:
+    repository = _repository()
+
+    runs = [
+        AgentRun(
+            run_id="run-1",
+            agent_name="enterprise-analyst",
+            status=AgentRunStatus.COMPLETED,
+        ),
+        AgentRun(
+            run_id="run-2",
+            agent_name="enterprise-analyst",
+            status=AgentRunStatus.FAILED,
+        ),
+    ]
+    repository.list.return_value = runs
+
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = service.list_runs(
+        agent_name="enterprise-analyst",
+        session_id="session-1",
+        user_id="user-1",
+        status=AgentRunStatus.COMPLETED,
+        limit=25,
+    )
+
+    assert result == runs
+    repository.list.assert_called_once_with(
+        agent_name="enterprise-analyst",
+        session_id="session-1",
+        user_id="user-1",
+        status=AgentRunStatus.COMPLETED,
+        limit=25,
+    )

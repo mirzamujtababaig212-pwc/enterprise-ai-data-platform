@@ -50,3 +50,7 @@ class AgentRunDetailResponse(BaseModel):
     completed_at: datetime | None = None
     output: Any | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRunListResponse(BaseModel):
+    runs: list[AgentRunDetailResponse]

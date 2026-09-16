@@ -85,3 +85,20 @@ class AgentRunApplicationService:
 
     def get_run(self, run_id: str) -> AgentRun | None:
         return self._repository.get(run_id)
+
+    def list_runs(
+        self,
+        *,
+        agent_name: str | None = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        status: AgentRunStatus | None = None,
+        limit: int = 100,
+    ) -> list[AgentRun]:
+        return self._repository.list(
+            agent_name=agent_name,
+            session_id=session_id,
+            user_id=user_id,
+            status=status,
+            limit=limit,
+        )
