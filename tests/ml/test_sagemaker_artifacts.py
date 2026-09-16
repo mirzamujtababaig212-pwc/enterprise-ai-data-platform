@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import tarfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import skops.io as sio
@@ -11,6 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 from ml.sagemaker.artifacts import (
     champion_artifact_key,
     extract_model_id,
+    publish_champion_model,
     package_model_artifact,
     validate_model_artifact,
 )
@@ -147,3 +149,97 @@ def test_champion_artifact_key() -> None:
         "model-artifacts/vehicleriskmodel/"
         "model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
     )
+
+
+def test_publish_champion_model_uploads_immutable_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_path = tmp_path / "model.tar.gz"
+    package_path.write_bytes(b"deployment-artifact")
+
+    version = MagicMock()
+    version.source = "models:/m-f68ad14c07064a1a9f2619fa7a7d9d7a"
+    version.version = "2"
+
+    package_mock = MagicMock(return_value=(version, package_path))
+    monkeypatch.setattr(
+        "ml.sagemaker.artifacts.package_champion_model",
+        package_mock,
+    )
+
+    storage = MagicMock()
+    storage.exists.return_value = False
+    storage.uri.return_value = (
+        "s3://enterprise-data-ai-platform/"
+        "model-artifacts/vehicleriskmodel/"
+        "model-version-2/"
+        "m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
+    )
+
+    result = publish_champion_model(
+        model_name="VehicleRiskModel",
+        output_path=tmp_path / "model.tar.gz",
+        storage=storage,
+    )
+
+    assert result == (
+        version,
+        package_path,
+        "model-artifacts/vehicleriskmodel/"
+        "model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz",
+        "s3://enterprise-data-ai-platform/"
+        "model-artifacts/vehicleriskmodel/"
+        "model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz",
+    )
+
+    package_mock.assert_called_once_with(
+        model_name="VehicleRiskModel",
+        output_path=tmp_path / "model.tar.gz",
+        model_alias="champion",
+        client=None,
+    )
+    storage.exists.assert_called_once_with(
+        "model-artifacts/vehicleriskmodel/"
+        "model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
+    )
+    storage.uri.assert_called()
+    storage.write.assert_called_once_with(
+        "model-artifacts/vehicleriskmodel/"
+        "model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz",
+        b"deployment-artifact",
+    )
+
+
+def test_publish_champion_model_rejects_existing_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_path = tmp_path / "model.tar.gz"
+    package_path.write_bytes(b"deployment-artifact")
+
+    version = MagicMock()
+    version.source = "models:/m-f68ad14c07064a1a9f2619fa7a7d9d7a"
+    version.version = "2"
+
+    monkeypatch.setattr(
+        "ml.sagemaker.artifacts.package_champion_model",
+        MagicMock(return_value=(version, package_path)),
+    )
+
+    storage = MagicMock()
+    storage.exists.return_value = True
+    storage.uri.return_value = (
+        "s3://enterprise-data-ai-platform/model-artifacts/"
+        "vehicleriskmodel/model-version-2/"
+        "m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
+    )
+
+    with pytest.raises(FileExistsError, match="Immutable model artifact already exists"):
+        publish_champion_model(
+            model_name="VehicleRiskModel",
+            output_path=package_path,
+            storage=storage,
+        )
+
+    storage.write.assert_not_called()

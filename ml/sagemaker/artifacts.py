@@ -10,6 +10,8 @@ import mlflow
 import skops.io as sio
 from mlflow import MlflowClient
 
+from common.storage.s3_storage import S3Storage
+
 MODEL_FILENAME = "model.skops"
 REQUIRED_ARTIFACTS = (
     "MLmodel",
@@ -173,3 +175,33 @@ def package_champion_model(
     )
 
     return version, package_path
+
+
+def publish_champion_model(
+    model_name: str,
+    output_path: str | Path,
+    storage: S3Storage,
+    model_alias: str = "champion",
+    client: MlflowClient | None = None,
+) -> tuple[Any, Path, str, str]:
+    """Package and publish the MLflow champion model to S3."""
+    version, package_path = package_champion_model(
+        model_name=model_name,
+        output_path=output_path,
+        model_alias=model_alias,
+        client=client,
+    )
+
+    model_id = extract_model_id(version.source)
+    key = champion_artifact_key(
+        model_name=model_name,
+        model_version=str(version.version),
+        model_id=model_id,
+    )
+
+    if storage.exists(key):
+        raise FileExistsError(f"Immutable model artifact already exists: {storage.uri(key)}")
+
+    storage.write(key, package_path.read_bytes())
+
+    return version, package_path, key, storage.uri(key)
