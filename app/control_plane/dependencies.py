@@ -5,8 +5,11 @@ import asyncio
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from ai_platform.agents.composite_observer import CompositeAgentExecutionObserver
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.models import AgentDefinition
+from ai_platform.agents.otel_observer import OpenTelemetryAgentExecutionObserver
+from ai_platform.agents.prometheus_observer import PrometheusAgentExecutionObserver
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.config.settings import settings
@@ -48,6 +51,13 @@ _llm_router = Router()
 
 _agent_registry = InMemoryAgentRegistry()
 _tool_registry = InMemoryToolRegistry()
+
+_agent_observer = CompositeAgentExecutionObserver(
+    [
+        OpenTelemetryAgentExecutionObserver(),
+        PrometheusAgentExecutionObserver(),
+    ]
+)
 
 _memory_store = InMemoryMemoryStore()
 _memory_service = MemoryService(_memory_store)
@@ -154,8 +164,18 @@ async def _initialize_agents() -> None:
             tool_names=("rag.search",),
         )
 
-        await _agent_registry.register(LLMAgent(analyst_definition))
-        await _agent_registry.register(LLMAgent(rag_analyst_definition))
+        await _agent_registry.register(
+            LLMAgent(
+                analyst_definition,
+                observer=_agent_observer,
+            )
+        )
+        await _agent_registry.register(
+            LLMAgent(
+                rag_analyst_definition,
+                observer=_agent_observer,
+            )
+        )
 
         _agents_initialized = True
 
