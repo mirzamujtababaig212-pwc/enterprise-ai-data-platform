@@ -297,6 +297,82 @@ def test_get_run_returns_repository_result() -> None:
     repository.get.assert_called_once_with("run-123")
 
 
+@pytest.mark.asyncio
+async def test_execute_preserves_runtime_error_when_failed_persistence_fails() -> None:
+    repository = _repository()
+
+    original_error = RuntimeError("agent execution failed")
+    runtime = Mock()
+    runtime.run = AsyncMock(side_effect=original_error)
+
+    update_calls = 0
+
+    def update_with_failed_persistence(run: AgentRun) -> AgentRun:
+        nonlocal update_calls
+        update_calls += 1
+
+        if update_calls == 2:
+            raise RuntimeError("failed-state persistence failed")
+
+        return run
+
+    repository.update.side_effect = update_with_failed_persistence
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(RuntimeError, match="agent execution failed") as exc_info:
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(input="Fail"),
+        )
+
+    assert exc_info.value is original_error
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_surfaces_completed_persistence_failure() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    update_calls = 0
+
+    def update_with_completed_persistence_failure(run: AgentRun) -> AgentRun:
+        nonlocal update_calls
+        update_calls += 1
+
+        if update_calls == 2:
+            raise RuntimeError("completed-state persistence failed")
+
+        return run
+
+    repository.update.side_effect = update_with_completed_persistence_failure
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="completed-state persistence failed",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(input="Complete"),
+        )
+
+    runtime.run.assert_awaited_once()
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 2
+
+
 def test_get_run_returns_none_for_missing_run() -> None:
     repository = _repository()
     repository.get.return_value = None

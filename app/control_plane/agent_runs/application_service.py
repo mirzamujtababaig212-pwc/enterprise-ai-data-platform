@@ -64,7 +64,12 @@ class AgentRunApplicationService:
                     "error_message": str(exc),
                 }
             )
-            self._repository.update(failed_run)
+
+            try:
+                self._repository.update(failed_run)
+            except Exception:
+                pass
+
             raise
 
         completed_at = datetime.now(UTC)
