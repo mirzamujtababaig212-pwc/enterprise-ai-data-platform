@@ -34,7 +34,7 @@ VEHICLE_QUALITY_EMBEDDING_IDENTITY = EmbeddingIdentity(
     requested_model="vehicle-quality-benchmark",
     resolved_provider="test-provider",
     resolved_model="vehicle-quality-benchmark",
-    dimension=8,
+    dimension=20,
 )
 
 
@@ -58,168 +58,672 @@ VEHICLE_QUALITY_BENCHMARK_ITEMS = (
             "quality-electric-motor",
             "Electric motors convert electrical energy into mechanical propulsion.",
         ),
-        (1, 0, 0, 0, 0, 0, 0, 0),
+        (
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-electric-powertrain",
             "An electric powertrain uses a battery and electric motor to propel a vehicle.",
         ),
-        (1, 0, 0, 0, 0, 0, 0, 0),
+        (
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-electric-inverter",
             "The inverter controls electrical power delivered from the battery to the electric motor.",
         ),
-        (1, 0, 0, 0, 0, 0, 0, 0),
+        (
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-battery-charging",
             "Electric vehicle batteries receive electrical energy through charging equipment.",
         ),
-        (0, 1, 0, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-battery-storage",
             "The traction battery stores electrical energy for later vehicle operation.",
         ),
-        (0, 1, 0, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-battery-management",
             "A battery management system monitors cell voltage, temperature, and state of charge.",
         ),
-        (0, 1, 0, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-regenerative-braking",
             "Regenerative braking converts kinetic energy into electrical energy stored in the battery.",
         ),
-        (0, 1, 1, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-energy-recovery",
             "Energy recovery during deceleration can return electrical energy to the traction battery.",
         ),
-        (0, 1, 1, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-friction-braking",
             "Friction brakes use brake pads and rotors to slow the vehicle.",
         ),
-        (0, 0, 1, 0, 0, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-gasoline-engine",
             "Gasoline engines burn fuel inside cylinders to generate mechanical power.",
         ),
-        (0, 0, 0, 1, 0, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-internal-combustion",
             "Internal combustion engines generate propulsion through controlled fuel combustion.",
         ),
-        (0, 0, 0, 1, 0, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-fuel-injection",
             "Fuel injectors meter gasoline into the engine combustion process.",
         ),
-        (0, 0, 0, 1, 0, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-hybrid-powertrain",
             "Hybrid powertrains combine an internal combustion engine with an electric motor.",
         ),
-        (1, 0, 0, 1, 0, 0, 0, 0),
+        (
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-hybrid-battery",
             "A hybrid vehicle uses a battery to support electric propulsion alongside the engine.",
         ),
-        (1, 1, 0, 1, 0, 0, 0, 0),
+        (
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-hybrid-regeneration",
             "Hybrid vehicles can recover braking energy and store it in their battery.",
         ),
-        (0, 1, 1, 1, 0, 0, 0, 0),
+        (
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-brake-inspection",
             "Brake inspections check pads, rotors, calipers, and hydraulic components.",
         ),
-        (0, 0, 1, 0, 1, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-brake-maintenance",
             "Brake maintenance includes pad replacement, rotor inspection, and brake fluid service.",
         ),
-        (0, 0, 1, 0, 1, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-tire-service",
             "Tire service includes pressure checks, rotation, balancing, and tread inspection.",
         ),
-        (0, 0, 0, 0, 1, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-fluid-service",
             "Routine vehicle service includes engine oil, coolant, and brake fluid checks.",
         ),
-        (0, 0, 0, 0, 1, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-component-replacement",
             "Component replacement restores worn vehicle parts that no longer meet service requirements.",
         ),
-        (0, 0, 0, 0, 1, 0, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-engine-temperature",
             "Engine temperature monitoring detects overheating and abnormal thermal conditions.",
         ),
-        (0, 0, 0, 0, 0, 1, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-vehicle-diagnostics",
             "Vehicle diagnostics identify faults using sensor data and diagnostic codes.",
         ),
-        (0, 0, 0, 0, 0, 1, 0, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-traction-control",
             "Traction control reduces wheel slip by managing available driving torque.",
         ),
-        (1, 0, 0, 0, 0, 0, 1, 0),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
     VehicleQualityBenchmarkItem(
         _chunk(
             "quality-warning-indicators",
             "Dashboard warning indicators alert drivers to vehicle system conditions.",
         ),
-        (0, 0, 0, 0, 0, 1, 0, 1),
+        (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     ),
 )
 
@@ -347,36 +851,235 @@ VEHICLE_QUALITY_EVALUATION_CASES = (
 
 
 def vehicle_quality_benchmark_embedding(text: str) -> EmbeddingResult:
-    normalized = text.lower()
+    """Create a deterministic atomic-concept embedding for the quality fixture.
 
-    vector = [0.0] * 8
+    The experimental benchmark uses one shared automotive concept ontology for
+    both documents and queries. Dimensions represent concepts rather than
+    query-specific ranking rules.
 
-    if any(term in normalized for term in ("electric", "ev", "motor", "propulsion", "hybrid")):
-        vector[0] = 1.0
+    Axes:
+      0  = electric
+      1  = battery
+      2  = braking
+      3  = combustion
+      4  = maintenance
+      5  = diagnostics
+      6  = motor
+      7  = inverter
+      8  = charging
+      9  = storage
+      10 = regeneration
+      11 = fuel injection
+      12 = inspection
+      13 = tires
+      14 = fluid service
+      15 = component replacement
+      16 = traction
+      17 = gasoline
+      18 = internal combustion
+      19 = hybrid powertrain
+    """
+    normalized = " ".join(text.lower().split())
+    vector = [0.0] * VEHICLE_QUALITY_EMBEDDING_IDENTITY.dimension
 
-    if any(term in normalized for term in ("battery", "charging", "storage", "energy")):
-        vector[1] = 1.0
+    def set_axis(index: int) -> None:
+        vector[index] = 1.0
 
-    if any(term in normalized for term in ("brak", "recover", "deceleration")):
-        vector[2] = 1.0
+    # ------------------------------------------------------------------
+    # Broad concepts
+    # ------------------------------------------------------------------
 
-    if any(term in normalized for term in ("gasoline", "combustion", "ice", "fuel", "hybrid")):
-        vector[3] = 1.0
-
-    if any(
-        term in normalized
-        for term in ("maintenance", "service", "inspection", "tire", "fluid", "component")
+    # Electric propulsion / electric vehicle concept.
+    if (
+        "electric motor" in normalized
+        or "electric powertrain" in normalized
+        or "electric propulsion" in normalized
+        or "ev battery" in normalized
+        or normalized.startswith("electric motors")
+        or "hybrid" in normalized
     ):
-        vector[4] = 1.0
+        set_axis(0)
 
-    if any(term in normalized for term in ("temperature", "diagnostic", "fault", "warning")):
-        vector[5] = 1.0
+    # Battery as an energy-storage component.
+    if "battery" in normalized or "batteries" in normalized:
+        set_axis(1)
 
-    if "traction" in normalized or "torque" in normalized:
-        vector[6] = 1.0
+    # Braking concept. Avoid treating "brake fluid" alone as a braking
+    # mechanism.
+    if (
+        "regenerative braking" in normalized
+        or "friction brakes" in normalized
+        or "brake pads" in normalized
+        or "braking" in normalized
+        or "brake maintenance" in normalized
+        or "brake inspection" in normalized
+        or ("brake" in normalized and "fluid" not in normalized)
+    ):
+        set_axis(2)
 
-    if "indicator" in normalized or "dashboard" in normalized:
-        vector[7] = 1.0
+    # Combustion / ICE concept. "Engine oil" and "engine temperature" are
+    # deliberately excluded from combustion by themselves.
+    if (
+        "gasoline engine" in normalized
+        or "internal combustion" in normalized
+        or "fuel combustion" in normalized
+        or "fuel injectors" in normalized
+        or "fuel injection" in normalized
+        or normalized.startswith("gasoline engines")
+        or "ice" in normalized.split()
+        or (
+            "engine" in normalized
+            and (
+                "propulsion" in normalized
+                or "combustion" in normalized
+                or "gasoline" in normalized
+                or "overheating" in normalized
+                or "thermal" in normalized
+            )
+        )
+    ):
+        set_axis(3)
+
+    # General maintenance/service concept.
+    if (
+        "maintenance" in normalized
+        or "vehicle service" in normalized
+        or "tire service" in normalized
+        or "fluid service" in normalized
+        or "component replacement" in normalized
+        or "worn vehicle parts" in normalized
+        or "routine vehicle service" in normalized
+    ):
+        set_axis(4)
+
+    # Diagnostics / fault-detection concept.
+    if (
+        "diagnostic" in normalized
+        or "diagnostics" in normalized
+        or "fault" in normalized
+        or "faults" in normalized
+        or "overheating" in normalized
+        or "thermal conditions" in normalized
+        or "sensor data" in normalized
+        or "sensor faults" in normalized
+        or "warning indicators" in normalized
+        or "temperature monitoring" in normalized
+    ):
+        set_axis(5)
+
+    # ------------------------------------------------------------------
+    # Atomic concepts
+    # ------------------------------------------------------------------
+
+    if (
+        "electric motor" in normalized
+        or "electric motors" in normalized
+        or "motor" in normalized
+        or "mechanical propulsion" in normalized
+        or "vehicle motion" in normalized
+    ):
+        set_axis(6)
+
+    # Fuel / engine architecture concepts are deliberately separate from
+    # the broad combustion axis so gasoline engines and internal-combustion
+    # engines remain distinguishable in graded retrieval.
+    if (
+        "gasoline engine" in normalized
+        or normalized.startswith("gasoline engines")
+        or "gasoline engines" in normalized
+    ):
+        set_axis(17)
+
+    if (
+        "internal combustion" in normalized
+        or "internal combustion engine" in normalized
+        or "ice" in normalized.split()
+    ):
+        set_axis(18)
+
+    # Hybrid powertrain is a distinct architecture concept, separate from
+    # the compositional electric + combustion representation.
+    if "hybrid powertrain" in normalized or (
+        "hybrid" in normalized
+        and "combine" in normalized
+        and "engine" in normalized
+        and "electric propulsion" in normalized
+    ):
+        set_axis(19)
+
+    if "inverter" in normalized:
+        set_axis(7)
+
+    if (
+        "charging equipment" in normalized
+        or "charging" in normalized
+        or "supplies electricity" in normalized
+    ):
+        set_axis(8)
+
+    if "stores electrical energy" in normalized or "storage" in normalized:
+        set_axis(9)
+
+    if (
+        "regenerative braking" in normalized
+        or "energy recovery" in normalized
+        or "recover braking energy" in normalized
+        or ("kinetic energy" in normalized and "recovered" in normalized)
+        or ("recover" in normalized and "braking" in normalized)
+    ):
+        set_axis(10)
+
+    if (
+        "fuel injectors" in normalized
+        or "fuel injection" in normalized
+        or "injectors" in normalized
+    ):
+        set_axis(11)
+
+    if (
+        "brake inspection" in normalized
+        or "brake inspections" in normalized
+        or ("pads" in normalized and "rotors" in normalized and "calipers" in normalized)
+    ):
+        set_axis(12)
+
+    if (
+        "tire" in normalized
+        or "tires" in normalized
+        or "tread" in normalized
+        or "rotation" in normalized
+        or "balancing" in normalized
+    ):
+        set_axis(13)
+
+    if (
+        "fluid service" in normalized
+        or "brake fluid" in normalized
+        or ("oil" in normalized and "coolant" in normalized and "brake fluid" in normalized)
+    ):
+        set_axis(14)
+
+    if (
+        "component replacement" in normalized
+        or "worn vehicle parts" in normalized
+        or "pad replacement" in normalized
+        or "replacement" in normalized
+    ):
+        set_axis(15)
+
+    if (
+        "traction control" in normalized
+        or "wheel slip" in normalized
+        or "driving torque" in normalized
+    ):
+        set_axis(16)
+
+    # Hybrid is compositional: hybrid documents participate in both electric
+    # and combustion concepts, while axis 19 captures hybrid powertrain
+    # architecture explicitly.
+    if "hybrid" in normalized:
+        set_axis(0)
+        set_axis(3)
 
     return EmbeddingResult(
         vector=tuple(vector),
@@ -396,7 +1099,7 @@ def vehicle_quality_benchmark_chunks() -> tuple[EmbeddedChunk, ...]:
     return tuple(
         EmbeddedChunk(
             chunk=item.chunk,
-            embedding=item.embedding,
+            embedding=vehicle_quality_benchmark_embedding(item.chunk.content).vector,
             embedding_identity=VEHICLE_QUALITY_EMBEDDING_IDENTITY,
         )
         for item in VEHICLE_QUALITY_BENCHMARK_ITEMS

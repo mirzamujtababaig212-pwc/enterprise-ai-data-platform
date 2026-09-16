@@ -42,6 +42,16 @@ def test_quality_benchmark_chunks_preserve_embedding_identity() -> None:
     assert all(chunk.embedding_identity == VEHICLE_QUALITY_EMBEDDING_IDENTITY for chunk in chunks)
 
 
+def test_quality_benchmark_chunks_match_canonical_embeddings() -> None:
+    chunks = vehicle_quality_benchmark_chunks()
+
+    expected_by_id = {item.chunk.id: item.embedding for item in VEHICLE_QUALITY_BENCHMARK_ITEMS}
+
+    for chunk in chunks:
+        assert chunk.embedding == expected_by_id[chunk.chunk.id]
+        assert len(chunk.embedding) == VEHICLE_QUALITY_EMBEDDING_IDENTITY.dimension
+
+
 @pytest.mark.asyncio
 async def test_quality_embedding_is_deterministic() -> None:
     service = VehicleQualityBenchmarkEmbeddingService()
