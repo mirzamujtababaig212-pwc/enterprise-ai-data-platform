@@ -47,6 +47,7 @@ class MemoryServiceProtocol(Protocol):
         namespace: str,
         memory_type: MemoryType,
         metadata: dict | None = None,
+        retention_seconds: int | None = None,
     ) -> MemoryItem: ...
 
     async def recall(

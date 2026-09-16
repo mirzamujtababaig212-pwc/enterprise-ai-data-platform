@@ -584,6 +584,7 @@ async def test_runtime_writes_successful_string_response_to_episodic_memory():
         system_prompt="You are a memory-writing agent.",
         model="test-model",
         memory_write_enabled=True,
+        memory_episodic_retention_seconds=3600,
     )
 
     await registry.register(agent)
@@ -599,6 +600,7 @@ async def test_runtime_writes_successful_string_response_to_episodic_memory():
             namespace: str,
             memory_type: str,
             metadata: dict | None = None,
+            retention_seconds: int | None = None,
         ):
             self.calls.append(
                 {
@@ -606,6 +608,7 @@ async def test_runtime_writes_successful_string_response_to_episodic_memory():
                     "namespace": namespace,
                     "memory_type": memory_type,
                     "metadata": metadata,
+                    "retention_seconds": retention_seconds,
                 }
             )
 
@@ -637,6 +640,7 @@ async def test_runtime_writes_successful_string_response_to_episodic_memory():
                 "agent_name": "memory-writing-agent",
                 "session_id": "session-123",
             },
+            "retention_seconds": 3600,
         }
     ]
 

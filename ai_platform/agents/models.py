@@ -31,6 +31,7 @@ class AgentDefinition:
     enabled: bool = True
 
     memory_write_enabled: bool = False
+    memory_episodic_retention_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -56,6 +57,12 @@ class AgentDefinition:
 
         if self.max_tokens <= 0:
             raise ValueError("Agent max_tokens must be greater than zero.")
+
+        if (
+            self.memory_episodic_retention_seconds is not None
+            and self.memory_episodic_retention_seconds <= 0
+        ):
+            raise ValueError("Agent memory_episodic_retention_seconds must be greater than zero.")
 
         object.__setattr__(
             self,

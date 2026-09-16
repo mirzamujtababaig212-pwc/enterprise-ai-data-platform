@@ -40,6 +40,37 @@ def test_agent_definition_accepts_valid_configuration():
         "domain": "data-engineering",
     }
     assert definition.enabled is True
+    assert definition.memory_write_enabled is False
+    assert definition.memory_episodic_retention_seconds is None
+
+
+def test_agent_definition_accepts_episodic_memory_retention():
+    definition = AgentDefinition(
+        name="memory-agent",
+        description="Agent with bounded episodic memory.",
+        system_prompt="You are a memory-aware agent.",
+        memory_write_enabled=True,
+        memory_episodic_retention_seconds=3600,
+    )
+
+    assert definition.memory_write_enabled is True
+    assert definition.memory_episodic_retention_seconds == 3600
+
+
+@pytest.mark.parametrize("retention_seconds", [0, -1])
+def test_agent_definition_rejects_non_positive_episodic_memory_retention(
+    retention_seconds,
+):
+    with pytest.raises(
+        ValueError,
+        match="memory_episodic_retention_seconds must be greater than zero",
+    ):
+        AgentDefinition(
+            name="memory-agent",
+            description="Agent with invalid memory retention.",
+            system_prompt="You are a memory-aware agent.",
+            memory_episodic_retention_seconds=retention_seconds,
+        )
 
 
 def test_agent_definition_rejects_empty_name():

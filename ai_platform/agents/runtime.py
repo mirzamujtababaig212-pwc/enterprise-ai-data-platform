@@ -165,6 +165,7 @@ class AgentRuntime:
                     namespace=request.memory_namespace,
                     memory_type="episodic",
                     metadata=metadata,
+                    retention_seconds=(agent.definition.memory_episodic_retention_seconds),
                 )
             except Exception:
                 # Memory persistence must not turn a successful agent

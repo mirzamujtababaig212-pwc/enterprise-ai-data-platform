@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -34,6 +34,66 @@ async def test_remember_creates_and_persists_memory():
     assert item.id.startswith("memory-")
 
     store.put.assert_awaited_once_with(item)
+
+
+@pytest.mark.asyncio
+async def test_remember_without_retention_has_no_expiry():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    service = MemoryService(store)
+
+    item = await service.remember(
+        "Persistent knowledge.",
+        namespace="project-a",
+        memory_type="semantic",
+    )
+
+    assert item.expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_remember_with_retention_sets_expiry():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    service = MemoryService(store)
+
+    before = datetime.now(timezone.utc)
+
+    item = await service.remember(
+        "Temporary episode.",
+        namespace="project-a",
+        memory_type="episodic",
+        retention_seconds=3600,
+    )
+
+    after = datetime.now(timezone.utc)
+
+    assert item.expires_at is not None
+    assert item.created_at >= before
+    assert item.created_at <= after
+
+    expected_lower = item.created_at + timedelta(seconds=3600)
+    assert item.expires_at == expected_lower
+
+
+@pytest.mark.asyncio
+async def test_remember_rejects_non_positive_retention():
+    store = MagicMock()
+    service = MemoryService(store)
+
+    for retention_seconds in (0, -1):
+        with pytest.raises(
+            ValueError,
+            match="retention_seconds must be greater than zero",
+        ):
+            await service.remember(
+                "Temporary memory.",
+                namespace="project-a",
+                memory_type="episodic",
+                retention_seconds=retention_seconds,
+            )
 
 
 @pytest.mark.asyncio
