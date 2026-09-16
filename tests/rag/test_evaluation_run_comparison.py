@@ -6,7 +6,11 @@ from rag.evaluation.comparison import (
     RetrievalEvaluationMetricStatus,
     RetrievalEvaluationRunComparator,
 )
-from rag.evaluation.lineage import RetrievalEvaluationLineage
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RetrievalEvaluationArtifact,
+    RetrievalEvaluationLineage,
+)
 from rag.evaluation.models import RetrievalEvaluationResult
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.quality_gate import RetrievalQualityGateResult
@@ -276,6 +280,112 @@ def test_comparison_rejects_incompatible_embedding_identity() -> None:
     with pytest.raises(
         ValueError,
         match="Evaluation runs are incompatible for embedding_identity",
+    ):
+        RetrievalEvaluationRunComparator.compare(baseline, candidate)
+
+
+def test_comparison_accepts_identical_retrieval_artifact() -> None:
+    from dataclasses import replace
+
+    baseline = _run(
+        "baseline",
+        recall=0.90,
+        precision=0.80,
+        mrr=0.90,
+        ndcg=0.85,
+        latency=100.0,
+        abstention_accuracy=0.90,
+    )
+    candidate = _run(
+        "candidate",
+        recall=0.95,
+        precision=0.85,
+        mrr=0.95,
+        ndcg=0.90,
+        latency=80.0,
+        abstention_accuracy=0.95,
+    )
+
+    artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        ),
+    )
+
+    baseline = replace(
+        baseline,
+        lineage=replace(baseline.lineage, retrieval_artifact=artifact),
+    )
+    candidate = replace(
+        candidate,
+        lineage=replace(candidate.lineage, retrieval_artifact=artifact),
+    )
+
+    comparison = RetrievalEvaluationRunComparator.compare(baseline, candidate)
+
+    assert comparison.passed is True
+
+
+def test_comparison_rejects_different_retrieval_artifact() -> None:
+    from dataclasses import replace
+
+    baseline = _run(
+        "baseline",
+        recall=0.90,
+        precision=0.80,
+        mrr=0.90,
+        ndcg=0.85,
+        latency=100.0,
+        abstention_accuracy=0.90,
+    )
+    candidate = _run(
+        "candidate",
+        recall=0.90,
+        precision=0.80,
+        mrr=0.90,
+        ndcg=0.85,
+        latency=100.0,
+        abstention_accuracy=0.90,
+    )
+
+    baseline_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        ),
+    )
+    candidate_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=10,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        ),
+    )
+
+    baseline = replace(
+        baseline,
+        lineage=replace(baseline.lineage, retrieval_artifact=baseline_artifact),
+    )
+    candidate = replace(
+        candidate,
+        lineage=replace(candidate.lineage, retrieval_artifact=candidate_artifact),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Evaluation runs are incompatible for retrieval_artifact",
     ):
         RetrievalEvaluationRunComparator.compare(baseline, candidate)
 

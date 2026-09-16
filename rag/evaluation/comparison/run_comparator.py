@@ -189,6 +189,11 @@ class RetrievalEvaluationRunComparator:
                 baseline_lineage.embedding_identity,
                 candidate_lineage.embedding_identity,
             ),
+            (
+                "retrieval_artifact",
+                baseline_lineage.retrieval_artifact,
+                candidate_lineage.retrieval_artifact,
+            ),
         )
 
         for name, baseline_value, candidate_value in checks:
