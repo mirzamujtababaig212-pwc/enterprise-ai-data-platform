@@ -186,6 +186,69 @@ def test_update_failure_details(repository) -> None:
     assert restored.error_message == "agent failed"
 
 
+def test_lifecycle_progression_persists_completed_run(repository) -> None:
+    run = make_run()
+
+    repository.create(run)
+
+    running = run.transition_to(AgentRunStatus.RUNNING).model_copy(
+        update={
+            "started_at": datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
+        }
+    )
+    repository.update(running)
+
+    restored_running = repository.get(run.run_id)
+    assert restored_running is not None
+    assert restored_running.status == AgentRunStatus.RUNNING
+    assert restored_running.started_at == running.started_at
+
+    completed = running.transition_to(AgentRunStatus.COMPLETED).model_copy(
+        update={
+            "completed_at": datetime(2026, 9, 17, 10, 5, tzinfo=UTC),
+            "output": {"answer": "completed"},
+        }
+    )
+    repository.update(completed)
+
+    restored_completed = repository.get(run.run_id)
+    assert restored_completed is not None
+    assert restored_completed.status == AgentRunStatus.COMPLETED
+    assert restored_completed.started_at == running.started_at
+    assert restored_completed.completed_at == completed.completed_at
+    assert restored_completed.output == {"answer": "completed"}
+
+
+def test_lifecycle_progression_persists_failed_run(repository) -> None:
+    run = make_run()
+
+    repository.create(run)
+
+    running = run.transition_to(AgentRunStatus.RUNNING).model_copy(
+        update={
+            "started_at": datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
+        }
+    )
+    repository.update(running)
+
+    failed = running.transition_to(AgentRunStatus.FAILED).model_copy(
+        update={
+            "completed_at": datetime(2026, 9, 17, 10, 1, tzinfo=UTC),
+            "error_type": "RuntimeError",
+            "error_message": "agent failed",
+        }
+    )
+    repository.update(failed)
+
+    restored_failed = repository.get(run.run_id)
+    assert restored_failed is not None
+    assert restored_failed.status == AgentRunStatus.FAILED
+    assert restored_failed.started_at == running.started_at
+    assert restored_failed.completed_at == failed.completed_at
+    assert restored_failed.error_type == "RuntimeError"
+    assert restored_failed.error_message == "agent failed"
+
+
 def test_update_missing_run_raises(repository) -> None:
     run = make_run(run_id="missing-run")
 
