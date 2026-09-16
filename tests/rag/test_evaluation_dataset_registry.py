@@ -5,6 +5,10 @@ import pytest
 from rag.evaluation.dataset_registry import (
     EvaluationDatasetRegistry,
     VehicleRetrievalEvaluationDatasetDefinition,
+    VehicleRetrievalQualityEvaluationDatasetDefinition,
+)
+from rag.evaluation.datasets.vehicle_retrieval_quality import (
+    VEHICLE_QUALITY_EMBEDDING_IDENTITY,
 )
 from rag.evaluation.datasets.vehicle import VEHICLE_EMBEDDING_IDENTITY
 from rag.evaluation.lineage import RetrievalEvaluationArtifact
@@ -112,3 +116,49 @@ def test_vehicle_dataset_definition_builds_faiss_retrieval_artifact() -> None:
         retriever_type="SemanticRetriever",
         vector_store_type="FAISSVectorStore",
     )
+
+
+def test_vehicle_quality_dataset_definition_is_versioned() -> None:
+    definition = VehicleRetrievalQualityEvaluationDatasetDefinition()
+
+    assert definition.name == "vehicle-retrieval-quality"
+    assert definition.version == "v1"
+
+
+def test_vehicle_quality_dataset_definition_builds_dataset() -> None:
+    definition = VehicleRetrievalQualityEvaluationDatasetDefinition()
+
+    dataset = definition.build_dataset()
+
+    assert dataset.name == "vehicle-retrieval-quality"
+    assert dataset.version == "v1"
+    assert dataset.size == 16
+
+
+def test_vehicle_quality_dataset_definition_preserves_embedding_identity() -> None:
+    definition = VehicleRetrievalQualityEvaluationDatasetDefinition()
+
+    assert definition.build_embedding_identity() == VEHICLE_QUALITY_EMBEDDING_IDENTITY
+
+
+def test_vehicle_quality_dataset_definition_builds_hybrid_artifact() -> None:
+    definition = VehicleRetrievalQualityEvaluationDatasetDefinition()
+
+    artifact = definition.build_retrieval_artifact()
+
+    assert artifact.retriever_type == "HybridRetriever"
+    assert artifact.vector_store_type == "InMemoryVectorStore"
+
+
+def test_registry_resolves_vehicle_quality_dataset_definition() -> None:
+    definition = EvaluationDatasetRegistry.get(
+        name="vehicle-retrieval-quality",
+        version="v1",
+    )
+
+    assert isinstance(
+        definition,
+        VehicleRetrievalQualityEvaluationDatasetDefinition,
+    )
+    assert definition.name == "vehicle-retrieval-quality"
+    assert definition.version == "v1"
