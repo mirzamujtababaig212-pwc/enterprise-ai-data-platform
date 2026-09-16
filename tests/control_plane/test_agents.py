@@ -9,6 +9,8 @@ from ai_platform.agents.models import (
     AgentResponse,
 )
 
+from app.control_plane.agent_runs.models import AgentRunExecutionResult
+
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.routes.agents import router
 
@@ -16,13 +18,17 @@ from app.control_plane.routes.agents import router
 class FakeAgentRunApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, AgentRequest]] = []
+        self.runs = {}
+
+    def get_run(self, run_id: str):
+        return self.runs.get(run_id)
 
     async def execute(
         self,
         *,
         agent_name: str,
         request: AgentRequest,
-    ) -> AgentResponse:
+    ) -> AgentRunExecutionResult:
         self.calls.append(
             (
                 agent_name,
@@ -33,7 +39,7 @@ class FakeAgentRunApplicationService:
         if agent_name == "missing-agent":
             raise LookupError("Agent 'missing-agent' is not registered.")
 
-        return AgentResponse(
+        response = AgentResponse(
             agent_name=agent_name,
             output=f"Agent response: {request.input}",
             session_id=request.session_id,
@@ -42,6 +48,11 @@ class FakeAgentRunApplicationService:
                 "model": "mock-gpt",
                 "tool_rounds": 0,
             },
+        )
+
+        return AgentRunExecutionResult(
+            run_id="run-test-123",
+            response=response,
         )
 
 
@@ -76,6 +87,7 @@ def test_run_agent_returns_runtime_response() -> None:
     assert response.status_code == 200
 
     assert response.json() == {
+        "run_id": "run-test-123",
         "agent_name": "enterprise-analyst",
         "output": "Agent response: Explain RAG.",
         "session_id": "session-123",
@@ -148,3 +160,45 @@ async def test_agent_runtime_initializes_rag_enabled_agent() -> None:
     tools = await dependencies._tool_registry.list_tools()
 
     assert any(tool.name == "rag.search" for tool in tools)
+
+
+def test_get_agent_run_returns_detail() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+
+    service.runs["run-123"] = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+        session_id="session-123",
+        output="completed",
+        metadata={"source": "test"},
+    )
+
+    response = client.get("/api/v1/agents/runs/run-123")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "run_id": "run-123",
+        "agent_name": "enterprise-analyst",
+        "status": "completed",
+        "session_id": "session-123",
+        "started_at": None,
+        "completed_at": None,
+        "output": "completed",
+        "metadata": {"source": "test"},
+    }
+
+
+def test_get_agent_run_returns_404_when_missing() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get("/api/v1/agents/runs/missing-run")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Agent run 'missing-run' was not found.",
+    }

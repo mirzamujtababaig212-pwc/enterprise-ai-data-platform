@@ -14,6 +14,11 @@ class AgentRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class AgentRunExecutionResult(BaseModel):
+    run_id: str = Field(min_length=1)
+    response: Any
+
+
 class AgentRun(BaseModel):
     run_id: str = Field(min_length=1)
     agent_name: str = Field(min_length=1)

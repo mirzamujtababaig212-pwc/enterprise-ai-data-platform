@@ -9,6 +9,7 @@ from app.control_plane.agent_runs.application_service import (
 )
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.schemas.agents import (
+    AgentRunDetailResponse,
     AgentRunRequest,
     AgentRunResponse,
 )
@@ -62,8 +63,39 @@ async def run_agent(
         ) from exc
 
     return AgentRunResponse(
-        agent_name=response.agent_name,
-        output=response.output,
-        session_id=response.session_id,
-        metadata=response.metadata,
+        run_id=response.run_id,
+        agent_name=response.response.agent_name,
+        output=response.response.output,
+        session_id=response.response.session_id,
+        metadata=response.response.metadata,
+    )
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=AgentRunDetailResponse,
+)
+async def get_agent_run(
+    run_id: str,
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunDetailResponse:
+    run = service.get_run(run_id)
+
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent run '{run_id}' was not found.",
+        )
+
+    return AgentRunDetailResponse(
+        run_id=run.run_id,
+        agent_name=run.agent_name,
+        status=run.status.value,
+        session_id=run.session_id,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        output=run.output,
+        metadata=run.metadata,
     )

@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.runtime import AgentRuntime
 
-from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.models import (
+    AgentRun,
+    AgentRunExecutionResult,
+    AgentRunStatus,
+)
 from app.control_plane.agent_runs.repository import AgentRunRepository
 
 
@@ -25,7 +29,7 @@ class AgentRunApplicationService:
         *,
         agent_name: str,
         request: AgentRequest,
-    ) -> AgentResponse:
+    ) -> AgentRunExecutionResult:
         run = AgentRun(
             run_id=str(uuid4()),
             agent_name=agent_name,
@@ -74,4 +78,10 @@ class AgentRunApplicationService:
         )
         self._repository.update(completed_run)
 
-        return response
+        return AgentRunExecutionResult(
+            run_id=completed_run.run_id,
+            response=response,
+        )
+
+    def get_run(self, run_id: str) -> AgentRun | None:
+        return self._repository.get(run_id)

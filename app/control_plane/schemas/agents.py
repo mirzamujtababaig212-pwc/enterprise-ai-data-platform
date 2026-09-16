@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -29,6 +30,7 @@ class AgentRunRequest(BaseModel):
 
 
 class AgentRunResponse(BaseModel):
+    run_id: str = Field(min_length=1)
     agent_name: str
     output: Any
 
@@ -37,3 +39,14 @@ class AgentRunResponse(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
     )
+
+
+class AgentRunDetailResponse(BaseModel):
+    run_id: str
+    agent_name: str
+    status: str
+    session_id: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    output: Any | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

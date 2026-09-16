@@ -6,7 +6,11 @@ import pytest
 
 from ai_platform.agents.models import AgentRequest, AgentResponse
 
-from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.models import (
+    AgentRun,
+    AgentRunExecutionResult,
+    AgentRunStatus,
+)
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
@@ -55,7 +59,9 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
         ),
     )
 
-    assert response.output == "completed"
+    assert isinstance(response, AgentRunExecutionResult)
+    assert response.run_id
+    assert response.response.output == "completed"
 
     assert repository.create.call_count == 1
     assert repository.update.call_count == 2
@@ -145,7 +151,9 @@ async def test_execute_preserves_agent_response_without_rebuilding_it() -> None:
         ),
     )
 
-    assert result is response
+    assert isinstance(result, AgentRunExecutionResult)
+    assert result.response is response
+    assert result.run_id
 
 
 @pytest.mark.asyncio
@@ -262,3 +270,44 @@ async def test_execute_does_not_attempt_failed_update_when_runtime_never_starts(
 
     repository.update.assert_not_called()
     runtime.run.assert_not_awaited()
+
+
+def test_get_run_returns_repository_result() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+        output="completed",
+    )
+    repository.get.return_value = run
+
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = service.get_run("run-123")
+
+    assert result is run
+    repository.get.assert_called_once_with("run-123")
+
+
+def test_get_run_returns_none_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = service.get_run("missing-run")
+
+    assert result is None
+    repository.get.assert_called_once_with("missing-run")
