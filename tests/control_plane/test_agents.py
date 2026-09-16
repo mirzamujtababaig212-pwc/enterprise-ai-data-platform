@@ -308,6 +308,91 @@ def test_get_agent_run_returns_detail() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "run_status",
+    [
+        AgentRunStatus.PENDING,
+        AgentRunStatus.RUNNING,
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.FAILED,
+    ],
+)
+def test_get_agent_run_exposes_all_lifecycle_statuses(
+    run_status: AgentRunStatus,
+) -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-status"] = AgentRun(
+        run_id="run-status",
+        agent_name="enterprise-analyst",
+        status=run_status,
+        session_id="session-123",
+        completed_at=None,
+        error_type="RuntimeError" if run_status == AgentRunStatus.FAILED else None,
+        error_message="provider failed" if run_status == AgentRunStatus.FAILED else None,
+        output=None,
+        metadata={"source": "test"},
+    )
+
+    response = client.get("/api/v1/agents/runs/run-status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "run_id": "run-status",
+        "agent_name": "enterprise-analyst",
+        "status": run_status.value,
+        "session_id": "session-123",
+        "started_at": None,
+        "completed_at": None,
+        "output": None,
+        "metadata": {"source": "test"},
+    }
+
+    assert "user_id" not in response.json()
+    assert "error_type" not in response.json()
+    assert "error_message" not in response.json()
+
+
+def test_list_agent_runs_serializes_all_lifecycle_statuses() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    for index, run_status in enumerate(AgentRunStatus):
+        service.runs[f"run-{index}"] = AgentRun(
+            run_id=f"run-{index}",
+            agent_name="enterprise-analyst",
+            status=run_status,
+            session_id=f"session-{index}",
+            metadata={"status_source": "test"},
+        )
+
+    response = client.get("/api/v1/agents/runs")
+
+    assert response.status_code == 200
+
+    runs = response.json()["runs"]
+
+    assert {run["status"] for run in runs} == {
+        "pending",
+        "running",
+        "completed",
+        "failed",
+    }
+
+    for run in runs:
+        assert set(run) == {
+            "run_id",
+            "agent_name",
+            "status",
+            "session_id",
+            "started_at",
+            "completed_at",
+            "output",
+            "metadata",
+        }
+
+
 def test_get_agent_run_returns_404_when_missing() -> None:
     service = FakeAgentRunApplicationService()
     client = build_client(service)
