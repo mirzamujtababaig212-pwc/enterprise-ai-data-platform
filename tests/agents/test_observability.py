@@ -32,6 +32,41 @@ def test_agent_execution_event_accepts_valid_event() -> None:
     }
 
 
+def test_agent_execution_event_preserves_run_id() -> None:
+    event = AgentExecutionEvent(
+        event_type=AgentExecutionEventType.AGENT_STARTED,
+        agent_name="production-llm-agent",
+        run_id="run-123",
+    )
+
+    assert event.run_id == "run-123"
+
+
+@pytest.mark.parametrize("run_id", ["", "   "])
+def test_agent_execution_event_rejects_empty_run_id(run_id: str) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Agent execution event run_id must not be empty",
+    ):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="production-llm-agent",
+            run_id=run_id,
+        )
+
+
+def test_agent_execution_event_rejects_non_string_run_id() -> None:
+    with pytest.raises(
+        TypeError,
+        match="Agent execution event run_id must be a string or None",
+    ):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="production-llm-agent",
+            run_id=123,  # type: ignore[arg-type]
+        )
+
+
 def test_agent_execution_event_copies_metadata() -> None:
     metadata = {
         "total_tokens": 42,

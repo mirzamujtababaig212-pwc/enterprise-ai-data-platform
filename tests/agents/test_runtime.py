@@ -47,6 +47,7 @@ class FakeAgent:
         self.last_request: AgentRequest | None = None
         self.last_history = ()
         self.last_memory = None
+        self.last_context: AgentExecutionContext | None = None
 
     @property
     def definition(self) -> AgentDefinition:
@@ -60,6 +61,7 @@ class FakeAgent:
         self.last_request = context.request
         self.last_history = context.history
         self.last_memory = context.memory
+        self.last_context = context
 
         return AgentResponse(
             agent_name=self.definition.name,
@@ -218,6 +220,28 @@ async def test_runtime_passes_history_to_agent() -> None:
     )
 
     assert agent.last_history == history
+
+
+@pytest.mark.asyncio
+async def test_runtime_passes_run_id_to_agent() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+    )
+
+    await runtime.run(
+        "test-agent",
+        AgentRequest(
+            input="Trace this execution.",
+        ),
+        run_id="run-123",
+    )
+
+    assert agent.last_context.run_id == "run-123"
 
 
 @pytest.mark.asyncio

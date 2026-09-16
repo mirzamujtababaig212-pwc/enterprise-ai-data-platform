@@ -94,6 +94,7 @@ class LLMAgent:
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.TOOL_CALL_REQUESTED,
                     agent_name=self.definition.name,
+                    run_id=context.run_id,
                     session_id=context.session_id,
                     tool_round=tool_round,
                     tool_name=tool_call.name,
@@ -114,6 +115,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
                         agent_name=self.definition.name,
+                        run_id=context.run_id,
                         session_id=context.session_id,
                         tool_round=tool_round,
                         tool_name=tool_call.name,
@@ -125,6 +127,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_FAILED,
                         agent_name=self.definition.name,
+                        run_id=context.run_id,
                         session_id=context.session_id,
                         tool_round=tool_round,
                         tool_name=tool_call.name,
@@ -157,6 +160,7 @@ class LLMAgent:
             AgentExecutionEvent(
                 event_type=AgentExecutionEventType.AGENT_STARTED,
                 agent_name=self.definition.name,
+                run_id=context.run_id,
                 session_id=context.session_id,
             )
         )
@@ -171,6 +175,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_REQUESTED,
                         agent_name=self.definition.name,
+                        run_id=context.run_id,
                         session_id=context.session_id,
                         tool_round=tool_rounds,
                     )
@@ -188,6 +193,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_COMPLETED,
                         agent_name=self.definition.name,
+                        run_id=context.run_id,
                         session_id=context.session_id,
                         tool_round=tool_rounds,
                         provider=result.provider,
@@ -205,6 +211,7 @@ class LLMAgent:
                         AgentExecutionEvent(
                             event_type=AgentExecutionEventType.AGENT_COMPLETED,
                             agent_name=self.definition.name,
+                            run_id=context.run_id,
                             session_id=context.session_id,
                             tool_round=tool_rounds,
                             provider=result.provider,
@@ -249,6 +256,7 @@ class LLMAgent:
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.AGENT_FAILED,
                     agent_name=self.definition.name,
+                    run_id=context.run_id,
                     session_id=context.session_id,
                     tool_round=tool_rounds,
                     metadata={

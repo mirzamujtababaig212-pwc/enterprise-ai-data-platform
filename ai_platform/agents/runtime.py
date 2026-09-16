@@ -67,6 +67,7 @@ class AgentRuntime:
         request: AgentRequest,
         *,
         history: tuple[AgentMessage, ...] = (),
+        run_id: str | None = None,
     ) -> AgentResponse:
         if not agent_name.strip():
             raise ValueError("Agent name must not be empty.")
@@ -140,6 +141,7 @@ class AgentRuntime:
             llm=llm_context,
             history=history,
             memory=memory_context,
+            run_id=run_id,
         )
 
         response = await agent.run(context)

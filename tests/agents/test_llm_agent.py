@@ -952,6 +952,7 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
         ),
         tools=tools,
         llm=llm_context,
+        run_id="run-123",
     )
 
     observer = FakeAgentExecutionObserver()
@@ -985,6 +986,13 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     assert completed.tool_round == 0
     assert completed.provider == "fake"
     assert completed.model == "gpt-test"
+
+    assert [event.run_id for event in observer.events] == [
+        "run-123",
+        "run-123",
+        "run-123",
+        "run-123",
+    ]
 
 
 @pytest.mark.asyncio

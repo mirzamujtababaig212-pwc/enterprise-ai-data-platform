@@ -97,6 +97,7 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
             session_id="session-1",
             user_id="user-1",
         ),
+        run_id=pending.run_id,
     )
 
 

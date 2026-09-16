@@ -36,12 +36,21 @@ class AgentExecutionContext:
         llm: AgentLLMContext,
         history: tuple[AgentMessage, ...] = (),
         memory: MemoryContext | None = None,
+        run_id: str | None = None,
     ) -> None:
         self.request = request
         self.tools = tools
         self.llm = llm
         self.history = history
         self.memory = memory
+        self.run_id = run_id
+
+        if self.run_id is not None:
+            if not isinstance(self.run_id, str):
+                raise TypeError("Agent execution run_id must be a string or None.")
+
+            if not self.run_id.strip():
+                raise ValueError("Agent execution run_id must not be empty.")
 
         for message in self.history:
             if not isinstance(message, AgentMessage):

@@ -53,6 +53,7 @@ class AgentRunApplicationService:
             response = await self._runtime.run(
                 agent_name,
                 request,
+                run_id=run.run_id,
             )
         except Exception as exc:
             failed_at = datetime.now(UTC)

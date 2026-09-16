@@ -123,6 +123,12 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             event.agent_name,
         )
 
+        if event.run_id is not None:
+            span.set_attribute(
+                "agent.run_id",
+                event.run_id,
+            )
+
         token = context.attach(
             trace.set_span_in_context(span),
         )
@@ -180,6 +186,12 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             "agent.name",
             event.agent_name,
         )
+
+        if event.run_id is not None:
+            span.set_attribute(
+                "agent.run_id",
+                event.run_id,
+            )
 
         if event.tool_round is not None:
             span.set_attribute(
@@ -258,6 +270,12 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             "agent.name",
             event.agent_name,
         )
+
+        if event.run_id is not None:
+            span.set_attribute(
+                "agent.run_id",
+                event.run_id,
+            )
 
         span.set_attribute(
             "tool.name",

@@ -73,6 +73,101 @@ def test_agent_completed_creates_agent_span() -> None:
     assert span.attributes["agent.name"] == "test-agent"
 
 
+def test_run_id_is_recorded_on_agent_llm_and_tool_spans() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+                run_id="run-123",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.LLM_REQUESTED,
+                agent_name="test-agent",
+                run_id="run-123",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.LLM_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-123",
+                provider="openai",
+                model="gpt-test",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.TOOL_CALL_REQUESTED,
+                agent_name="test-agent",
+                run_id="run-123",
+                tool_name="search_documents",
+                call_id="call-123",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-123",
+                tool_name="search_documents",
+                call_id="call-123",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-123",
+            )
+        )
+
+    run(scenario())
+
+    assert span_by_name(exporter, "agent.run").attributes["agent.run_id"] == "run-123"
+    assert span_by_name(exporter, "agent.llm.request").attributes["agent.run_id"] == "run-123"
+    assert span_by_name(exporter, "agent.tool.call").attributes["agent.run_id"] == "run-123"
+
+
+def test_run_id_is_not_recorded_when_absent() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.LLM_REQUESTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.LLM_COMPLETED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    for span in exporter.get_finished_spans():
+        assert "agent.run_id" not in span.attributes
+
+
 def test_agent_failed_creates_error_agent_span() -> None:
     observer, exporter = make_observer()
 

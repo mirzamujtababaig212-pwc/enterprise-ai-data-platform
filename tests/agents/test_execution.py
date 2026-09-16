@@ -73,6 +73,54 @@ def make_context(
     )
 
 
+def test_execution_context_defaults_to_no_run_id() -> None:
+    context = make_context()
+
+    assert context.run_id is None
+
+
+def test_execution_context_preserves_run_id() -> None:
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        run_id="run-123",
+    )
+
+    assert context.run_id == "run-123"
+
+
+@pytest.mark.parametrize("run_id", ["", "   "])
+def test_execution_context_rejects_empty_run_id(run_id: str) -> None:
+    base_context = make_context()
+
+    with pytest.raises(
+        ValueError,
+        match="Agent execution run_id must not be empty",
+    ):
+        AgentExecutionContext(
+            base_context.request,
+            tools=base_context.tools,
+            llm=base_context.llm,
+            run_id=run_id,
+        )
+
+
+def test_execution_context_rejects_non_string_run_id() -> None:
+    base_context = make_context()
+
+    with pytest.raises(
+        TypeError,
+        match="Agent execution run_id must be a string or None",
+    ):
+        AgentExecutionContext(
+            base_context.request,
+            tools=base_context.tools,
+            llm=base_context.llm,
+            run_id=123,  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.asyncio
 async def test_execution_context_defaults_to_no_memory() -> None:
     context = make_context()
