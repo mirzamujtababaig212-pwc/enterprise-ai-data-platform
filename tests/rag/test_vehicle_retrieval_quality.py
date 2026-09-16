@@ -9,6 +9,7 @@ from rag.evaluation.datasets.vehicle_retrieval_quality import (
     VehicleQualityBenchmarkEmbeddingService,
     vehicle_quality_benchmark_chunks,
     vehicle_quality_evaluation_cases,
+    vehicle_quality_query_taxonomy,
 )
 
 
@@ -68,3 +69,32 @@ def test_quality_benchmark_uses_graded_relevance() -> None:
     for case in vehicle_quality_evaluation_cases():
         assert case.relevance_grades is not None
         assert all(grade >= 0.0 for grade in case.relevance_grades.values())
+
+
+def test_quality_query_taxonomy_covers_every_case() -> None:
+    cases = vehicle_quality_evaluation_cases()
+    taxonomy = vehicle_quality_query_taxonomy()
+
+    assert set(taxonomy) == {case.query for case in cases}
+    assert set(taxonomy.values()) <= {
+        "semantic",
+        "lexical",
+        "mixed",
+        "noisy",
+    }
+
+
+def test_quality_query_taxonomy_has_expected_distribution() -> None:
+    taxonomy = vehicle_quality_query_taxonomy()
+
+    counts = {
+        category: sum(value == category for value in taxonomy.values())
+        for category in {"semantic", "lexical", "mixed", "noisy"}
+    }
+
+    assert counts == {
+        "semantic": 4,
+        "lexical": 9,
+        "mixed": 3,
+        "noisy": 0,
+    }

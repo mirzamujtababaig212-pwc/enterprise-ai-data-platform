@@ -10,6 +10,25 @@ from rag.models import (
     EmbeddingResult,
 )
 
+VEHICLE_QUALITY_QUERY_TAXONOMY = {
+    "What converts stored electrical power into vehicle motion?": "semantic",
+    "electric inverter battery motor power delivery": "lexical",
+    "What equipment supplies electricity to an EV battery?": "mixed",
+    "traction battery stores electrical energy": "lexical",
+    "How is kinetic energy recovered during braking?": "semantic",
+    "regenerative braking battery energy recovery": "lexical",
+    "What happens inside an ICE during propulsion?": "semantic",
+    "gasoline fuel injectors combustion": "lexical",
+    "How does a hybrid combine engine and electric propulsion?": "mixed",
+    "pads rotors calipers brake inspection": "lexical",
+    "What maintenance replaces worn brake components?": "mixed",
+    "tire pressure rotation balancing tread": "lexical",
+    "oil coolant brake fluid service": "lexical",
+    "Which process restores worn vehicle parts?": "semantic",
+    "overheating thermal engine conditions": "lexical",
+    "sensor faults diagnostic codes": "lexical",
+}
+
 VEHICLE_QUALITY_EMBEDDING_IDENTITY = EmbeddingIdentity(
     requested_provider="test-provider",
     requested_model="vehicle-quality-benchmark",
@@ -386,3 +405,7 @@ def vehicle_quality_benchmark_chunks() -> tuple[EmbeddedChunk, ...]:
 
 def vehicle_quality_evaluation_cases() -> tuple[RetrievalEvaluationCase, ...]:
     return VEHICLE_QUALITY_EVALUATION_CASES
+
+
+def vehicle_quality_query_taxonomy() -> dict[str, str]:
+    return dict(VEHICLE_QUALITY_QUERY_TAXONOMY)
