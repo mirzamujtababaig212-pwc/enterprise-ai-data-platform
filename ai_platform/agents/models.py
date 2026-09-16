@@ -30,6 +30,8 @@ class AgentDefinition:
 
     enabled: bool = True
 
+    memory_write_enabled: bool = False
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("Agent name must not be empty.")

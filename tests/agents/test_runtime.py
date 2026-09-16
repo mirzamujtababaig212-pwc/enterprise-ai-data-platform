@@ -18,6 +18,15 @@ from ai_platform.agents.llm_messages import (
 )
 
 
+class EmptyMemoryBuilder:
+    async def build(self, namespace: str) -> MemoryContext:
+        return MemoryContext(
+            working=(),
+            semantic=(),
+            episodic=(),
+        )
+
+
 class FakeAgent:
     def __init__(
         self,
@@ -559,3 +568,249 @@ async def test_runtime_propagates_history_into_llm_execution_context() -> None:
     )
 
     assert response.output == "History received."
+
+
+@pytest.mark.asyncio
+async def test_runtime_writes_successful_string_response_to_episodic_memory():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(
+        name="memory-writing-agent",
+        output="The customer prefers Snowflake.",
+    )
+    agent._definition = AgentDefinition(
+        name="memory-writing-agent",
+        description="Memory-writing agent.",
+        system_prompt="You are a memory-writing agent.",
+        model="test-model",
+        memory_write_enabled=True,
+    )
+
+    await registry.register(agent)
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def remember(
+            self,
+            content: str,
+            *,
+            namespace: str,
+            memory_type: str,
+            metadata: dict | None = None,
+        ):
+            self.calls.append(
+                {
+                    "content": content,
+                    "namespace": namespace,
+                    "memory_type": memory_type,
+                    "metadata": metadata,
+                }
+            )
+
+    memory_service = TrackingMemoryService()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=memory_service,
+    )
+
+    response = await runtime.run(
+        "memory-writing-agent",
+        AgentRequest(
+            input="What does the customer prefer?",
+            session_id="session-123",
+            memory_namespace="customer-456",
+        ),
+    )
+
+    assert response.output == "The customer prefers Snowflake."
+    assert memory_service.calls == [
+        {
+            "content": "The customer prefers Snowflake.",
+            "namespace": "customer-456",
+            "memory_type": "episodic",
+            "metadata": {
+                "source": "agent_execution",
+                "agent_name": "memory-writing-agent",
+                "session_id": "session-123",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_write_memory_when_write_back_is_disabled():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(
+        name="memory-disabled-agent",
+        output="Do not persist this.",
+    )
+    await registry.register(agent)
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def remember(self, *args, **kwargs):
+            self.calls += 1
+
+    memory_service = TrackingMemoryService()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=memory_service,
+    )
+
+    response = await runtime.run(
+        "memory-disabled-agent",
+        AgentRequest(
+            input="Hello.",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert response.output == "Do not persist this."
+    assert memory_service.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_write_memory_without_namespace():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(
+        name="memory-no-namespace-agent",
+        output="This has nowhere to go.",
+    )
+    agent._definition = AgentDefinition(
+        name="memory-no-namespace-agent",
+        description="Memory agent without namespace.",
+        system_prompt="You are a memory agent.",
+        model="test-model",
+        memory_write_enabled=True,
+    )
+    await registry.register(agent)
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def remember(self, *args, **kwargs):
+            self.calls += 1
+
+    memory_service = TrackingMemoryService()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_service=memory_service,
+    )
+
+    response = await runtime.run(
+        "memory-no-namespace-agent",
+        AgentRequest(
+            input="Hello.",
+        ),
+    )
+
+    assert response.output == "This has nowhere to go."
+    assert memory_service.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_write_non_string_response():
+    registry = InMemoryAgentRegistry()
+
+    class StructuredAgent:
+        @property
+        def definition(self) -> AgentDefinition:
+            return AgentDefinition(
+                name="structured-memory-agent",
+                description="Structured memory agent.",
+                system_prompt="You return structured responses.",
+                memory_write_enabled=True,
+            )
+
+        async def run(
+            self,
+            context: AgentExecutionContext,
+        ) -> AgentResponse:
+            return AgentResponse(
+                agent_name=self.definition.name,
+                output={
+                    "answer": "Do not serialize me.",
+                    "confidence": 0.9,
+                },
+            )
+
+    agent = StructuredAgent()
+    await registry.register(agent)
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def remember(self, *args, **kwargs):
+            self.calls += 1
+
+    memory_service = TrackingMemoryService()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=memory_service,
+    )
+
+    response = await runtime.run(
+        "structured-memory-agent",
+        AgentRequest(
+            input="Return structured data.",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert response.output == {
+        "answer": "Do not serialize me.",
+        "confidence": 0.9,
+    }
+    assert memory_service.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_runtime_returns_success_when_memory_write_fails():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(
+        name="memory-failing-agent",
+        output="The execution succeeded.",
+    )
+    agent._definition = AgentDefinition(
+        name="memory-failing-agent",
+        description="Memory failure test agent.",
+        system_prompt="You are a test agent.",
+        memory_write_enabled=True,
+    )
+    await registry.register(agent)
+
+    class FailingMemoryService:
+        async def remember(self, *args, **kwargs):
+            raise RuntimeError("memory backend unavailable")
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=FailingMemoryService(),
+    )
+
+    response = await runtime.run(
+        "memory-failing-agent",
+        AgentRequest(
+            input="Run successfully.",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert response.output == "The execution succeeded."

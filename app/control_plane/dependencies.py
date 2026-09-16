@@ -56,6 +56,7 @@ _agent_runtime = AgentRuntime(
     tool_registry=_tool_registry,
     llm_gateway=_llm_router,
     memory_context_builder=_memory_context_builder,
+    memory_service=_memory_service,
 )
 
 _agent_initialization_lock = asyncio.Lock()
