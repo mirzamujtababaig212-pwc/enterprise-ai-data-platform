@@ -89,6 +89,72 @@ class RetrievalEvaluationReleaseDecisionRecord(Base):
     )
 
 
+class AgentRunRecord(Base):
+    __tablename__ = "agent_runs"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+    )
+
+    agent_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    error_type: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    output: Mapped[object | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
+    run_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+
 class UsageEventRecord(Base):
     __tablename__ = "usage_events"
 

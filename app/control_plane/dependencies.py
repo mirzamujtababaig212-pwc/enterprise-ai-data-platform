@@ -32,6 +32,8 @@ from rag.evaluation.external.dispatcher import (
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
 from app.control_plane.persistence.database import get_db
+from app.control_plane.agent_runs.application_service import AgentRunApplicationService
+from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
@@ -161,6 +163,17 @@ async def _initialize_agents() -> None:
 async def get_agent_runtime() -> AgentRuntime:
     await _initialize_agents()
     return _agent_runtime
+
+
+async def get_agent_run_application_service(
+    db: Session = Depends(get_db),
+) -> AgentRunApplicationService:
+    await _initialize_agents()
+
+    return AgentRunApplicationService(
+        runtime=_agent_runtime,
+        repository=PostgreSQLAgentRunRepository(db),
+    )
 
 
 def get_llm_router() -> Router:

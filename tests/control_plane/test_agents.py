@@ -9,20 +9,19 @@ from ai_platform.agents.models import (
     AgentResponse,
 )
 
-from app.control_plane.dependencies import get_agent_runtime
+from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.routes.agents import router
 
 
-class FakeAgentRuntime:
+class FakeAgentRunApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, AgentRequest]] = []
 
-    async def run(
+    async def execute(
         self,
+        *,
         agent_name: str,
         request: AgentRequest,
-        *,
-        history=(),
     ) -> AgentResponse:
         self.calls.append(
             (
@@ -47,20 +46,20 @@ class FakeAgentRuntime:
 
 
 def build_client(
-    runtime: FakeAgentRuntime,
+    service: FakeAgentRunApplicationService,
 ) -> TestClient:
     app = FastAPI()
 
     app.include_router(router)
 
-    app.dependency_overrides[get_agent_runtime] = lambda: runtime
+    app.dependency_overrides[get_agent_run_application_service] = lambda: service
 
     return TestClient(app)
 
 
 def test_run_agent_returns_runtime_response() -> None:
-    runtime = FakeAgentRuntime()
-    client = build_client(runtime)
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
 
     response = client.post(
         "/api/v1/agents/enterprise-analyst/run",
@@ -87,9 +86,9 @@ def test_run_agent_returns_runtime_response() -> None:
         },
     }
 
-    assert len(runtime.calls) == 1
+    assert len(service.calls) == 1
 
-    agent_name, request = runtime.calls[0]
+    agent_name, request = service.calls[0]
 
     assert agent_name == "enterprise-analyst"
     assert request.input == "Explain RAG."
@@ -101,8 +100,8 @@ def test_run_agent_returns_runtime_response() -> None:
 
 
 def test_unknown_agent_returns_404() -> None:
-    runtime = FakeAgentRuntime()
-    client = build_client(runtime)
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
 
     response = client.post(
         "/api/v1/agents/missing-agent/run",
@@ -117,8 +116,8 @@ def test_unknown_agent_returns_404() -> None:
 
 
 def test_agent_request_requires_input() -> None:
-    runtime = FakeAgentRuntime()
-    client = build_client(runtime)
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
 
     response = client.post(
         "/api/v1/agents/enterprise-analyst/run",
@@ -127,7 +126,7 @@ def test_agent_request_requires_input() -> None:
 
     assert response.status_code == 422
 
-    assert runtime.calls == []
+    assert service.calls == []
 
 
 @pytest.mark.asyncio

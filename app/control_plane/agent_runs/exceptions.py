@@ -1,0 +1,6 @@
+class DuplicateAgentRunError(ValueError):
+    """Raised when an agent run with the same ID already exists."""
+
+
+class AgentRunNotFoundError(LookupError):
+    """Raised when an agent run cannot be found for an update."""

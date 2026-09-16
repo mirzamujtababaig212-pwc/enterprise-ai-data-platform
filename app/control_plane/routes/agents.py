@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ai_platform.agents.models import AgentRequest
-from ai_platform.agents.runtime import AgentRuntime
 
-from app.control_plane.dependencies import get_agent_runtime
+from app.control_plane.agent_runs.application_service import (
+    AgentRunApplicationService,
+)
+from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.schemas.agents import (
     AgentRunRequest,
     AgentRunResponse,
@@ -24,7 +26,9 @@ router = APIRouter(
 async def run_agent(
     agent_name: str,
     payload: AgentRunRequest,
-    runtime: AgentRuntime = Depends(get_agent_runtime),
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
 ) -> AgentRunResponse:
     try:
         request = AgentRequest(
@@ -34,9 +38,9 @@ async def run_agent(
             metadata=payload.metadata,
         )
 
-        response = await runtime.run(
-            agent_name,
-            request,
+        response = await service.execute(
+            agent_name=agent_name,
+            request=request,
         )
 
     except LookupError as exc:

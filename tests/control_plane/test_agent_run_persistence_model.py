@@ -1,0 +1,88 @@
+from datetime import UTC, datetime
+
+from sqlalchemy import inspect
+
+from app.control_plane.persistence.models import AgentRunRecord, Base
+
+
+def test_agent_run_record_table_name() -> None:
+    assert AgentRunRecord.__tablename__ == "agent_runs"
+
+
+def test_agent_run_record_columns() -> None:
+    columns = {column.name: column for column in inspect(AgentRunRecord).columns}
+
+    assert set(columns) == {
+        "run_id",
+        "agent_name",
+        "session_id",
+        "user_id",
+        "status",
+        "started_at",
+        "completed_at",
+        "error_type",
+        "error_message",
+        "output",
+        "metadata",
+    }
+
+
+def test_agent_run_record_primary_key() -> None:
+    primary_key_columns = {column.name for column in inspect(AgentRunRecord).primary_key}
+
+    assert primary_key_columns == {"run_id"}
+
+
+def test_agent_run_record_indexes() -> None:
+    indexes = {
+        index.name: {column.name for column in index.columns}
+        for index in AgentRunRecord.__table__.indexes
+    }
+
+    assert indexes["ix_agent_runs_agent_name"] == {"agent_name"}
+    assert indexes["ix_agent_runs_session_id"] == {"session_id"}
+    assert indexes["ix_agent_runs_user_id"] == {"user_id"}
+    assert indexes["ix_agent_runs_status"] == {"status"}
+    assert indexes["ix_agent_runs_started_at"] == {"started_at"}
+
+
+def test_agent_run_record_json_fields() -> None:
+    columns = {column.name: column for column in inspect(AgentRunRecord).columns}
+
+    assert columns["output"].type.__class__.__name__ == "JSON"
+    assert columns["metadata"].type.__class__.__name__ == "JSON"
+
+
+def test_agent_run_record_accepts_domain_shape() -> None:
+    started_at = datetime.now(UTC)
+    completed_at = datetime.now(UTC)
+
+    record = AgentRunRecord(
+        run_id="550e8400-e29b-41d4-a716-446655440000",
+        agent_name="enterprise-analyst",
+        session_id="session-1",
+        user_id="user-1",
+        status="completed",
+        started_at=started_at,
+        completed_at=completed_at,
+        output={
+            "answer": "completed",
+            "sources": ["doc-1"],
+        },
+        run_metadata={
+            "source": "control_plane",
+        },
+    )
+
+    assert record.run_id == "550e8400-e29b-41d4-a716-446655440000"
+    assert record.agent_name == "enterprise-analyst"
+    assert record.status == "completed"
+    assert record.output == {
+        "answer": "completed",
+        "sources": ["doc-1"],
+    }
+    assert record.run_metadata == {"source": "control_plane"}
+
+
+def test_agent_run_record_is_registered_in_base_metadata() -> None:
+    assert "agent_runs" in Base.metadata.tables
