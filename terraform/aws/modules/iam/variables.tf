@@ -59,3 +59,19 @@ variable "bedrock_invoke_resource_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "ecr_repository_arn" {
+  description = "ARN of the ECR repository containing SageMaker inference images."
+  type        = string
+}
+
+variable "model_artifact_bucket_arn" {
+  description = "ARN of the S3 bucket containing SageMaker model artifacts."
+  type        = string
+}
+
+variable "model_artifact_prefix" {
+  description = "S3 key prefix containing SageMaker model artifacts."
+  type        = string
+  default     = "model-artifacts/"
+}

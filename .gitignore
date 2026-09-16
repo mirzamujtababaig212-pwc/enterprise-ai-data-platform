@@ -232,3 +232,9 @@ metastore_db.backup.*/
 task-def*.json
 tfplan.json
 plan.txt
+
+# Local backups and snapshots
+backups/
+*.bk
+*.bk.*
+*.sql.bak

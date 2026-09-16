@@ -82,3 +82,13 @@ output "batch_pipeline_log_group_name" {
   description = "CloudWatch log group for AWS Bronze-Silver-Gold Step Functions execution logs."
   value       = module.step_functions.log_group_name
 }
+
+output "sagemaker_vehicle_risk_model_name" {
+  description = "SageMaker Vehicle Risk model name."
+  value       = module.sagemaker.model_name
+}
+
+output "sagemaker_vehicle_risk_model_arn" {
+  description = "SageMaker Vehicle Risk model ARN."
+  value       = module.sagemaker.model_arn
+}

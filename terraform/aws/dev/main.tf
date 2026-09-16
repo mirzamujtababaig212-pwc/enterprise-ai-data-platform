@@ -69,6 +69,10 @@ module "iam" {
   s3_bucket_arn = module.s3.bucket_arn
   kms_key_arn   = module.kms.key_arn
 
+  ecr_repository_arn        = module.ecr.repository_arn
+  model_artifact_bucket_arn = module.s3.bucket_arn
+  model_artifact_prefix     = "model-artifacts/"
+
   data_bucket_arn = data.aws_s3_bucket.enterprise_data.arn
 }
 
@@ -144,4 +148,29 @@ module "step_functions" {
 
   subnet_ids        = module.vpc.public_subnet_ids
   security_group_id = module.ecs.ecs_security_group_id
+}
+
+module "sagemaker" {
+  source = "../modules/sagemaker"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  container_image = "${module.ecr.repository_url}:sagemaker-vehicle-risk-model-v2-docker"
+
+  model_artifact_s3_uri = "s3://${module.s3.bucket_name}/model-artifacts/vehicleriskmodel/model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
+
+  execution_role_arn = module.iam.sagemaker_execution_role_arn
+
+  model_name = "vehicle-risk"
+}
+
+output "sagemaker_vehicle_risk_endpoint_name" {
+  description = "SageMaker Vehicle Risk endpoint name."
+  value       = module.sagemaker.endpoint_name
+}
+
+output "sagemaker_vehicle_risk_endpoint_arn" {
+  description = "SageMaker Vehicle Risk endpoint ARN."
+  value       = module.sagemaker.endpoint_arn
 }

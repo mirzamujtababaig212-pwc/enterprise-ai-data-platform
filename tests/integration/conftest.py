@@ -2,6 +2,8 @@ import os
 import shutil
 import tempfile
 
+import boto3
+
 import pytest
 from delta import configure_spark_with_delta_pip
 from dotenv import load_dotenv
@@ -11,8 +13,8 @@ from pyspark.sql import SparkSession
 @pytest.fixture(scope="session", autouse=True)
 def local_mlflow_environment():
     """
-    Configure host-side integration tests to use the local MLflow/MinIO
-    artifact store instead of falling through to real AWS credentials.
+    Configure host-side integration tests for either local MLflow/MinIO
+    or real AWS resources when AWS integration mode is enabled.
     """
     load_dotenv()
 
@@ -20,23 +22,30 @@ def local_mlflow_environment():
         "MLFLOW_TRACKING_URI",
         "http://localhost:5051",
     )
-    os.environ.setdefault(
-        "MLFLOW_S3_ENDPOINT_URL",
-        "http://localhost:9000",
-    )
 
-    if os.getenv("RUN_AWS_INTEGRATION") != "1":
-        if not os.environ.get("AWS_ACCESS_KEY_ID"):
-            os.environ["AWS_ACCESS_KEY_ID"] = os.getenv(
-                "MINIO_ROOT_USER",
-                "minio",
-            )
+    if os.getenv("RUN_AWS_INTEGRATION") == "1":
+        os.environ.pop("MLFLOW_S3_ENDPOINT_URL", None)
+    else:
+        os.environ.setdefault(
+            "MLFLOW_S3_ENDPOINT_URL",
+            "http://localhost:9000",
+        )
 
-        if not os.environ.get("AWS_SECRET_ACCESS_KEY"):
-            os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv(
-                "MINIO_ROOT_PASSWORD",
-                "minio123",
-            )
+        os.environ.pop("AWS_PROFILE", None)
+
+        os.environ["AWS_ACCESS_KEY_ID"] = os.getenv(
+            "MINIO_ROOT_USER",
+            "minio",
+        )
+
+        os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv(
+            "MINIO_ROOT_PASSWORD",
+            "minio123",
+        )
+
+        # boto3 may have initialized its default session during pytest
+        # collection before the fixture configured the local MinIO credentials.
+        boto3.DEFAULT_SESSION = None
 
     os.environ.setdefault(
         "AWS_DEFAULT_REGION",

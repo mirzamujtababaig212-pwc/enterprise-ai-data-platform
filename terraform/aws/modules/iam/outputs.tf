@@ -17,3 +17,8 @@ output "ecs_batch_execution_role_arn" {
   description = "ARN of the ECS batch task execution role."
   value       = aws_iam_role.ecs_batch_execution.arn
 }
+
+output "sagemaker_execution_role_arn" {
+  description = "ARN of the SageMaker inference execution role."
+  value       = aws_iam_role.sagemaker_execution.arn
+}

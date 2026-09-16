@@ -368,12 +368,21 @@ that integrates well with the platform's existing architecture.
 
 ### SageMaker
 
-Rejected because the Enterprise AI Platform targets a cloud-agnostic
-deployment strategy.
+Not selected as the enterprise MLOps control plane because it is
+AWS-specific and reduces portability.
+
+SageMaker may nevertheless be used as an AWS-specific model serving
+and deployment execution plane behind the cloud-agnostic MLflow
+architecture.
 
 ### Azure ML
 
-Rejected because the platform avoids vendor-specific MLOps solutions.
+Not selected as the enterprise MLOps control plane because it is
+Azure-specific and introduces vendor dependency.
+
+Equivalent cloud-specific deployment services may be integrated as
+execution planes without replacing MLflow as the enterprise MLOps
+control plane.
 
 ---
 

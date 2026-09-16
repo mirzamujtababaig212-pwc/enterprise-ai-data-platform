@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    MODEL_DIR=/opt/ml/model \
+    PORT=8080
+
+WORKDIR /app
+
+COPY requirements/sagemaker.txt ./requirements/sagemaker.txt
+
+RUN pip install --upgrade pip \
+    && pip install -r requirements/sagemaker.txt
+
+COPY ml/__init__.py ./ml/__init__.py
+COPY ml/contracts ./ml/contracts
+COPY ml/sagemaker ./ml/sagemaker
+
+RUN mkdir -p /opt/ml/model
+
+EXPOSE 8080
+
+ENTRYPOINT ["python", "-m", "ml.sagemaker.server"]

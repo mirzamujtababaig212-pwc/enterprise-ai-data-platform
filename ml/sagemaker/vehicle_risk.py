@@ -7,10 +7,11 @@ from typing import Any
 import pandas as pd
 import skops.io as sio
 
-from ml.models.vehicle_risk import (
-    FEATURE_COLUMNS,
-    MODEL_NAME,
-    validate_feature_dataframe,
+from ml.contracts import FeatureValidator
+from ml.contracts.vehicle_risk import (
+    VEHICLE_RISK_FEATURE_COLUMNS,
+    VEHICLE_RISK_FEATURE_CONTRACT,
+    VEHICLE_RISK_MODEL_NAME,
 )
 
 MODEL_FILENAME = "model.skops"
@@ -56,7 +57,7 @@ def input_fn(request_body: str | bytes, content_type: str) -> pd.DataFrame:
 
     dataframe = pd.DataFrame([payload])
 
-    expected_columns = set(FEATURE_COLUMNS)
+    expected_columns = set(VEHICLE_RISK_FEATURE_COLUMNS)
     actual_columns = set(dataframe.columns)
 
     missing = sorted(expected_columns - actual_columns)
@@ -68,9 +69,13 @@ def input_fn(request_body: str | bytes, content_type: str) -> pd.DataFrame:
     if extra:
         raise ValueError(f"Vehicle Risk request contains unexpected features: {extra}")
 
-    validate_feature_dataframe(dataframe)
+    result = FeatureValidator.validate(dataframe, VEHICLE_RISK_FEATURE_CONTRACT)
+    if not result.valid:
+        raise ValueError(
+            "Vehicle Risk feature contract validation failed: " + "; ".join(result.errors)
+        )
 
-    return dataframe[list(FEATURE_COLUMNS)]
+    return dataframe[list(VEHICLE_RISK_FEATURE_COLUMNS)]
 
 
 def predict_fn(
@@ -78,9 +83,13 @@ def predict_fn(
     model: Any,
 ) -> dict[str, Any]:
     """Execute Vehicle Risk inference against the packaged model."""
-    validate_feature_dataframe(input_data)
+    result = FeatureValidator.validate(input_data, VEHICLE_RISK_FEATURE_CONTRACT)
+    if not result.valid:
+        raise ValueError(
+            "Vehicle Risk feature contract validation failed: " + "; ".join(result.errors)
+        )
 
-    selected_features = input_data[list(FEATURE_COLUMNS)]
+    selected_features = input_data[list(VEHICLE_RISK_FEATURE_COLUMNS)]
 
     prediction = model.predict(selected_features)
     risk = int(prediction[0])
@@ -96,7 +105,7 @@ def predict_fn(
     return {
         "risk": risk,
         "risk_probability": probability,
-        "model_name": MODEL_NAME,
+        "model_name": VEHICLE_RISK_MODEL_NAME,
         "model_alias": DEFAULT_MODEL_ALIAS,
     }
 

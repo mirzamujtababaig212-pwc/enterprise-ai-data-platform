@@ -4,27 +4,15 @@ from typing import Any, Final
 
 import pandas as pd
 
-from ml.platform import FeatureValidator
-
-from .vehicle_risk_features import VEHICLE_RISK_FEATURE_CONTRACT
-
-
-MODEL_NAME: Final[str] = "VehicleRiskModel"
-
-
-FEATURE_COLUMNS: Final[tuple[str, ...]] = (
-    "event_count",
-    "avg_speed",
-    "max_speed",
-    "speed_stddev",
-    "avg_rpm",
-    "max_rpm",
-    "avg_fuel_level",
-    "min_fuel_level",
-    "avg_battery",
-    "avg_engine_temperature",
-    "max_engine_temperature",
+from ml.contracts import FeatureValidator
+from ml.contracts.vehicle_risk import (
+    VEHICLE_RISK_FEATURE_COLUMNS,
+    VEHICLE_RISK_FEATURE_CONTRACT,
+    VEHICLE_RISK_MODEL_NAME,
 )
+
+MODEL_NAME: Final[str] = VEHICLE_RISK_MODEL_NAME
+FEATURE_COLUMNS: Final[tuple[str, ...]] = VEHICLE_RISK_FEATURE_COLUMNS
 
 
 TARGET_COLUMN: Final[str] = "risk"
