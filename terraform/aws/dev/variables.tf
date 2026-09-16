@@ -21,6 +21,11 @@ variable "image_tag" {
   type        = string
 }
 
+variable "sagemaker_model_artifact_s3_uri" {
+  description = "S3 URI of the immutable SageMaker model artifact to deploy."
+  type        = string
+}
+
 variable "ecs_desired_count" {
   description = "Number of ECS gateway tasks to run."
   type        = number

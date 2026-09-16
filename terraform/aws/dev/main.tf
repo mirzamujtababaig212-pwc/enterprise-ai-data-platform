@@ -158,7 +158,7 @@ module "sagemaker" {
 
   container_image = "${module.ecr.repository_url}:sagemaker-vehicle-risk-model-v2-docker"
 
-  model_artifact_s3_uri = "s3://${module.s3.bucket_name}/model-artifacts/vehicleriskmodel/model-version-2/m-f68ad14c07064a1a9f2619fa7a7d9d7a/model.tar.gz"
+  model_artifact_s3_uri = var.sagemaker_model_artifact_s3_uri
 
   execution_role_arn = module.iam.sagemaker_execution_role_arn
 
