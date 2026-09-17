@@ -246,3 +246,95 @@ async def test_hybrid_memory_retriever_rejects_invalid_arguments():
             namespace="project-a",
             top_k=0,
         )
+
+
+@pytest.mark.asyncio
+async def test_hybrid_memory_retriever_diagnoses_rrf_contributions():
+    semantic = FakeMemoryRetriever(
+        [
+            _item("shared"),
+            _item("semantic-only"),
+        ]
+    )
+    lexical = FakeMemoryRetriever(
+        [
+            _item("lexical-only"),
+            _item("shared"),
+        ]
+    )
+
+    retriever = HybridMemoryRetriever(
+        semantic,
+        lexical,
+        candidate_k=2,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    diagnostics = await retriever.diagnose(
+        "deployment",
+        namespace="project-a",
+        top_k=3,
+    )
+
+    assert [item.memory_id for item in diagnostics] == [
+        "shared",
+        "semantic-only",
+        "lexical-only",
+    ]
+
+    shared = diagnostics[0]
+    assert shared.semantic_rank == 1
+    assert shared.lexical_rank == 2
+    assert shared.semantic_contribution == pytest.approx(1.0 / 61.0)
+    assert shared.lexical_contribution == pytest.approx(0.5 / 62.0)
+    assert shared.fused_score == pytest.approx(1.0 / 61.0 + 0.5 / 62.0)
+    assert shared.final_rank == 1
+
+    semantic_only = diagnostics[1]
+    assert semantic_only.semantic_rank == 2
+    assert semantic_only.lexical_rank is None
+    assert semantic_only.lexical_contribution == 0.0
+
+    lexical_only = diagnostics[2]
+    assert lexical_only.semantic_rank is None
+    assert lexical_only.lexical_rank == 1
+    assert lexical_only.semantic_contribution == 0.0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_memory_retriever_diagnosis_matches_retrieve_order():
+    semantic = FakeMemoryRetriever(
+        [
+            _item("b"),
+            _item("a"),
+        ]
+    )
+    lexical = FakeMemoryRetriever(
+        [
+            _item("a"),
+            _item("b"),
+        ]
+    )
+
+    retriever = HybridMemoryRetriever(
+        semantic,
+        lexical,
+        candidate_k=2,
+        semantic_weight=1.0,
+        lexical_weight=1.0,
+    )
+
+    results = await retriever.retrieve(
+        "deployment",
+        namespace="project-a",
+        top_k=2,
+    )
+    diagnostics = await retriever.diagnose(
+        "deployment",
+        namespace="project-a",
+        top_k=2,
+    )
+
+    assert [item.id for item in results] == [diagnostic.memory_id for diagnostic in diagnostics]
