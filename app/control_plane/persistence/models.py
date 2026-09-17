@@ -200,6 +200,52 @@ class MemoryItemRecord(Base):
     )
 
 
+class MemoryEmbeddingRecord(Base):
+    __tablename__ = "memory_embeddings"
+
+    memory_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("memory_items.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(),
+        nullable=False,
+    )
+
+    embedding_dimension: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    embedding_requested_provider: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    embedding_requested_model: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    embedding_resolved_provider: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    embedding_resolved_model: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class UsageEventRecord(Base):
     __tablename__ = "usage_events"
 
