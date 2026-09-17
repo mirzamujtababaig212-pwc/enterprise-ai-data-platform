@@ -47,10 +47,10 @@ async def test_memory_retrieval_quality_baseline():
     assert result.successful_queries == len(MEMORY_RETRIEVAL_QUALITY_CASES)
     assert result.failed_queries == 0
 
-    assert result.recall_at_k >= 0.0
-    assert result.precision_at_k >= 0.0
-    assert result.mrr >= 0.0
-    assert result.ndcg_at_k >= 0.0
+    assert result.recall_at_k >= 0.90
+    assert result.precision_at_k >= 0.60
+    assert result.mrr >= 0.79
+    assert result.ndcg_at_k >= 0.81
     assert result.mean_latency_ms >= 0.0
 
     assert len(result.query_results) == len(MEMORY_RETRIEVAL_QUALITY_CASES)
