@@ -1,3 +1,7 @@
+from rag.evaluation.comparison.experiment_comparator import (
+    RetrievalEvaluationExperimentComparator,
+    RetrievalEvaluationExperimentComparison,
+)
 from rag.evaluation.comparison.regression_policy import (
     RetrievalRegressionPolicy,
     RetrievalRegressionPolicyEvaluator,
@@ -15,6 +19,8 @@ from rag.evaluation.comparison.baseline_selector import (
 )
 
 __all__ = [
+    "RetrievalEvaluationExperimentComparator",
+    "RetrievalEvaluationExperimentComparison",
     "RetrievalEvaluationMetricComparison",
     "RetrievalEvaluationMetricStatus",
     "RetrievalEvaluationRunComparator",
