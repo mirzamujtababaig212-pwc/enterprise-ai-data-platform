@@ -6,6 +6,8 @@ import pytest
 
 from memory.retrieval.factory import MemoryRetrieverFactory
 from memory.retrieval.lexical import LexicalMemoryRetriever
+from memory.retrieval.hybrid import HybridMemoryRetriever
+from memory.retrieval.postgres_lexical import PostgreSQLLexicalMemoryRetriever
 from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
 
 
@@ -21,7 +23,7 @@ def test_factory_creates_lexical_retriever_for_in_memory() -> None:
     assert retriever.store is store
 
 
-def test_factory_creates_semantic_retriever_for_postgres() -> None:
+def test_factory_creates_hybrid_retriever_for_postgres() -> None:
     embedding_service = MagicMock()
     store = MagicMock()
 
@@ -31,8 +33,16 @@ def test_factory_creates_semantic_retriever_for_postgres() -> None:
         embedding_service=embedding_service,
     )
 
-    assert isinstance(retriever, PostgreSQLSemanticMemoryRetriever)
-    assert retriever._embedding_service is embedding_service
+    assert isinstance(retriever, HybridMemoryRetriever)
+    assert isinstance(
+        retriever.semantic_retriever,
+        PostgreSQLSemanticMemoryRetriever,
+    )
+    assert isinstance(
+        retriever.lexical_retriever,
+        PostgreSQLLexicalMemoryRetriever,
+    )
+    assert retriever.semantic_retriever._embedding_service is embedding_service
 
 
 def test_factory_requires_embedding_service_for_postgres() -> None:

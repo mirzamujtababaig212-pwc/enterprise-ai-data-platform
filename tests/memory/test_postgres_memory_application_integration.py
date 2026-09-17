@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -21,10 +20,14 @@ import asyncio
 
 from app.control_plane.dependencies import (
     _memory_embedding_store,
+    _memory_retriever,
     _memory_service,
     _memory_store,
 )
 from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
+from memory.retrieval.hybrid import HybridMemoryRetriever
+from memory.retrieval.postgres_lexical import PostgreSQLLexicalMemoryRetriever
+from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
 from memory.stores.postgres import PostgreSQLMemoryStore
 
 
@@ -36,6 +39,15 @@ async def main() -> None:
     )
     assert _memory_service.embedding_service is not None
     assert _memory_service.embedding_store is _memory_embedding_store
+    assert isinstance(_memory_retriever, HybridMemoryRetriever)
+    assert isinstance(
+        _memory_retriever.semantic_retriever,
+        PostgreSQLSemanticMemoryRetriever,
+    )
+    assert isinstance(
+        _memory_retriever.lexical_retriever,
+        PostgreSQLLexicalMemoryRetriever,
+    )
 
     namespace = "postgres-memory-application-integration"
 
@@ -55,6 +67,12 @@ async def main() -> None:
             memory_type="episodic",
             limit=10,
         )
+        retrieved = await _memory_retriever.retrieve(
+            item.content,
+            namespace=namespace,
+            memory_type="episodic",
+            top_k=5,
+        )
 
         assert len(results) == 1
 
@@ -70,6 +88,7 @@ async def main() -> None:
         }
         assert result.expires_at is None
         assert result.created_at.tzinfo is not None
+        assert [result.id for result in retrieved] == [item.id]
     finally:
         await _memory_service.forget(item.id)
 

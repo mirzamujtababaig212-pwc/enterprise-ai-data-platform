@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from memory.retrieval.contracts import MemoryRetriever
+from memory.retrieval.hybrid import HybridMemoryRetriever
 from memory.retrieval.lexical import LexicalMemoryRetriever
+from memory.retrieval.postgres_lexical import PostgreSQLLexicalMemoryRetriever
 from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
 from rag.contracts import EmbeddingService
 
@@ -22,11 +24,17 @@ class MemoryRetrieverFactory:
         if normalized_backend == "postgres":
             if embedding_service is None:
                 raise ValueError(
-                    "An embedding service is required for PostgreSQL " "semantic memory retrieval."
+                    "An embedding service is required for PostgreSQL " "hybrid memory retrieval."
                 )
 
-            return PostgreSQLSemanticMemoryRetriever(
+            semantic_retriever = PostgreSQLSemanticMemoryRetriever(
                 embedding_service=embedding_service,
+            )
+            lexical_retriever = PostgreSQLLexicalMemoryRetriever()
+
+            return HybridMemoryRetriever(
+                semantic_retriever=semantic_retriever,
+                lexical_retriever=lexical_retriever,
             )
 
         raise ValueError(
