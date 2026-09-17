@@ -187,27 +187,48 @@ The current retrieval architecture includes:
 - Retrieval quality evaluation and experiment comparison
 
 Hybrid retrieval combines semantic and lexical candidate sets using
-weighted Reciprocal Rank Fusion (RRF). It remains the baseline retrieval
+weighted Reciprocal Rank Fusion (RRF). It remains the default retrieval
 strategy for the current retrieval-quality evaluation path.
+
+The PostgreSQL hybrid retrieval path has a deterministic regression
+benchmark covering 11 labeled retrieval cases. The current hybrid
+baseline achieves Recall@5 of 1.0000, Precision@5 of 0.4727, MRR of
+0.9394, and nDCG@5 of 0.9530, with all relevant items present in the
+hybrid candidate sets.
+
+Experiments varying the semantic and lexical RRF weights across the
+tested ranges did not materially change the benchmark ordering or
+aggregate quality metrics. No change to the default RRF weighting is
+therefore justified by the current evidence.
 
 Cross-encoder reranking is implemented as an experimental,
 post-retrieval capability. It is intentionally separated from the
 Enterprise LLM Gateway and does not change the core `Retriever` contract.
 
-Controlled experiments currently show that the cross-encoder can improve
-some ranking measures, including MRR on the vehicle retrieval-quality
-benchmark, while also introducing materially higher inference latency
-and benchmark-dependent changes in nDCG. It is therefore not promoted
-to the default retrieval path based on the current evidence.
+Controlled CrossEncoder experiments improved MRR in the current
+benchmark but introduced materially higher inference latency and
+benchmark-dependent changes in nDCG and recall. Candidate-depth
+experiments also showed that increasing the reranking candidate set does
+not guarantee improved retrieval quality.
+
+A further selective-reranking experiment using CrossEncoder score
+margins did not identify a stable threshold that consistently improves
+the benchmark. CrossEncoder score margins are model scores rather than
+calibrated confidence probabilities and can be high even when the
+top-ranked item is not labeled relevant.
+
+Hybrid semantic and lexical retrieval using RRF therefore remains the
+default retrieval strategy. CrossEncoder reranking remains an optional
+experimental capability and is not enabled globally by default.
 
 Retrieval experiments are compared descriptively rather than treated as
 release regressions when the retrieval implementation itself changes.
 Release compatibility remains governed by the existing evaluation
 lineage and release-comparison rules.
 
-Promotion of reranking to a default retrieval strategy requires broader,
-representative enterprise datasets and evaluation across retrieval
-quality, latency, cost, and operational behavior.
+Promotion of reranking to a default retrieval strategy requires broader
+and more representative enterprise datasets and evaluation across
+ranking quality, latency, cost, and operational behavior.
 
 ---
 
