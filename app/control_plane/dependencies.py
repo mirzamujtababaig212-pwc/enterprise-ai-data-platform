@@ -15,7 +15,8 @@ from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
 from ml.inference import VehicleRiskPredictor
-from memory import InMemoryMemoryStore, MemoryService
+from memory import MemoryService
+from memory.stores.factory import MemoryStoreFactory
 from memory.context import MemoryContextBuilder
 from rag.embeddings.gateway import GatewayEmbeddingService
 from rag.generation.gateway import GatewayChatService
@@ -59,7 +60,7 @@ _agent_observer = CompositeAgentExecutionObserver(
     ]
 )
 
-_memory_store = InMemoryMemoryStore()
+_memory_store = MemoryStoreFactory.create()
 _memory_service = MemoryService(_memory_store)
 _memory_context_builder = MemoryContextBuilder(_memory_service)
 

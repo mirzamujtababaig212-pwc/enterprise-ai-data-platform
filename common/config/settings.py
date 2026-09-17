@@ -8,6 +8,7 @@ from common.config.snowflake import SnowflakeConfig
 from common.config.fabric import FabricConfig
 from common.config.qdrant import QdrantConfig
 from common.config.vector_store import VectorStoreConfig
+from common.config.memory import MemoryStoreConfig
 
 
 class Settings:
@@ -21,3 +22,4 @@ class Settings:
     fabric = FabricConfig
     qdrant = QdrantConfig
     vector_store = VectorStoreConfig
+    memory_store = MemoryStoreConfig
