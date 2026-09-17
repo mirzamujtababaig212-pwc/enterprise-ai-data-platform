@@ -5,6 +5,12 @@ from typing import Protocol
 
 from rag.contracts import EmbeddingService, Retriever
 from rag.evaluation.dataset import RetrievalEvaluationDataset
+from rag.evaluation.datasets.enterprise_policy import (
+    ENTERPRISE_POLICY_EMBEDDING_IDENTITY,
+    EnterprisePolicyBenchmarkEmbeddingService,
+    enterprise_policy_benchmark_chunks,
+    enterprise_policy_evaluation_cases,
+)
 from rag.evaluation.datasets.vehicle import (
     VEHICLE_EMBEDDING_IDENTITY,
     VehicleBenchmarkEmbeddingService,
@@ -45,6 +51,63 @@ class EvaluationDatasetDefinition(Protocol):
     def build_retrieval_artifact(self) -> RetrievalEvaluationArtifact: ...
 
     async def build_retriever(self) -> Retriever: ...
+
+
+@dataclass(frozen=True)
+class EnterprisePolicyRetrievalEvaluationDatasetDefinition:
+    """Executable definition for the enterprise policy retrieval evaluation dataset."""
+
+    name: str = "enterprise-policy-retrieval"
+    version: str = "v1"
+
+    def build_dataset(self) -> RetrievalEvaluationDataset:
+        return RetrievalEvaluationDataset.from_cases(
+            self.name,
+            enterprise_policy_evaluation_cases(),
+            version=self.version,
+        )
+
+    def build_embedding_service(self) -> EmbeddingService:
+        return EnterprisePolicyBenchmarkEmbeddingService()
+
+    def build_embedding_identity(self) -> EmbeddingIdentity:
+        return ENTERPRISE_POLICY_EMBEDDING_IDENTITY
+
+    async def build_retriever(self) -> Retriever:
+        vector_store = VectorStoreFactory.create(
+            backend="in_memory",
+        )
+        await vector_store.upsert(enterprise_policy_benchmark_chunks())
+
+        semantic_retriever = SemanticRetriever(
+            embedding_service=self.build_embedding_service(),
+            vector_store=vector_store,
+        )
+
+        lexical_retriever = InMemoryLexicalRetriever(
+            [item.chunk for item in enterprise_policy_benchmark_chunks()]
+        )
+
+        return HybridRetriever(
+            semantic_retriever=semantic_retriever,
+            lexical_retriever=lexical_retriever,
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        )
+
+    def build_retrieval_artifact(self) -> RetrievalEvaluationArtifact:
+        return RetrievalEvaluationArtifact(
+            retriever_type="HybridRetriever",
+            vector_store_type="InMemoryVectorStore",
+            hybrid_configuration=HybridRetrievalConfiguration(
+                candidate_k=5,
+                rrf_k=60,
+                semantic_weight=1.0,
+                lexical_weight=0.5,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -159,6 +222,10 @@ class EvaluationDatasetRegistry:
             "vehicle-retrieval-quality",
             "v1",
         ): VehicleRetrievalQualityEvaluationDatasetDefinition(),
+        (
+            "enterprise-policy-retrieval",
+            "v1",
+        ): EnterprisePolicyRetrievalEvaluationDatasetDefinition(),
     }
 
     @classmethod

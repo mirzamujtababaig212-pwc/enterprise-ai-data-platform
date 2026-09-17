@@ -6,6 +6,7 @@ from rag.evaluation.dataset_registry import (
     EvaluationDatasetRegistry,
     VehicleRetrievalEvaluationDatasetDefinition,
     VehicleRetrievalQualityEvaluationDatasetDefinition,
+    EnterprisePolicyRetrievalEvaluationDatasetDefinition,
 )
 from rag.evaluation.datasets.vehicle_retrieval_quality import (
     VEHICLE_QUALITY_EMBEDDING_IDENTITY,
@@ -167,4 +168,25 @@ def test_registry_resolves_vehicle_quality_dataset_definition() -> None:
         VehicleRetrievalQualityEvaluationDatasetDefinition,
     )
     assert definition.name == "vehicle-retrieval-quality"
+    assert definition.version == "v1"
+
+
+def test_enterprise_policy_dataset_definition_is_versioned() -> None:
+    definition = EnterprisePolicyRetrievalEvaluationDatasetDefinition()
+
+    assert definition.name == "enterprise-policy-retrieval"
+    assert definition.version == "v1"
+
+
+def test_registry_resolves_enterprise_policy_dataset_definition() -> None:
+    definition = EvaluationDatasetRegistry.get(
+        name="enterprise-policy-retrieval",
+        version="v1",
+    )
+
+    assert isinstance(
+        definition,
+        EnterprisePolicyRetrievalEvaluationDatasetDefinition,
+    )
+    assert definition.name == "enterprise-policy-retrieval"
     assert definition.version == "v1"
