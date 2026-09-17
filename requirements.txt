@@ -105,6 +105,9 @@ scikit-learn>=1.5,<2.0
 pandas>=2.2,<3.0
 
 torch==2.14.0
+onnxruntime==1.30.0
+transformers==5.17.0
+huggingface_hub==1.31.0
 
 anthropic==1.4.0
 pgvector>=0.3.6,<1.0
