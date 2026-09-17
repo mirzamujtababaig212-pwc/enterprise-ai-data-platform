@@ -173,6 +173,44 @@ The RAG architecture consists of:
 
 ---
 
+# Retrieval Strategy
+
+The platform supports composable retrieval strategies behind the
+`Retriever` contract.
+
+The current retrieval architecture includes:
+
+- Semantic retrieval
+- Lexical retrieval
+- Hybrid semantic and lexical retrieval
+- Post-retrieval reranking through `RerankingRetriever`
+- Retrieval quality evaluation and experiment comparison
+
+Hybrid retrieval combines semantic and lexical candidate sets using
+weighted Reciprocal Rank Fusion (RRF). It remains the baseline retrieval
+strategy for the current retrieval-quality evaluation path.
+
+Cross-encoder reranking is implemented as an experimental,
+post-retrieval capability. It is intentionally separated from the
+Enterprise LLM Gateway and does not change the core `Retriever` contract.
+
+Controlled experiments currently show that the cross-encoder can improve
+some ranking measures, including MRR on the vehicle retrieval-quality
+benchmark, while also introducing materially higher inference latency
+and benchmark-dependent changes in nDCG. It is therefore not promoted
+to the default retrieval path based on the current evidence.
+
+Retrieval experiments are compared descriptively rather than treated as
+release regressions when the retrieval implementation itself changes.
+Release compatibility remains governed by the existing evaluation
+lineage and release-comparison rules.
+
+Promotion of reranking to a default retrieval strategy requires broader,
+representative enterprise datasets and evaluation across retrieval
+quality, latency, cost, and operational behavior.
+
+---
+
 # Core Components
 
 The RAG architecture includes:
@@ -399,16 +437,15 @@ relevance and user experience for enterprise AI applications.
 
 Potential future enhancements include:
 
-- Hybrid lexical and semantic retrieval
 - Graph RAG
 - Multi-modal RAG
 - Agentic RAG
 - Adaptive retrieval strategies
-- Cross-encoder reranking
 - Knowledge graph integration
 - Multi-vector indexing
 - Personalized retrieval
 - Continuous retrieval evaluation
+- Broader enterprise-scale reranking evaluation
 
 ---
 
