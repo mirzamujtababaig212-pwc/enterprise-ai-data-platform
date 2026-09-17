@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from collections.abc import Sequence
+
+from memory.models import MemoryItem, MemoryType
+from memory.retrieval.contracts import MemoryRetriever
+
+DEFAULT_RRF_K = 60
+DEFAULT_SEMANTIC_WEIGHT = 1.0
+DEFAULT_LEXICAL_WEIGHT = 0.5
+
+
+class HybridMemoryRetriever:
+    """
+    Fuse semantic and lexical memory retrieval using weighted
+    Reciprocal Rank Fusion.
+
+    Component retrievers are queried independently. Their raw scores
+    are intentionally ignored because lexical and semantic score
+    scales are not directly comparable.
+    """
+
+    def __init__(
+        self,
+        semantic_retriever: MemoryRetriever,
+        lexical_retriever: MemoryRetriever,
+        *,
+        candidate_k: int = 10,
+        rrf_k: int = DEFAULT_RRF_K,
+        semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
+        lexical_weight: float = DEFAULT_LEXICAL_WEIGHT,
+    ) -> None:
+        if candidate_k <= 0:
+            raise ValueError("candidate_k must be greater than zero.")
+
+        if rrf_k <= 0:
+            raise ValueError("rrf_k must be greater than zero.")
+
+        if semantic_weight < 0:
+            raise ValueError("semantic_weight must be greater than or equal to zero.")
+
+        if lexical_weight < 0:
+            raise ValueError("lexical_weight must be greater than or equal to zero.")
+
+        if semantic_weight == 0 and lexical_weight == 0:
+            raise ValueError("At least one retrieval weight must be greater than zero.")
+
+        self.semantic_retriever = semantic_retriever
+        self.lexical_retriever = lexical_retriever
+        self.candidate_k = candidate_k
+        self.rrf_k = rrf_k
+        self.semantic_weight = semantic_weight
+        self.lexical_weight = lexical_weight
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        namespace: str,
+        memory_type: MemoryType | None = None,
+        top_k: int = 5,
+    ) -> Sequence[MemoryItem]:
+        if not query.strip():
+            raise ValueError("Query must not be empty.")
+
+        if not namespace.strip():
+            raise ValueError("Memory namespace must not be empty.")
+
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero.")
+
+        semantic_results, lexical_results = await asyncio.gather(
+            self.semantic_retriever.retrieve(
+                query,
+                namespace=namespace,
+                memory_type=memory_type,
+                top_k=self.candidate_k,
+            ),
+            self.lexical_retriever.retrieve(
+                query,
+                namespace=namespace,
+                memory_type=memory_type,
+                top_k=self.candidate_k,
+            ),
+        )
+
+        fused_scores: defaultdict[str, float] = defaultdict(float)
+        item_by_id: dict[str, MemoryItem] = {}
+
+        for rank, item in enumerate(semantic_results, start=1):
+            fused_scores[item.id] += self.semantic_weight / (self.rrf_k + rank)
+            item_by_id.setdefault(item.id, item)
+
+        for rank, item in enumerate(lexical_results, start=1):
+            fused_scores[item.id] += self.lexical_weight / (self.rrf_k + rank)
+            item_by_id.setdefault(item.id, item)
+
+        return tuple(
+            item_by_id[memory_id]
+            for memory_id in sorted(
+                fused_scores,
+                key=lambda memory_id: (
+                    -fused_scores[memory_id],
+                    memory_id,
+                ),
+            )[:top_k]
+        )
