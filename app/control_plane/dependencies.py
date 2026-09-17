@@ -84,6 +84,11 @@ _memory_retriever = MemoryRetrieverFactory.create(
     backend=CommonSettings.memory_store.BACKEND,
     memory_store=_memory_store,
     embedding_service=_rag_embedding_service,
+    reranker=CommonSettings.memory_store.RERANKER,
+    reranker_model_id=CommonSettings.memory_store.RERANKER_MODEL_ID,
+    reranker_onnx_filename=CommonSettings.memory_store.RERANKER_ONNX_FILENAME,
+    reranker_max_length=CommonSettings.memory_store.RERANKER_MAX_LENGTH,
+    reranker_candidate_k=CommonSettings.memory_store.RERANKER_CANDIDATE_K,
 )
 _memory_context_builder = MemoryContextBuilder(
     _memory_service,
