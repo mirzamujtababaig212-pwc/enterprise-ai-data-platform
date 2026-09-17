@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -8,6 +10,9 @@ from memory.models import MemoryItem, MemoryType
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 LEXICAL_CANDIDATE_LIMIT = 10_000
+
+_BM25_K1 = 1.2
+_BM25_B = 0.75
 
 
 class MemoryStore(Protocol):
@@ -20,8 +25,8 @@ class MemoryStore(Protocol):
     ) -> Sequence[MemoryItem]: ...
 
 
-def _tokenize(text: str) -> frozenset[str]:
-    return frozenset(token.lower() for token in _TOKEN_PATTERN.findall(text))
+def _tokenize(text: str) -> tuple[str, ...]:
+    return tuple(token.lower() for token in _TOKEN_PATTERN.findall(text))
 
 
 class LexicalMemoryRetriever:
@@ -66,21 +71,57 @@ class LexicalMemoryRetriever:
             limit=LEXICAL_CANDIDATE_LIMIT,
         )
 
+        if not candidates:
+            return ()
+
+        tokenized_candidates = [(item, _tokenize(item.content)) for item in candidates]
+
+        non_empty_candidates = [(item, tokens) for item, tokens in tokenized_candidates if tokens]
+
+        if not non_empty_candidates:
+            return ()
+
+        document_frequency = Counter(
+            token for _, tokens in non_empty_candidates for token in set(tokens)
+        )
+
+        document_count = len(non_empty_candidates)
+
+        average_document_length = (
+            sum(len(tokens) for _, tokens in non_empty_candidates) / document_count
+        )
+
+        if average_document_length == 0.0:
+            return ()
+
+        query_terms = set(query_tokens)
+
         scored: list[tuple[MemoryItem, float]] = []
 
-        for item in candidates:
-            memory_tokens = _tokenize(item.content)
+        for item, tokens in non_empty_candidates:
+            term_frequencies = Counter(tokens)
+            document_length = len(tokens)
 
-            if not memory_tokens:
-                continue
+            score = 0.0
 
-            overlap = len(query_tokens & memory_tokens)
+            for term in query_terms:
+                frequency = term_frequencies.get(term, 0)
 
-            if overlap == 0:
-                continue
+                if frequency == 0:
+                    continue
 
-            score = overlap / len(query_tokens)
-            scored.append((item, score))
+                df = document_frequency[term]
+
+                idf = math.log(1.0 + (document_count - df + 0.5) / (df + 0.5))
+
+                denominator = frequency + _BM25_K1 * (
+                    1.0 - _BM25_B + _BM25_B * document_length / average_document_length
+                )
+
+                score += idf * (frequency * (_BM25_K1 + 1.0) / denominator)
+
+            if score > 0.0:
+                scored.append((item, score))
 
         if not scored:
             return ()

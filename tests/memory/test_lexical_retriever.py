@@ -293,3 +293,113 @@ async def test_older_relevant_memory_is_retrieved_past_newer_irrelevant_memories
     )
 
     assert [item.id for item in results] == ["memory-relevant"]
+
+
+@pytest.mark.asyncio
+async def test_lexical_retriever_prefers_rare_terms_over_generic_terms():
+    store = InMemoryMemoryStore()
+
+    await store.put(
+        make_item(
+            "memory-generic",
+            "production release deployment configuration monitoring",
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-specific",
+            "deployment configuration requires validation before production release",
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-rare",
+            "deployment configuration requires approval before production release",
+        )
+    )
+
+    retriever = LexicalMemoryRetriever(store)
+
+    results = await retriever.retrieve(
+        "deployment configuration approval",
+        namespace="project-a",
+        top_k=3,
+    )
+
+    assert results[0].id == "memory-rare"
+
+
+@pytest.mark.asyncio
+async def test_lexical_retriever_uses_term_frequency_for_equal_length_documents():
+    store = InMemoryMemoryStore()
+    base_time = datetime.now(timezone.utc)
+
+    await store.put(
+        make_item(
+            "memory-repeated",
+            "deployment deployment configuration",
+            created_at=base_time,
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-single",
+            "deployment release configuration",
+            created_at=base_time + timedelta(minutes=1),
+        )
+    )
+
+    retriever = LexicalMemoryRetriever(store)
+
+    results = await retriever.retrieve(
+        "deployment",
+        namespace="project-a",
+        top_k=1,
+    )
+
+    assert [item.id for item in results] == ["memory-repeated"]
+
+
+@pytest.mark.asyncio
+async def test_lexical_retriever_uses_idf_for_rare_query_terms():
+    store = InMemoryMemoryStore()
+    base_time = datetime.now(timezone.utc)
+
+    await store.put(
+        make_item(
+            "memory-generic",
+            "deployment",
+            created_at=base_time + timedelta(minutes=3),
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-generic-2",
+            "deployment",
+            created_at=base_time + timedelta(minutes=2),
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-generic-3",
+            "deployment",
+            created_at=base_time + timedelta(minutes=1),
+        )
+    )
+    await store.put(
+        make_item(
+            "memory-rare",
+            "approval",
+            created_at=base_time,
+        )
+    )
+
+    retriever = LexicalMemoryRetriever(store)
+
+    results = await retriever.retrieve(
+        "deployment approval",
+        namespace="project-a",
+        top_k=1,
+    )
+
+    assert [item.id for item in results] == ["memory-rare"]
