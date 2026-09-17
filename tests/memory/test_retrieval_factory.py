@@ -68,6 +68,7 @@ def test_factory_creates_reranking_retriever_for_cross_encoder() -> None:
 
     assert isinstance(retriever, RerankingMemoryRetriever)
     assert isinstance(retriever.retriever, HybridMemoryRetriever)
+    assert retriever.retriever.candidate_k == 25
     assert retriever.reranker is fake_reranker
     assert retriever.candidate_k == 25
 
@@ -88,6 +89,7 @@ def test_factory_does_not_load_reranker_when_disabled() -> None:
         )
 
     assert isinstance(retriever, HybridMemoryRetriever)
+    assert retriever.candidate_k == 10
     reranker_class.assert_not_called()
 
 

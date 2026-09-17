@@ -52,9 +52,14 @@ class MemoryRetrieverFactory:
             )
             lexical_retriever = PostgreSQLLexicalMemoryRetriever()
 
+            hybrid_candidate_k = (
+                reranker_candidate_k if normalized_reranker == "cross_encoder" else 10
+            )
+
             retriever: MemoryRetriever = HybridMemoryRetriever(
                 semantic_retriever=semantic_retriever,
                 lexical_retriever=lexical_retriever,
+                candidate_k=hybrid_candidate_k,
             )
 
             if normalized_reranker == "cross_encoder":
