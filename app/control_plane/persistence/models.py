@@ -155,6 +155,51 @@ class AgentRunRecord(Base):
     )
 
 
+class MemoryItemRecord(Base):
+    __tablename__ = "memory_items"
+
+    id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    memory_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    content: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    namespace: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    memory_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+
 class UsageEventRecord(Base):
     __tablename__ = "usage_events"
 
