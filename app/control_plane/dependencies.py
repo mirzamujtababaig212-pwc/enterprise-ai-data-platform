@@ -16,8 +16,10 @@ from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
 from ml.inference import VehicleRiskPredictor
 from memory import MemoryService
-from memory.stores.factory import MemoryStoreFactory
+from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
 from memory.context import MemoryContextBuilder
+from memory.retrieval.factory import MemoryRetrieverFactory
+from memory.stores.factory import MemoryStoreFactory
 from rag.embeddings.gateway import GatewayEmbeddingService
 from rag.generation.gateway import GatewayChatService
 from rag.indexing import RAGIndexer
@@ -29,6 +31,7 @@ from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
 
 from app.config.settings import Settings
+from common.config.settings import Settings as CommonSettings
 from rag.evaluation.external.dispatcher import (
     ExternalEvaluationDispatcher,
     RagasExternalEvaluationDispatcher,
@@ -61,8 +64,31 @@ _agent_observer = CompositeAgentExecutionObserver(
 )
 
 _memory_store = MemoryStoreFactory.create()
-_memory_service = MemoryService(_memory_store)
-_memory_context_builder = MemoryContextBuilder(_memory_service)
+
+_rag_embedding_service = GatewayEmbeddingService(
+    provider=settings.DEFAULT_PROVIDER,
+    model=settings.DEFAULT_EMBEDDING_MODEL,
+    gateway_router=_llm_router,
+)
+
+_memory_embedding_store = (
+    PostgreSQLMemoryEmbeddingStore() if CommonSettings.memory_store.BACKEND == "postgres" else None
+)
+
+_memory_service = MemoryService(
+    _memory_store,
+    embedding_service=_rag_embedding_service if _memory_embedding_store is not None else None,
+    embedding_store=_memory_embedding_store,
+)
+_memory_retriever = MemoryRetrieverFactory.create(
+    backend=CommonSettings.memory_store.BACKEND,
+    memory_store=_memory_store,
+    embedding_service=_rag_embedding_service,
+)
+_memory_context_builder = MemoryContextBuilder(
+    _memory_service,
+    memory_retriever=_memory_retriever,
+)
 
 _agent_runtime = AgentRuntime(
     _agent_registry,
@@ -84,12 +110,6 @@ _rag_vector_store = VectorStoreFactory.create()
 _rag_chunker = RecursiveChunker(
     chunk_size=1000,
     overlap=100,
-)
-
-_rag_embedding_service = GatewayEmbeddingService(
-    provider=settings.DEFAULT_PROVIDER,
-    model=settings.DEFAULT_EMBEDDING_MODEL,
-    gateway_router=_llm_router,
 )
 
 _rag_chat_service = GatewayChatService(

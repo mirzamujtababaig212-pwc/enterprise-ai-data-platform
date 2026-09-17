@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from memory.models import MemoryItem, MemoryType
+from rag.models import EmbeddingResult
 
 
 class MemoryStore(Protocol):
@@ -28,6 +29,28 @@ class MemoryStore(Protocol):
         memory_type: MemoryType | None = None,
         limit: int = 10,
     ) -> Sequence[MemoryItem]: ...
+
+    async def delete(
+        self,
+        memory_id: str,
+    ) -> None: ...
+
+
+class MemoryEmbeddingStore(Protocol):
+    """
+    Persistence abstraction for memory embeddings.
+    """
+
+    async def put(
+        self,
+        memory_id: str,
+        embedding: EmbeddingResult,
+    ) -> None: ...
+
+    async def get(
+        self,
+        memory_id: str,
+    ) -> EmbeddingResult | None: ...
 
     async def delete(
         self,

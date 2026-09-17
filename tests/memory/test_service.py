@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from memory.models import MemoryItem
+from rag.models import EmbeddingIdentity, EmbeddingResult
 from memory.service import MemoryService
 
 
@@ -34,6 +35,159 @@ async def test_remember_creates_and_persists_memory():
     assert item.id.startswith("memory-")
 
     store.put.assert_awaited_once_with(item)
+
+
+@pytest.mark.asyncio
+async def test_remember_persists_embedding_for_semantic_memory():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    embedding_service = MagicMock()
+    embedding = EmbeddingResult(
+        vector=(1.0, 0.0, 0.0),
+        identity=EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="test-model",
+            resolved_provider="test-provider",
+            resolved_model="test-model",
+            dimension=3,
+        ),
+    )
+    embedding_service.embed_with_metadata = AsyncMock(return_value=embedding)
+
+    embedding_store = MagicMock()
+    embedding_store.put = AsyncMock()
+
+    service = MemoryService(
+        store,
+        embedding_service=embedding_service,
+        embedding_store=embedding_store,
+    )
+
+    item = await service.remember(
+        "The project uses Databricks.",
+        namespace="project-a",
+        memory_type="semantic",
+    )
+
+    embedding_service.embed_with_metadata.assert_awaited_once_with(
+        item.content,
+    )
+    store.put.assert_awaited_once_with(item)
+    embedding_store.put.assert_awaited_once_with(item.id, embedding)
+
+
+@pytest.mark.asyncio
+async def test_remember_persists_embedding_for_episodic_memory():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    embedding_service = MagicMock()
+    embedding = EmbeddingResult(
+        vector=(0.0, 1.0),
+        identity=EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="test-model",
+            resolved_provider="test-provider",
+            resolved_model="test-model",
+            dimension=2,
+        ),
+    )
+    embedding_service.embed_with_metadata = AsyncMock(return_value=embedding)
+
+    embedding_store = MagicMock()
+    embedding_store.put = AsyncMock()
+
+    service = MemoryService(
+        store,
+        embedding_service=embedding_service,
+        embedding_store=embedding_store,
+    )
+
+    item = await service.remember(
+        "User discussed the migration.",
+        namespace="project-a",
+        memory_type="episodic",
+    )
+
+    embedding_service.embed_with_metadata.assert_awaited_once_with(
+        item.content,
+    )
+    store.put.assert_awaited_once_with(item)
+    embedding_store.put.assert_awaited_once_with(item.id, embedding)
+
+
+@pytest.mark.asyncio
+async def test_remember_does_not_embed_working_memory():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    embedding_service = MagicMock()
+    embedding_service.embed_with_metadata = AsyncMock()
+
+    embedding_store = MagicMock()
+    embedding_store.put = AsyncMock()
+
+    service = MemoryService(
+        store,
+        embedding_service=embedding_service,
+        embedding_store=embedding_store,
+    )
+
+    item = await service.remember(
+        "Temporary context.",
+        namespace="session-1",
+        memory_type="working",
+    )
+
+    assert item.memory_type == "working"
+    embedding_service.embed_with_metadata.assert_not_awaited()
+    embedding_store.put.assert_not_awaited()
+    store.put.assert_awaited_once_with(item)
+
+
+@pytest.mark.asyncio
+async def test_remember_without_embedding_dependencies_preserves_existing_behavior():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    service = MemoryService(store)
+
+    item = await service.remember(
+        "The project uses Databricks.",
+        namespace="project-a",
+        memory_type="semantic",
+    )
+
+    store.put.assert_awaited_once_with(item)
+
+
+@pytest.mark.asyncio
+async def test_remember_does_not_persist_memory_when_embedding_fails():
+    store = MagicMock()
+    store.put = AsyncMock()
+
+    embedding_service = MagicMock()
+    embedding_service.embed_with_metadata = AsyncMock(side_effect=RuntimeError("embedding failed"))
+
+    embedding_store = MagicMock()
+    embedding_store.put = AsyncMock()
+
+    service = MemoryService(
+        store,
+        embedding_service=embedding_service,
+        embedding_store=embedding_store,
+    )
+
+    with pytest.raises(RuntimeError, match="embedding failed"):
+        await service.remember(
+            "The project uses Databricks.",
+            namespace="project-a",
+            memory_type="semantic",
+        )
+
+    store.put.assert_not_awaited()
+    embedding_store.put.assert_not_awaited()
 
 
 @pytest.mark.asyncio

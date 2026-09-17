@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from memory.models import MemoryItem
+from memory.retrieval.contracts import MemoryRetriever
 from memory.service import MemoryService
 
 
@@ -29,13 +30,20 @@ class MemoryContextBuilder:
     directly accessing a concrete memory store.
     """
 
-    def __init__(self, memory_service: MemoryService):
+    def __init__(
+        self,
+        memory_service: MemoryService,
+        *,
+        memory_retriever: MemoryRetriever | None = None,
+    ) -> None:
         self.memory_service = memory_service
+        self.memory_retriever = memory_retriever
 
     async def build(
         self,
         namespace: str,
         *,
+        query: str | None = None,
         working_limit: int = 5,
         semantic_limit: int = 5,
         episodic_limit: int = 5,
@@ -52,23 +60,41 @@ class MemoryContextBuilder:
         if episodic_limit <= 0:
             raise ValueError("episodic_limit must be greater than zero.")
 
+        if query is not None and not query.strip():
+            raise ValueError("Memory query must not be empty.")
+
         working = await self.memory_service.recall(
             namespace,
             memory_type="working",
             limit=working_limit,
         )
 
-        semantic = await self.memory_service.recall(
-            namespace,
-            memory_type="semantic",
-            limit=semantic_limit,
-        )
+        if query is not None and self.memory_retriever is not None:
+            semantic = await self.memory_retriever.retrieve(
+                query,
+                namespace=namespace,
+                memory_type="semantic",
+                top_k=semantic_limit,
+            )
 
-        episodic = await self.memory_service.recall(
-            namespace,
-            memory_type="episodic",
-            limit=episodic_limit,
-        )
+            episodic = await self.memory_retriever.retrieve(
+                query,
+                namespace=namespace,
+                memory_type="episodic",
+                top_k=episodic_limit,
+            )
+        else:
+            semantic = await self.memory_service.recall(
+                namespace,
+                memory_type="semantic",
+                limit=semantic_limit,
+            )
+
+            episodic = await self.memory_service.recall(
+                namespace,
+                memory_type="episodic",
+                limit=episodic_limit,
+            )
 
         return MemoryContext(
             working=tuple(working),

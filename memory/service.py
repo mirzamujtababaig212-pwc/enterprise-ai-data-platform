@@ -4,8 +4,9 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from memory.contracts import MemoryStore
+from memory.contracts import MemoryEmbeddingStore, MemoryStore
 from memory.models import MemoryItem, MemoryType
+from rag.contracts import EmbeddingService
 
 
 class MemoryService:
@@ -19,8 +20,13 @@ class MemoryService:
     def __init__(
         self,
         store: MemoryStore,
+        *,
+        embedding_service: EmbeddingService | None = None,
+        embedding_store: MemoryEmbeddingStore | None = None,
     ) -> None:
         self.store = store
+        self.embedding_service = embedding_service
+        self.embedding_store = embedding_store
 
     async def remember(
         self,
@@ -57,7 +63,24 @@ class MemoryService:
             expires_at=expires_at,
         )
 
+        embedding = None
+
+        if (
+            memory_type in {"semantic", "episodic"}
+            and self.embedding_service is not None
+            and self.embedding_store is not None
+        ):
+            embedding = await self.embedding_service.embed_with_metadata(
+                content,
+            )
+
         await self.store.put(item)
+
+        if embedding is not None:
+            await self.embedding_store.put(
+                item.id,
+                embedding,
+            )
 
         return item
 

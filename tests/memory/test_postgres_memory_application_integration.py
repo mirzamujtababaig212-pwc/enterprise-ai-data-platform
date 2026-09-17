@@ -20,14 +20,22 @@ def test_application_dependencies_use_postgres_memory_service() -> None:
 import asyncio
 
 from app.control_plane.dependencies import (
+    _memory_embedding_store,
     _memory_service,
     _memory_store,
 )
+from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
 from memory.stores.postgres import PostgreSQLMemoryStore
 
 
 async def main() -> None:
     assert isinstance(_memory_store, PostgreSQLMemoryStore)
+    assert isinstance(
+        _memory_embedding_store,
+        PostgreSQLMemoryEmbeddingStore,
+    )
+    assert _memory_service.embedding_service is not None
+    assert _memory_service.embedding_store is _memory_embedding_store
 
     namespace = "postgres-memory-application-integration"
 
@@ -73,6 +81,8 @@ asyncio.run(main())
     environment["MEMORY_STORE_BACKEND"] = "postgres"
     environment["POSTGRES_HOST"] = "localhost"
     environment["POSTGRES_PORT"] = "5432"
+    environment["DEFAULT_PROVIDER"] = "mock"
+    environment["DEFAULT_EMBEDDING_MODEL"] = "mock-embedding"
 
     result = subprocess.run(
         [sys.executable, "-c", script],
