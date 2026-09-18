@@ -28,7 +28,7 @@ from rag.query import RAGQueryService
 from rag.retrieval.hybrid import HybridRetriever
 from rag.retrieval.lexical import PostgreSQLLexicalRetriever
 from rag.retrieval.retriever import SemanticRetriever
-from rag.contracts import VectorStore
+from rag.contracts import Retriever, VectorStore
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
 
@@ -130,6 +130,29 @@ _vehicle_risk_predictor = VehicleRiskPredictor(
     model_alias="champion",
 )
 
+
+def _build_rag_retriever(
+    *,
+    semantic_retriever: SemanticRetriever,
+    backend: str,
+    lexical_retriever: PostgreSQLLexicalRetriever | None = None,
+) -> Retriever:
+    if backend in {"postgres", "qdrant"}:
+        if lexical_retriever is None:
+            raise ValueError("A PostgreSQL lexical retriever is required for hybrid RAG backends.")
+
+        return HybridRetriever(
+            semantic_retriever=semantic_retriever,
+            lexical_retriever=lexical_retriever,
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        )
+
+    return semantic_retriever
+
+
 _rag_vector_store = VectorStoreFactory.create()
 
 _rag_chunker = RecursiveChunker(
@@ -154,17 +177,17 @@ _rag_semantic_retriever = SemanticRetriever(
     vector_store=_rag_vector_store,
 )
 
-_rag_retriever = _rag_semantic_retriever
+_rag_lexical_retriever = (
+    PostgreSQLLexicalRetriever()
+    if CommonSettings.vector_store.BACKEND in {"postgres", "qdrant"}
+    else None
+)
 
-if CommonSettings.vector_store.BACKEND in {"postgres", "qdrant"}:
-    _rag_retriever = HybridRetriever(
-        semantic_retriever=_rag_semantic_retriever,
-        lexical_retriever=PostgreSQLLexicalRetriever(),
-        candidate_k=5,
-        rrf_k=60,
-        semantic_weight=1.0,
-        lexical_weight=0.5,
-    )
+_rag_retriever = _build_rag_retriever(
+    semantic_retriever=_rag_semantic_retriever,
+    backend=CommonSettings.vector_store.BACKEND,
+    lexical_retriever=_rag_lexical_retriever,
+)
 
 _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
