@@ -187,6 +187,8 @@ class AgentExecutionContext:
                 tool_call.arguments,
                 principal=self.user_id,
                 execution_context={
+                    "run_id": self.run_id,
+                    "call_id": tool_call.call_id,
                     "governance_policy": self.governance_policy,
                     "agent_name": self.agent_name,
                     "session_id": self.session_id,

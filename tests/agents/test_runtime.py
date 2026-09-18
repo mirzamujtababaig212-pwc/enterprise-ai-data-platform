@@ -16,6 +16,11 @@ from ai_platform.agents.llm_messages import (
     system_message,
     user_message,
 )
+from tools.authorization.in_memory import InMemoryToolAuthorizer
+from tools.authorization.service import ToolAuthorizationService
+from tools.execution.service import ToolExecutionService
+from tools.models import ToolDefinition
+from tools.registry.in_memory import InMemoryToolRegistry
 
 
 class EmptyMemoryBuilder:
@@ -68,6 +73,146 @@ class FakeAgent:
             output=self._output,
             session_id=context.session_id,
         )
+
+
+class RuntimeToolAgent:
+    def __init__(self, *, name: str = "runtime-tool-agent") -> None:
+        self._definition = AgentDefinition(
+            name=name,
+            description="Agent used to test runtime tool authorization.",
+            system_prompt="You are a tool-enabled test agent.",
+            model="test-model",
+            tool_names=("test_tool",),
+        )
+        self.last_tool_results = None
+
+    @property
+    def definition(self) -> AgentDefinition:
+        return self._definition
+
+    async def run(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentResponse:
+        from ai_platform.agents.execution import AgentToolCall
+
+        self.last_tool_results = await context.execute_tool_calls(
+            (
+                AgentToolCall(
+                    call_id="call-runtime-1",
+                    name="test_tool",
+                    arguments={"value": 42},
+                ),
+            )
+        )
+
+        return AgentResponse(
+            agent_name=self.definition.name,
+            output="Tool execution attempted.",
+            session_id=context.session_id,
+        )
+
+
+class RuntimeTestTool:
+    def __init__(self) -> None:
+        self._definition = ToolDefinition(
+            name="test_tool",
+            description="Runtime authorization test tool.",
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+        return {
+            "status": "success",
+            "arguments": arguments,
+        }
+
+
+@pytest.mark.asyncio
+async def test_runtime_authorized_principal_can_execute_declared_tool() -> None:
+    agent_registry = InMemoryAgentRegistry()
+    tool_registry = InMemoryToolRegistry()
+    tool = RuntimeTestTool()
+
+    await agent_registry.register(RuntimeToolAgent())
+    await tool_registry.register(tool)
+
+    authorizer = InMemoryToolAuthorizer()
+    await authorizer.allow(
+        "user-authorized",
+        "test_tool",
+    )
+
+    authorization_service = ToolAuthorizationService(authorizer)
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=authorization_service,
+    )
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+    )
+
+    agent = await agent_registry.get("runtime-tool-agent")
+
+    response = await runtime.run(
+        "runtime-tool-agent",
+        AgentRequest(
+            input="Use the test tool.",
+            user_id="user-authorized",
+        ),
+    )
+
+    assert response.output == "Tool execution attempted."
+    assert agent.last_tool_results[0].success is True
+    assert agent.last_tool_results[0].output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_unauthorized_principal_cannot_execute_declared_tool() -> None:
+    agent_registry = InMemoryAgentRegistry()
+    tool_registry = InMemoryToolRegistry()
+    tool = RuntimeTestTool()
+
+    await agent_registry.register(RuntimeToolAgent())
+    await tool_registry.register(tool)
+
+    authorizer = InMemoryToolAuthorizer()
+    authorization_service = ToolAuthorizationService(authorizer)
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=authorization_service,
+    )
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+    )
+
+    agent = await agent_registry.get("runtime-tool-agent")
+
+    response = await runtime.run(
+        "runtime-tool-agent",
+        AgentRequest(
+            input="Use the test tool.",
+            user_id="user-unauthorized",
+        ),
+    )
+
+    assert response.output == "Tool execution attempted."
+    assert agent.last_tool_results[0].success is False
+    assert agent.last_tool_results[0].error == ("Tool is not authorized for this principal.")
+    assert tool.execution_count == 0
 
 
 @pytest.mark.asyncio

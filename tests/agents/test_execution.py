@@ -635,10 +635,73 @@ async def test_execution_context_maps_tool_call_to_tool_result() -> None:
             "principal": "user-123",
             "timeout_seconds": None,
             "execution_context": {
+                "run_id": None,
+                "call_id": "call-123",
                 "governance_policy": None,
                 "agent_name": "test-agent",
                 "session_id": None,
                 "user_id": "user-123",
+                "request_metadata": {},
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execution_context_propagates_run_and_call_ids_to_tool_execution() -> None:
+    definition = make_definition(
+        tool_names=("search",),
+    )
+
+    execution_service = FakeToolExecutionService()
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+        execution_service=execution_service,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Check the status.",
+            session_id="session-123",
+            user_id="user-456",
+        ),
+        tools=tools,
+        llm=AgentLLMContext(
+            FakeGateway(),
+            definition.llm_config,
+        ),
+        run_id="run-789",
+    )
+
+    await context.execute_tool_calls(
+        (
+            AgentToolCall(
+                call_id="call-123",
+                name="search",
+                arguments={
+                    "query": "pipeline status",
+                },
+            ),
+        )
+    )
+
+    assert execution_service.calls == [
+        {
+            "tool_name": "search",
+            "arguments": {
+                "query": "pipeline status",
+            },
+            "principal": "user-456",
+            "timeout_seconds": None,
+            "execution_context": {
+                "run_id": "run-789",
+                "call_id": "call-123",
+                "governance_policy": None,
+                "agent_name": "test-agent",
+                "session_id": "session-123",
+                "user_id": "user-456",
                 "request_metadata": {},
             },
         }
@@ -778,6 +841,8 @@ async def test_execution_context_propagates_governance_policy_to_tools() -> None
             "principal": "user-456",
             "timeout_seconds": None,
             "execution_context": {
+                "run_id": None,
+                "call_id": "call-123",
                 "governance_policy": policy,
                 "agent_name": "test-agent",
                 "session_id": "session-123",
