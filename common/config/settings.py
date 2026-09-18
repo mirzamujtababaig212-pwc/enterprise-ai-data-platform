@@ -9,6 +9,7 @@ from common.config.fabric import FabricConfig
 from common.config.qdrant import QdrantConfig
 from common.config.vector_store import VectorStoreConfig
 from common.config.memory import MemoryStoreConfig
+from common.config.rag import RAGRetrievalConfig
 
 
 class Settings:
@@ -23,3 +24,4 @@ class Settings:
     qdrant = QdrantConfig
     vector_store = VectorStoreConfig
     memory_store = MemoryStoreConfig
+    rag_retrieval = RAGRetrievalConfig

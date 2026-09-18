@@ -25,7 +25,7 @@ from rag.generation.gateway import GatewayChatService
 from rag.indexing import RAGIndexer
 from rag.chunking.recursive import RecursiveChunker
 from rag.query import RAGQueryService
-from rag.retrieval.hybrid import HybridRetriever
+from rag.retrieval.factory import RAGRetrieverFactory
 from rag.retrieval.lexical import PostgreSQLLexicalRetriever
 from rag.retrieval.retriever import SemanticRetriever
 from rag.contracts import Retriever, VectorStore
@@ -137,20 +137,16 @@ def _build_rag_retriever(
     backend: str,
     lexical_retriever: PostgreSQLLexicalRetriever | None = None,
 ) -> Retriever:
-    if backend in {"postgres", "qdrant"}:
-        if lexical_retriever is None:
-            raise ValueError("A PostgreSQL lexical retriever is required for hybrid RAG backends.")
-
-        return HybridRetriever(
-            semantic_retriever=semantic_retriever,
-            lexical_retriever=lexical_retriever,
-            candidate_k=5,
-            rrf_k=60,
-            semantic_weight=1.0,
-            lexical_weight=0.5,
-        )
-
-    return semantic_retriever
+    return RAGRetrieverFactory.create(
+        backend=backend,
+        semantic_retriever=semantic_retriever,
+        lexical_retriever=lexical_retriever,
+        reranker=CommonSettings.rag_retrieval.RERANKER,
+        reranker_model_id=CommonSettings.rag_retrieval.RERANKER_MODEL_ID,
+        reranker_onnx_filename=CommonSettings.rag_retrieval.RERANKER_ONNX_FILENAME,
+        reranker_max_length=CommonSettings.rag_retrieval.RERANKER_MAX_LENGTH,
+        reranker_candidate_k=CommonSettings.rag_retrieval.RERANKER_CANDIDATE_K,
+    )
 
 
 _rag_vector_store = VectorStoreFactory.create()
