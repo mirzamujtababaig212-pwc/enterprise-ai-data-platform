@@ -1,5 +1,7 @@
 from tools.authorization import (
     InMemoryToolAuthorizer,
+    ToolAuthorizationAuditRecord,
+    ToolAuthorizationAuditSink,
     ToolAuthorizationRequest,
     ToolAuthorizationResult,
     ToolAuthorizationService,
@@ -21,6 +23,8 @@ from tools.registry.in_memory import InMemoryToolRegistry
 
 __all__ = [
     "InMemoryToolAuthorizer",
+    "ToolAuthorizationAuditRecord",
+    "ToolAuthorizationAuditSink",
     "InMemoryToolRegistry",
     "MCPPythonSDKClient",
     "MCPToolAdapter",

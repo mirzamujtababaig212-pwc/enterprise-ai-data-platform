@@ -42,6 +42,10 @@ from app.control_plane.persistence.database import SessionLocal, get_db
 from app.control_plane.agent_run_events.postgres_observer import (
     PostgreSQLAgentRunEventObserver,
 )
+from app.control_plane.agent_run_events.tool_authorization_observer import (
+    ToolAuthorizationAuditObserver,
+)
+from tools.execution.service import ToolExecutionService
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
@@ -65,6 +69,15 @@ _agent_observer = CompositeAgentExecutionObserver(
         PrometheusAgentExecutionObserver(),
         PostgreSQLAgentRunEventObserver(SessionLocal),
     ]
+)
+
+_tool_authorization_audit_sink = ToolAuthorizationAuditObserver(
+    _agent_observer,
+)
+
+_tool_execution_service = ToolExecutionService(
+    _tool_registry,
+    audit_sink=_tool_authorization_audit_sink,
 )
 
 _memory_store = MemoryStoreFactory.create()
@@ -102,6 +115,7 @@ _memory_context_builder = MemoryContextBuilder(
 _agent_runtime = AgentRuntime(
     _agent_registry,
     tool_registry=_tool_registry,
+    tool_execution_service=_tool_execution_service,
     llm_gateway=_llm_router,
     memory_context_builder=_memory_context_builder,
     memory_service=_memory_service,

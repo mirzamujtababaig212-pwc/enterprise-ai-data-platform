@@ -559,3 +559,137 @@ async def test_execution_authorization_receives_tool_metadata():
     assert authorizer.requests[0].principal == "agent:research"
     assert authorizer.requests[0].tool_name == "test_tool"
     assert authorizer.requests[0].metadata == tool.definition.metadata
+
+
+class RecordingAuthorizationAuditSink:
+    def __init__(self) -> None:
+        self.records = []
+
+    async def record(self, record) -> None:
+        self.records.append(record)
+
+
+class FailingAuthorizationAuditSink:
+    async def record(self, record) -> None:
+        raise RuntimeError("simulated audit failure")
+
+
+@pytest.mark.asyncio
+async def test_authorization_decision_is_audited_for_allowed_tool() -> None:
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+    audit_sink = RecordingAuthorizationAuditSink()
+    tool = FakeTool()
+
+    await registry.register(tool)
+    await authorizer.allow("agent:research", "test_tool")
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        audit_sink=audit_sink,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context={
+            "run_id": "run-123",
+            "call_id": "call-456",
+            "agent_name": "research-agent",
+            "session_id": "session-789",
+        },
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+    assert len(audit_sink.records) == 1
+
+    record = audit_sink.records[0]
+    assert record.principal == "agent:research"
+    assert record.tool_name == "test_tool"
+    assert record.allowed is True
+    assert record.reason == "Tool is authorized."
+    assert record.run_id == "run-123"
+    assert record.call_id == "call-456"
+    assert record.agent_name == "research-agent"
+    assert record.session_id == "session-789"
+
+
+@pytest.mark.asyncio
+async def test_authorization_decision_is_audited_for_denied_tool() -> None:
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+    audit_sink = RecordingAuthorizationAuditSink()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        audit_sink=audit_sink,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        principal="agent:restricted",
+        execution_context={
+            "run_id": "run-denied",
+            "call_id": "call-denied",
+            "agent_name": "restricted-agent",
+            "session_id": "session-denied",
+        },
+    )
+
+    assert result.success is False
+    assert result.error == "Tool is not authorized for this principal."
+    assert tool.execution_count == 0
+    assert len(audit_sink.records) == 1
+
+    record = audit_sink.records[0]
+    assert record.principal == "agent:restricted"
+    assert record.tool_name == "test_tool"
+    assert record.allowed is False
+    assert record.reason == "Tool is not authorized for this principal."
+    assert record.run_id == "run-denied"
+    assert record.call_id == "call-denied"
+    assert record.agent_name == "restricted-agent"
+    assert record.session_id == "session-denied"
+
+
+@pytest.mark.asyncio
+async def test_authorization_audit_failure_does_not_break_tool_execution() -> None:
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+    tool = FakeTool()
+
+    await registry.register(tool)
+    await authorizer.allow("agent:research", "test_tool")
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        audit_sink=FailingAuthorizationAuditSink(),
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1

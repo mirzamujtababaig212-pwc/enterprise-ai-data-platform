@@ -17,6 +17,8 @@ class AgentExecutionEventType(StrEnum):
     TOOL_CALL_COMPLETED = "tool.call.completed"
     TOOL_CALL_FAILED = "tool.call.failed"
 
+    TOOL_AUTHORIZATION_DECISION = "tool.authorization.decision"
+
 
 @dataclass(frozen=True)
 class AgentExecutionEvent:

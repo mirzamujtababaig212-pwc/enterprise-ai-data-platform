@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
+from tools.authorization.audit import (
+    ToolAuthorizationAuditRecord,
+    ToolAuthorizationAuditSink,
+)
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
 from tools.models import ToolExecutionResult
+
+logger = logging.getLogger(__name__)
 
 
 class ToolExecutionService:
@@ -14,6 +21,7 @@ class ToolExecutionService:
         registry: ToolRegistry,
         *,
         authorization_service: ToolAuthorizationService | None = None,
+        audit_sink: ToolAuthorizationAuditSink | None = None,
         default_timeout_seconds: float = 30.0,
     ):
         if default_timeout_seconds <= 0:
@@ -21,6 +29,7 @@ class ToolExecutionService:
 
         self.registry = registry
         self.authorization_service = authorization_service
+        self.audit_sink = audit_sink
         self.default_timeout_seconds = default_timeout_seconds
 
     async def execute(
@@ -73,6 +82,14 @@ class ToolExecutionService:
                 metadata=tool.definition.metadata,
             )
 
+            await self._audit_authorization(
+                principal=principal,
+                tool_name=tool_name,
+                allowed=authorization.allowed,
+                reason=authorization.reason,
+                execution_context=execution_context,
+            )
+
             if not authorization.allowed:
                 return ToolExecutionResult(
                     tool_name=tool_name,
@@ -114,4 +131,40 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"{type(exc).__name__}: {exc}",
+            )
+
+    async def _audit_authorization(
+        self,
+        *,
+        principal: str,
+        tool_name: str,
+        allowed: bool,
+        reason: str | None,
+        execution_context: dict[str, Any] | None,
+    ) -> None:
+        if self.audit_sink is None:
+            return
+
+        context = execution_context or {}
+
+        record = ToolAuthorizationAuditRecord(
+            principal=principal,
+            tool_name=tool_name,
+            allowed=allowed,
+            reason=reason,
+            run_id=context.get("run_id"),
+            call_id=context.get("call_id"),
+            agent_name=context.get("agent_name"),
+            session_id=context.get("session_id"),
+        )
+
+        try:
+            await self.audit_sink.record(record)
+        except Exception:
+            logger.exception(
+                "Failed to record tool authorization audit: "
+                "principal=%s tool_name=%s allowed=%s",
+                principal,
+                tool_name,
+                allowed,
             )

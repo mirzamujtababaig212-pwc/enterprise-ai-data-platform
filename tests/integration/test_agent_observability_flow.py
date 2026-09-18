@@ -29,6 +29,9 @@ from tools.authorization.in_memory import InMemoryToolAuthorizer
 from tools.authorization.policy import MetadataAuthorizationPolicy
 from tools.authorization.service import ToolAuthorizationService
 from tools.execution.service import ToolExecutionService
+from app.control_plane.agent_run_events.tool_authorization_observer import (
+    ToolAuthorizationAuditObserver,
+)
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
@@ -147,6 +150,7 @@ async def make_runtime(
     execution_service = ToolExecutionService(
         tool_registry,
         authorization_service=authorization_service,
+        audit_sink=ToolAuthorizationAuditObserver(observer),
     )
 
     return AgentRuntime(
@@ -219,6 +223,7 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.TOOL_CALL_REQUESTED,
+            AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION,
             AgentExecutionEventType.TOOL_CALL_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
@@ -228,9 +233,10 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         started = observer.events[0]
         first_llm = observer.events[2]
         tool_requested = observer.events[3]
-        tool_completed = observer.events[4]
-        final_llm = observer.events[6]
-        completed = observer.events[7]
+        authorization = observer.events[4]
+        tool_completed = observer.events[5]
+        final_llm = observer.events[7]
+        completed = observer.events[8]
 
         assert started.agent_name == "observable-mcp-agent"
         assert started.session_id == "session-observe-123"
@@ -250,6 +256,18 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         assert tool_requested.tool_name == "search_documents"
         assert tool_requested.call_id == "call-observe-1"
         assert tool_requested.metadata == {}
+
+        assert authorization.event_type is AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION
+        assert authorization.agent_name == "observable-mcp-agent"
+        assert authorization.session_id == "session-observe-123"
+        assert authorization.tool_name == "search_documents"
+        assert authorization.call_id == "call-observe-1"
+        assert authorization.metadata == {
+            "allowed": True,
+            "reason": "Tool is authorized.",
+        }
+        assert "principal" not in authorization.metadata
+        assert "user-observe-123" not in authorization.metadata
 
         assert tool_completed.agent_name == "observable-mcp-agent"
         assert tool_completed.session_id == "session-observe-123"
@@ -708,11 +726,34 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
             event.event_type != AgentExecutionEventType.TOOL_CALL_COMPLETED for event in tool_events
         )
 
+        authorization_events = [
+            event
+            for event in observer.events
+            if event.event_type is AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION
+        ]
+
+        assert len(authorization_events) == 1
+
+        authorization = authorization_events[0]
+
+        assert authorization.agent_name == "observable-mcp-agent"
+        assert authorization.session_id == "session-observe-denied"
+        assert authorization.tool_round is None
+        assert authorization.tool_name == "search_documents"
+        assert authorization.call_id == "call-observe-1"
+        assert authorization.metadata == {
+            "allowed": False,
+            "reason": "Authorization metadata requirement failed: mcp_server='finance-server'.",
+        }
+        assert "principal" not in authorization.metadata
+        assert "user-observe-denied" not in authorization.metadata
+
         assert [event.event_type for event in observer.events] == [
             AgentExecutionEventType.AGENT_STARTED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.TOOL_CALL_REQUESTED,
+            AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION,
             AgentExecutionEventType.TOOL_CALL_FAILED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
