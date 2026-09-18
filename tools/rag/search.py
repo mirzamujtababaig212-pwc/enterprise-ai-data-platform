@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from rag.contracts import Retriever
 from rag.governance import GovernancePolicy
-from rag.retrieval.retriever import SemanticRetriever
 from tools.models import ToolDefinition
 
 
 class RAGSearchTool:
     """Tool exposing semantic retrieval to agents."""
 
-    def __init__(self, retriever: SemanticRetriever) -> None:
+    def __init__(self, retriever: Retriever) -> None:
         self._retriever = retriever
 
     @property

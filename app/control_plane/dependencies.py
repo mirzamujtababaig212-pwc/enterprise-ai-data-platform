@@ -25,6 +25,8 @@ from rag.generation.gateway import GatewayChatService
 from rag.indexing import RAGIndexer
 from rag.chunking.recursive import RecursiveChunker
 from rag.query import RAGQueryService
+from rag.retrieval.hybrid import HybridRetriever
+from rag.retrieval.lexical import PostgreSQLLexicalRetriever
 from rag.retrieval.retriever import SemanticRetriever
 from rag.contracts import VectorStore
 from tools.registry.in_memory import InMemoryToolRegistry
@@ -147,10 +149,22 @@ _rag_indexer = RAGIndexer(
     vector_store=_rag_vector_store,
 )
 
-_rag_retriever = SemanticRetriever(
+_rag_semantic_retriever = SemanticRetriever(
     embedding_service=_rag_embedding_service,
     vector_store=_rag_vector_store,
 )
+
+_rag_retriever = _rag_semantic_retriever
+
+if CommonSettings.vector_store.BACKEND in {"postgres", "qdrant"}:
+    _rag_retriever = HybridRetriever(
+        semantic_retriever=_rag_semantic_retriever,
+        lexical_retriever=PostgreSQLLexicalRetriever(),
+        candidate_k=5,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
 
 _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
