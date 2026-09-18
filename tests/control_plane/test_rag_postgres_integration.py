@@ -22,7 +22,7 @@ from rag.chunking import RecursiveChunker
 from rag.indexing import RAGIndexer
 from rag.models import EmbeddingIdentity, EmbeddingResult
 from rag.query import RAGQueryService
-from rag.retrieval import SemanticRetriever
+from rag.retrieval import HybridRetriever, PostgreSQLLexicalRetriever, SemanticRetriever
 from rag.stores.postgres import PostgreSQLVectorStore
 
 
@@ -108,9 +108,22 @@ def test_control_plane_rag_postgres_index_and_query_end_to_end() -> None:
         vector_store=vector_store,
     )
 
-    retriever = SemanticRetriever(
+    semantic_retriever = SemanticRetriever(
         embedding_service=embedding_service,
         vector_store=vector_store,
+    )
+
+    lexical_retriever = PostgreSQLLexicalRetriever(
+        session_factory=test_session_factory,
+    )
+
+    retriever = HybridRetriever(
+        semantic_retriever=semantic_retriever,
+        lexical_retriever=lexical_retriever,
+        candidate_k=5,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
     )
 
     query_service = RAGQueryService(
@@ -203,7 +216,7 @@ def test_control_plane_rag_postgres_index_and_query_end_to_end() -> None:
             "source": "postgres-integration-test",
             "category": "architecture",
         }
-        assert source["score"] == pytest.approx(1.0)
+        assert source["score"] == pytest.approx(1.5 / 61.0)
 
     finally:
         app.dependency_overrides.clear()

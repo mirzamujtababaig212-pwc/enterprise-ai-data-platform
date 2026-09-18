@@ -151,6 +151,51 @@ def test_postgresql_lexical_retriever_returns_ranked_matches() -> None:
         engine.dispose()
 
 
+def test_postgresql_lexical_retriever_matches_natural_language_query() -> None:
+    engine, session_factory = _postgres_connection()
+    document_id = "lexical-postgres-natural-language"
+
+    try:
+        _seed(session_factory, document_id)
+
+        session: Session = session_factory()
+        try:
+            session.add(
+                RAGChunkRecord(
+                    chunk_id=f"{document_id}:deldai",
+                    document_id=document_id,
+                    chunk_index=4,
+                    content=(
+                        "DELDAI Enterprise AI OS provides governed "
+                        "retrieval and agent capabilities."
+                    ),
+                    chunk_metadata={"classification": "internal"},
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        retriever = PostgreSQLLexicalRetriever(
+            session_factory=session_factory,
+        )
+
+        results = asyncio.run(
+            retriever.retrieve(
+                "What does DELDAI provide?",
+                top_k=1,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.id == f"{document_id}:deldai"
+        assert results[0].score == pytest.approx(1.0)
+
+    finally:
+        _cleanup(session_factory, document_id)
+        engine.dispose()
+
+
 def test_postgresql_lexical_retriever_applies_top_k_and_min_score() -> None:
     engine, session_factory = _postgres_connection()
     document_id = "lexical-postgres-top-k-min-score"

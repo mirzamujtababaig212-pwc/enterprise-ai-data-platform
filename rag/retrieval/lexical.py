@@ -23,6 +23,15 @@ def _tokenize(text: str) -> tuple[str, ...]:
     return tuple(token.lower() for token in _TOKEN_PATTERN.findall(text))
 
 
+def _build_postgres_tsquery(query: str) -> str | None:
+    tokens = _tokenize(query)
+
+    if not tokens:
+        return None
+
+    return " OR ".join(tokens)
+
+
 class InMemoryLexicalRetriever:
     """
     Deterministic lexical retriever over an in-memory collection of chunks.
@@ -273,7 +282,12 @@ class PostgreSQLLexicalRetriever:
 
         try:
             content_tsv = column("content_tsv", TSVECTOR())
-            tsquery = func.websearch_to_tsquery("simple", query)
+            tsquery_text = _build_postgres_tsquery(query)
+
+            if tsquery_text is None:
+                return []
+
+            tsquery = func.websearch_to_tsquery("simple", tsquery_text)
             rank = func.ts_rank_cd(content_tsv, tsquery)
 
             statement = select(RAGChunkRecord, rank.label("rank")).where(
