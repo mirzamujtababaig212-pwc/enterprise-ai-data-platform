@@ -9,6 +9,7 @@ from rag.evaluation.dataset_registry import (
     VehicleRetrievalQualityEvaluationDatasetDefinition,
 )
 from rag.evaluation.evaluator import RetrievalEvaluator
+from rag.evaluation.lineage import RerankerConfiguration
 from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.run import RetrievalEvaluationRun
 from rag.evaluation.workflow import RetrievalEvaluationWorkflow
@@ -78,10 +79,18 @@ async def test_cross_encoder_vehicle_quality_experiment() -> None:
         candidate_k=5,
     )
 
-    candidate_artifact = definition.build_retrieval_artifact()
-    candidate_artifact = type(candidate_artifact)(
+    baseline_artifact = definition.build_retrieval_artifact()
+    candidate_artifact = type(baseline_artifact)(
         retriever_type="RerankingRetriever",
-        vector_store_type=candidate_artifact.vector_store_type,
+        vector_store_type=baseline_artifact.vector_store_type,
+        hybrid_configuration=baseline_artifact.hybrid_configuration,
+        reranker_configuration=RerankerConfiguration(
+            type="cross_encoder",
+            model_id=reranker.model_id,
+            onnx_filename=reranker.onnx_filename,
+            max_length=reranker.max_length,
+            candidate_k=5,
+        ),
     )
 
     candidate_workflow = _workflow(
@@ -124,6 +133,21 @@ async def test_cross_encoder_vehicle_quality_experiment() -> None:
 
     assert candidate_run.lineage.retrieval_artifact is not None
     assert candidate_run.lineage.retrieval_artifact.retriever_type == "RerankingRetriever"
+
+    candidate_artifact = candidate_run.lineage.retrieval_artifact
+    assert candidate_artifact.hybrid_configuration is not None
+    assert candidate_artifact.hybrid_configuration.candidate_k == 5
+    assert candidate_artifact.hybrid_configuration.rrf_k == 60
+    assert candidate_artifact.hybrid_configuration.semantic_weight == 1.0
+    assert candidate_artifact.hybrid_configuration.lexical_weight == 0.5
+
+    assert candidate_artifact.reranker_configuration == RerankerConfiguration(
+        type="cross_encoder",
+        model_id=reranker.model_id,
+        onnx_filename=reranker.onnx_filename,
+        max_length=reranker.max_length,
+        candidate_k=5,
+    )
 
     assert comparison.metrics["mrr"].status.value == "improved"
     assert comparison.metrics["mrr"].delta == pytest.approx(0.03125)

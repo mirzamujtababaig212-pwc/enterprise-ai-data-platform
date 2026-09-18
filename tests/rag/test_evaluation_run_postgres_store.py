@@ -141,6 +141,7 @@ def _hybrid_run(run_id: str = "hybrid-run-1") -> RetrievalEvaluationRun:
     from rag.evaluation.lineage import (
         HybridRetrievalConfiguration,
         RetrievalEvaluationArtifact,
+        RerankerConfiguration,
     )
 
     run = _run(run_id=run_id)
@@ -153,6 +154,13 @@ def _hybrid_run(run_id: str = "hybrid-run-1") -> RetrievalEvaluationRun:
             rrf_k=60,
             semantic_weight=1.0,
             lexical_weight=0.5,
+        ),
+        reranker_configuration=RerankerConfiguration(
+            type="cross_encoder",
+            model_id="jinaai/jina-reranker-v1-tiny-en",
+            onnx_filename="onnx/model_int8.onnx",
+            max_length=8192,
+            candidate_k=20,
         ),
     )
 
@@ -257,6 +265,14 @@ def test_save_and_get_round_trip_preserves_hybrid_retrieval_configuration() -> N
         assert configuration.rrf_k == 60
         assert configuration.semantic_weight == 1.0
         assert configuration.lexical_weight == 0.5
+
+        reranker_configuration = artifact.reranker_configuration
+        assert reranker_configuration is not None
+        assert reranker_configuration.type == "cross_encoder"
+        assert reranker_configuration.model_id == "jinaai/jina-reranker-v1-tiny-en"
+        assert reranker_configuration.onnx_filename == "onnx/model_int8.onnx"
+        assert reranker_configuration.max_length == 8192
+        assert reranker_configuration.candidate_k == 20
     finally:
         repository._session.close()
         engine.dispose()

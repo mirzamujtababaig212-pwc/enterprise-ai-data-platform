@@ -40,6 +40,42 @@ class HybridRetrievalConfiguration:
 
 
 @dataclass(frozen=True)
+class RerankerConfiguration:
+    """Immutable configuration provenance for retrieval reranking."""
+
+    type: str
+    model_id: str | None = None
+    onnx_filename: str | None = None
+    max_length: int | None = None
+    candidate_k: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.type.strip():
+            raise ValueError("reranker type must not be empty")
+
+        if self.max_length is not None and self.max_length <= 0:
+            raise ValueError("reranker max_length must be greater than zero")
+
+        if self.candidate_k is not None and self.candidate_k <= 0:
+            raise ValueError("reranker candidate_k must be greater than zero")
+
+        if self.model_id is not None and not self.model_id.strip():
+            raise ValueError("reranker model_id must not be empty")
+
+        if self.onnx_filename is not None and not self.onnx_filename.strip():
+            raise ValueError("reranker onnx_filename must not be empty")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "type": self.type,
+            "model_id": self.model_id,
+            "onnx_filename": self.onnx_filename,
+            "max_length": self.max_length,
+            "candidate_k": self.candidate_k,
+        }
+
+
+@dataclass(frozen=True)
 class RetrievalEvaluationArtifact:
     """
     Immutable provenance for the retrieval implementation evaluated by a run.
@@ -51,6 +87,7 @@ class RetrievalEvaluationArtifact:
     retriever_type: str
     vector_store_type: str
     hybrid_configuration: HybridRetrievalConfiguration | None = None
+    reranker_configuration: RerankerConfiguration | None = None
 
     def __post_init__(self) -> None:
         if not self.retriever_type.strip():
@@ -66,6 +103,11 @@ class RetrievalEvaluationArtifact:
             "hybrid_configuration": (
                 self.hybrid_configuration.as_dict()
                 if self.hybrid_configuration is not None
+                else None
+            ),
+            "reranker_configuration": (
+                self.reranker_configuration.as_dict()
+                if self.reranker_configuration is not None
                 else None
             ),
         }
@@ -155,6 +197,12 @@ class RetrievalEvaluationLineage:
                 retrieval_artifact.hybrid_configuration.as_dict()
                 if retrieval_artifact is not None
                 and retrieval_artifact.hybrid_configuration is not None
+                else None
+            ),
+            "reranker_configuration": (
+                retrieval_artifact.reranker_configuration.as_dict()
+                if retrieval_artifact is not None
+                and retrieval_artifact.reranker_configuration is not None
                 else None
             ),
         }

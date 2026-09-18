@@ -24,6 +24,7 @@ from rag.evaluation.external import (
 from rag.evaluation.lineage import (
     HybridRetrievalConfiguration,
     RetrievalEvaluationArtifact,
+    RerankerConfiguration,
     RetrievalEvaluationLineage,
 )
 from rag.evaluation.models import RetrievalEvaluationResult
@@ -224,10 +225,23 @@ def _deserialize_run(
                 lexical_weight=hybrid_configuration_data["lexical_weight"],
             )
 
+        reranker_configuration_data = lineage_data.get("reranker_configuration")
+
+        reranker_configuration = None
+        if reranker_configuration_data is not None:
+            reranker_configuration = RerankerConfiguration(
+                type=reranker_configuration_data["type"],
+                model_id=reranker_configuration_data.get("model_id"),
+                onnx_filename=reranker_configuration_data.get("onnx_filename"),
+                max_length=reranker_configuration_data.get("max_length"),
+                candidate_k=reranker_configuration_data.get("candidate_k"),
+            )
+
         retrieval_artifact = RetrievalEvaluationArtifact(
             retriever_type=lineage_data["retriever_type"],
             vector_store_type=lineage_data["vector_store_type"],
             hybrid_configuration=hybrid_configuration,
+            reranker_configuration=reranker_configuration,
         )
 
     lineage = RetrievalEvaluationLineage(
