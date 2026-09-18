@@ -128,6 +128,7 @@ class AgentRuntime:
 
             memory_context = await self._memory_context_builder.build(
                 request.memory_namespace,
+                query=request.input,
             )
 
         llm_context = AgentLLMContext(

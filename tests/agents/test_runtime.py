@@ -24,7 +24,12 @@ from tools.registry.in_memory import InMemoryToolRegistry
 
 
 class EmptyMemoryBuilder:
-    async def build(self, namespace: str) -> MemoryContext:
+    async def build(
+        self,
+        namespace: str,
+        *,
+        query: str | None = None,
+    ) -> MemoryContext:
         return MemoryContext(
             working=(),
             semantic=(),
@@ -226,7 +231,12 @@ async def test_runtime_builds_memory_context_for_requested_namespace():
         def __init__(self) -> None:
             self.requested_namespace = None
 
-        async def build(self, namespace: str) -> MemoryContext:
+        async def build(
+            self,
+            namespace: str,
+            *,
+            query: str | None = None,
+        ) -> MemoryContext:
             self.requested_namespace = namespace
             return MemoryContext(
                 working=(),
@@ -250,6 +260,54 @@ async def test_runtime_builds_memory_context_for_requested_namespace():
     )
 
     assert builder.requested_namespace == "project-a"
+    assert isinstance(agent.last_memory, MemoryContext)
+    assert agent.last_memory.is_empty
+
+
+@pytest.mark.asyncio
+async def test_runtime_passes_request_input_to_memory_context_builder():
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent()
+    await registry.register(agent)
+
+    class TrackingMemoryBuilder:
+        def __init__(self) -> None:
+            self.requested_namespace = None
+            self.requested_query = None
+
+        async def build(
+            self,
+            namespace: str,
+            *,
+            query: str | None = None,
+        ) -> MemoryContext:
+            self.requested_namespace = namespace
+            self.requested_query = query
+
+            return MemoryContext(
+                working=(),
+                semantic=(),
+                episodic=(),
+            )
+
+    builder = TrackingMemoryBuilder()
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=builder,
+    )
+
+    await runtime.run(
+        "test-agent",
+        AgentRequest(
+            input="How did we deploy Databricks?",
+            memory_namespace="project-a",
+        ),
+    )
+
+    assert builder.requested_namespace == "project-a"
+    assert builder.requested_query == "How did we deploy Databricks?"
     assert isinstance(agent.last_memory, MemoryContext)
     assert agent.last_memory.is_empty
 
