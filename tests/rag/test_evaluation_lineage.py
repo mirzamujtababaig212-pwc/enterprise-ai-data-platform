@@ -3,6 +3,7 @@ import pytest
 from rag.evaluation.lineage import (
     HybridRetrievalConfiguration,
     RetrievalEvaluationArtifact,
+    RerankerConfiguration,
     RetrievalEvaluationLineage,
 )
 from rag.models import EmbeddingIdentity
@@ -99,6 +100,7 @@ def test_retrieval_artifact_preserves_hybrid_configuration() -> None:
             "semantic_weight": 1.0,
             "lexical_weight": 0.5,
         },
+        "reranker_configuration": None,
     }
 
 
@@ -325,3 +327,107 @@ def test_retrieval_evaluation_artifact_rejects_empty_fields(field: str) -> None:
 
     with pytest.raises(ValueError, match=f"{field} must not be empty"):
         RetrievalEvaluationArtifact(**kwargs)
+
+
+def test_reranker_configuration_captures_cross_encoder_parameters() -> None:
+    configuration = RerankerConfiguration(
+        type="cross_encoder",
+        model_id="jinaai/jina-reranker-v1-tiny-en",
+        onnx_filename="onnx/model_int8.onnx",
+        max_length=8192,
+        candidate_k=20,
+    )
+
+    assert configuration.as_dict() == {
+        "type": "cross_encoder",
+        "model_id": "jinaai/jina-reranker-v1-tiny-en",
+        "onnx_filename": "onnx/model_int8.onnx",
+        "max_length": 8192,
+        "candidate_k": 20,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("type", " ", "reranker type must not be empty"),
+        ("model_id", " ", "reranker model_id must not be empty"),
+        ("onnx_filename", " ", "reranker onnx_filename must not be empty"),
+        ("max_length", 0, "reranker max_length must be greater than zero"),
+        ("candidate_k", 0, "reranker candidate_k must be greater than zero"),
+    ],
+)
+def test_reranker_configuration_rejects_invalid_parameters(
+    field: str,
+    value: str | int,
+    message: str,
+) -> None:
+    values = {
+        "type": "cross_encoder",
+        "model_id": "jinaai/jina-reranker-v1-tiny-en",
+        "onnx_filename": "onnx/model_int8.onnx",
+        "max_length": 8192,
+        "candidate_k": 20,
+    }
+    values[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        RerankerConfiguration(**values)
+
+
+def test_retrieval_artifact_preserves_reranker_configuration() -> None:
+    configuration = RerankerConfiguration(
+        type="cross_encoder",
+        model_id="jinaai/jina-reranker-v1-tiny-en",
+        onnx_filename="onnx/model_int8.onnx",
+        max_length=8192,
+        candidate_k=20,
+    )
+
+    artifact = RetrievalEvaluationArtifact(
+        retriever_type="RerankingRetriever",
+        vector_store_type="QdrantVectorStore",
+        reranker_configuration=configuration,
+    )
+
+    assert artifact.reranker_configuration == configuration
+    assert artifact.as_dict()["reranker_configuration"] == configuration.as_dict()
+
+
+def test_retrieval_evaluation_lineage_serializes_reranker_configuration() -> None:
+    configuration = RerankerConfiguration(
+        type="cross_encoder",
+        model_id="jinaai/jina-reranker-v1-tiny-en",
+        onnx_filename="onnx/model_int8.onnx",
+        max_length=8192,
+        candidate_k=20,
+    )
+    artifact = RetrievalEvaluationArtifact(
+        retriever_type="RerankingRetriever",
+        vector_store_type="QdrantVectorStore",
+        reranker_configuration=configuration,
+    )
+
+    lineage = RetrievalEvaluationLineage(
+        dataset_name="vehicle-retrieval-quality",
+        dataset_version="v1",
+        evaluation_policy_name="test-policy",
+        min_recall_at_k=0.0,
+        min_precision_at_k=0.0,
+        min_mrr=0.0,
+        min_ndcg_at_k=0.0,
+        max_mean_latency_ms=None,
+        min_abstention_accuracy=None,
+        evaluator_k=5,
+        min_relevance_score=0.0,
+        embedding_identity=EmbeddingIdentity(
+            requested_provider="mock",
+            requested_model="mock-embedding",
+            resolved_provider="mock",
+            resolved_model="mock-embedding",
+            dimension=2,
+        ),
+        retrieval_artifact=artifact,
+    )
+
+    assert lineage.as_dict()["reranker_configuration"] == configuration.as_dict()
