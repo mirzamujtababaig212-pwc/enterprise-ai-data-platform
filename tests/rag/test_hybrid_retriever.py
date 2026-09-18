@@ -269,3 +269,94 @@ async def test_hybrid_retriever_rejects_invalid_arguments():
 
     with pytest.raises(ValueError, match="between -1.0 and 1.0"):
         await retriever.retrieve("vehicle", min_score=1.1)
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retriever_diagnoses_rrf_contributions():
+    semantic = FakeRetriever(
+        [
+            _result("shared", 0.95),
+            _result("semantic-only", 0.80),
+        ]
+    )
+    lexical = FakeRetriever(
+        [
+            _result("lexical-only", 1.0),
+            _result("shared", 0.90),
+        ]
+    )
+
+    retriever = HybridRetriever(
+        semantic,
+        lexical,
+        candidate_k=2,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    diagnostics = await retriever.diagnose(
+        "vehicle battery",
+        top_k=3,
+    )
+
+    assert [item.chunk_id for item in diagnostics] == [
+        "shared",
+        "semantic-only",
+        "lexical-only",
+    ]
+
+    shared = diagnostics[0]
+    assert shared.semantic_rank == 1
+    assert shared.lexical_rank == 2
+    assert shared.semantic_contribution == pytest.approx(1.0 / 61.0)
+    assert shared.lexical_contribution == pytest.approx(0.5 / 62.0)
+    assert shared.fused_score == pytest.approx(1.0 / 61.0 + 0.5 / 62.0)
+    assert shared.final_rank == 1
+
+    semantic_only = diagnostics[1]
+    assert semantic_only.semantic_rank == 2
+    assert semantic_only.lexical_rank is None
+    assert semantic_only.lexical_contribution == 0.0
+
+    lexical_only = diagnostics[2]
+    assert lexical_only.semantic_rank is None
+    assert lexical_only.lexical_rank == 1
+    assert lexical_only.semantic_contribution == 0.0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retriever_diagnosis_matches_retrieve_order():
+    semantic = FakeRetriever(
+        [
+            _result("b", 0.9),
+            _result("a", 0.8),
+        ]
+    )
+    lexical = FakeRetriever(
+        [
+            _result("a", 0.9),
+            _result("b", 0.8),
+        ]
+    )
+
+    retriever = HybridRetriever(
+        semantic,
+        lexical,
+        candidate_k=2,
+        semantic_weight=1.0,
+        lexical_weight=1.0,
+    )
+
+    results = await retriever.retrieve(
+        "vehicle",
+        top_k=2,
+    )
+    diagnostics = await retriever.diagnose(
+        "vehicle",
+        top_k=2,
+    )
+
+    assert [result.chunk.id for result in results] == [
+        diagnostic.chunk_id for diagnostic in diagnostics
+    ]

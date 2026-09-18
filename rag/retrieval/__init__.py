@@ -1,4 +1,4 @@
-from rag.retrieval.hybrid import HybridRetriever
+from rag.retrieval.hybrid import HybridRetrievalDiagnostic, HybridRetriever
 from rag.retrieval.lexical import InMemoryLexicalRetriever, PostgreSQLLexicalRetriever
 from rag.retrieval.retriever import SemanticRetriever
 from rag.retrieval.reranker import (
@@ -10,6 +10,7 @@ from rag.retrieval.reranker import (
 
 __all__ = [
     "HybridRetriever",
+    "HybridRetrievalDiagnostic",
     "InMemoryLexicalRetriever",
     "PostgreSQLLexicalRetriever",
     "SemanticRetriever",
