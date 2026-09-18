@@ -38,7 +38,10 @@ from rag.evaluation.external.dispatcher import (
 )
 from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
 from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
-from app.control_plane.persistence.database import get_db
+from app.control_plane.persistence.database import SessionLocal, get_db
+from app.control_plane.agent_run_events.postgres_observer import (
+    PostgreSQLAgentRunEventObserver,
+)
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
@@ -60,6 +63,7 @@ _agent_observer = CompositeAgentExecutionObserver(
     [
         OpenTelemetryAgentExecutionObserver(),
         PrometheusAgentExecutionObserver(),
+        PostgreSQLAgentRunEventObserver(SessionLocal),
     ]
 )
 

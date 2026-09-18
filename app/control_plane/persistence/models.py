@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -152,6 +152,95 @@ class AgentRunRecord(Base):
         JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
         default=dict,
+    )
+
+
+class AgentRunEventRecord(Base):
+    __tablename__ = "agent_run_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    agent_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    tool_round: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    tool_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    call_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    provider: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    model: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    event_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_agent_run_events_run_created_at",
+            "run_id",
+            "created_at",
+        ),
     )
 
 
