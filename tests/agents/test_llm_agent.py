@@ -6,6 +6,10 @@ import pytest
 
 from tests.tools.execution.test_service import FakeTool
 from ai_platform.agents.contracts import Agent
+from ai_platform.agents.checkpoint import (
+    AgentCheckpointPosition,
+    AgentExecutionCheckpoint,
+)
 from ai_platform.agents.exceptions import AgentToolLoopLimitError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
@@ -865,6 +869,125 @@ class FakeAgentExecutionObserver:
         event: AgentExecutionEvent,
     ) -> None:
         self.events.append(event)
+
+
+class FakeAgentCheckpointHandler:
+    def __init__(self) -> None:
+        self.checkpoints: list[AgentExecutionCheckpoint] = []
+
+    async def save(
+        self,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> None:
+        self.checkpoints.append(checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FakeAgentCheckpointHandler()
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+            metadata={"request_id": "request-789"},
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-123",
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    await agent.run(context)
+
+    assert len(checkpoint_handler.checkpoints) == 1
+
+    checkpoint = checkpoint_handler.checkpoints[0]
+
+    assert checkpoint.run_id == "run-123"
+    assert checkpoint.agent_name == "production-llm-agent"
+    assert checkpoint.session_id == "session-456"
+    assert checkpoint.user_id == "user-123"
+    assert checkpoint.tool_round == 1
+    assert checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert checkpoint.metadata == {"request_id": "request-789"}
+
+    assert checkpoint.messages[-1].role is AgentMessageRole.TOOL
+    assert "call-123" in checkpoint.messages[-1].content
+    assert len(checkpoint.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_does_not_capture_checkpoint_without_run_id() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FakeAgentCheckpointHandler()
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+        ),
+        tools=tools,
+        llm=llm_context,
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    await agent.run(context)
+
+    assert checkpoint_handler.checkpoints == []
 
 
 @pytest.mark.asyncio

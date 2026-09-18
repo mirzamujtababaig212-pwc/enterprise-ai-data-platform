@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from ai_platform.agents.observer import AgentExecutionObserver
+from ai_platform.agents.checkpoint import (
+    AgentCheckpointHandler,
+    AgentCheckpointPosition,
+    AgentExecutionCheckpoint,
+)
 from ai_platform.agents.exceptions import AgentToolLoopLimitError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_messages import AgentMessage
@@ -31,12 +36,14 @@ class LLMAgent:
         definition: AgentDefinition,
         *,
         observer: AgentExecutionObserver | None = None,
+        checkpoint_handler: AgentCheckpointHandler | None = None,
     ) -> None:
         if not isinstance(definition, AgentDefinition):
             raise TypeError("LLMAgent definition must be an AgentDefinition.")
 
         self._definition = definition
         self._observer = observer
+        self._checkpoint_handler = checkpoint_handler
 
     @property
     def definition(self) -> AgentDefinition:
@@ -202,6 +209,21 @@ class LLMAgent:
         messages.extend(
             tool_result_messages,
         )
+
+        if self._checkpoint_handler is not None and context.run_id is not None:
+            await self._checkpoint_handler.save(
+                AgentExecutionCheckpoint(
+                    schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+                    run_id=context.run_id,
+                    agent_name=self.definition.name,
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                    messages=tuple(messages),
+                    tool_round=tool_round,
+                    position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+                    metadata=context.metadata,
+                )
+            )
 
     async def run(
         self,
