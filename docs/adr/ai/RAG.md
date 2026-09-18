@@ -211,11 +211,26 @@ benchmark-dependent changes in nDCG and recall. Candidate-depth
 experiments also showed that increasing the reranking candidate set does
 not guarantee improved retrieval quality.
 
+On the enterprise-policy benchmark, which contains 20 graded retrieval
+cases, the Hybrid RRF baseline achieved Recall@5 of 0.9750, Precision@5
+of 0.4500, MRR of 1.0000, and nDCG@5 of 0.9380. Replacing the Hybrid
+ranking with CrossEncoder reranking preserved recall and precision but
+reduced MRR to 0.8417 and nDCG@5 to 0.7736. Per-query diagnostics showed
+that the CrossEncoder can rank broadly related policy content above
+higher-grade business-specific results, indicating a ranking-objective
+mismatch rather than a candidate-coverage problem.
+
 A further selective-reranking experiment using CrossEncoder score
 margins did not identify a stable threshold that consistently improves
 the benchmark. CrossEncoder score margins are model scores rather than
 calibrated confidence probabilities and can be high even when the
 top-ranked item is not labeled relevant.
+
+Normalized Hybrid-score and CrossEncoder-score fusion was also evaluated
+on the enterprise-policy benchmark. Introducing even a 10% CrossEncoder
+contribution reduced MRR from 1.0000 to 0.9750 and nDCG@5 from 0.9380 to
+0.9036. Higher CrossEncoder contributions produced further degradation.
+No score-fusion policy is therefore adopted.
 
 Hybrid semantic and lexical retrieval using RRF therefore remains the
 default retrieval strategy. CrossEncoder reranking remains an optional
