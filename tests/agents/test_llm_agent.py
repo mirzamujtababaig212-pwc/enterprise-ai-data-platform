@@ -27,6 +27,9 @@ from ai_platform.agents.models import (
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.models import ToolDefinition
+from tools.rag.search import RAGSearchTool
+from rag.governance import GovernancePolicy
+from rag.models import DocumentChunk, RetrievalResult
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.agents.observability import (
@@ -1304,6 +1307,119 @@ async def test_llm_agent_emits_complete_lifecycle_after_tool_execution() -> None
     assert agent_completed.tool_round == 1
     assert agent_completed.provider == "fake"
     assert agent_completed.model == "gpt-test"
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_executes_real_rag_tool_with_governance_context() -> None:
+    class FakeRetriever:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def retrieve(
+            self,
+            query: str,
+            top_k: int,
+            min_score: float | None = None,
+            metadata_filter: dict[str, object] | None = None,
+            governance_policy: GovernancePolicy | None = None,
+        ) -> list[Any]:
+            self.calls.append(
+                {
+                    "query": query,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                    "metadata_filter": metadata_filter,
+                    "governance_policy": governance_policy,
+                }
+            )
+
+            return [
+                RetrievalResult(
+                    chunk=DocumentChunk(
+                        id="chunk-rag-001",
+                        document_id="doc-rag-001",
+                        content="Enterprise RAG retrieves relevant knowledge.",
+                        metadata={"source": "test"},
+                        chunk_index=0,
+                    ),
+                    score=0.95,
+                )
+            ]
+
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    retriever = FakeRetriever()
+    tool_registry = InMemoryToolRegistry()
+
+    await tool_registry.register(
+        RAGSearchTool(retriever),
+    )
+
+    policy = GovernancePolicy(
+        required_metadata={
+            "tenant_id": "tenant-a",
+        }
+    )
+
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-123",
+            user_id="user-rag-456",
+            governance_policy=policy,
+            metadata={
+                "source": "agent-api",
+            },
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id="run-rag-123",
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "RAG retrieves relevant context for generation."
+
+    assert retriever.calls == [
+        {
+            "query": "RAG",
+            "top_k": 5,
+            "min_score": None,
+            "metadata_filter": None,
+            "governance_policy": policy,
+        }
+    ]
+
+    completed = next(
+        event
+        for event in observer.events
+        if event.event_type == AgentExecutionEventType.TOOL_CALL_COMPLETED
+    )
+
+    assert completed.tool_name == "rag.search"
+    assert completed.call_id == "call-123"
+    assert completed.run_id == "run-rag-123"
+    assert completed.session_id == "session-rag-123"
 
 
 @pytest.mark.asyncio
