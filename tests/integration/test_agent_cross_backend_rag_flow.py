@@ -10,15 +10,25 @@ from sqlalchemy.orm import Session, sessionmaker
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.models import AgentDefinition, AgentRequest
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
+from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.routing.router import Router
+from app.control_plane.agent_run_events.postgres_observer import (
+    PostgreSQLAgentRunEventObserver,
+)
+from app.control_plane.agent_run_events.postgres_repository import (
+    PostgreSQLAgentRunEventsRepository,
+)
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
-from app.control_plane.agent_runs.in_memory import InMemoryAgentRunRepository
+from app.control_plane.agent_runs.postgres_repository import (
+    PostgreSQLAgentRunRepository,
+)
 from app.control_plane.agent_runs.models import AgentRunStatus
 from app.control_plane.persistence.models import (
     RAGChunkRecord,
+    AgentRunRecord,
     RAGDocumentRecord,
 )
 from rag.evaluation.datasets.vehicle_retrieval_quality import (
@@ -125,6 +135,13 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
 
     postgres = _postgres_engine()
 
+    postgres_session_factory = sessionmaker(
+        bind=postgres,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
     qdrant_url = os.getenv(
         "QDRANT_TEST_URL",
         "http://localhost:6333",
@@ -172,12 +189,7 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
         )
 
         lexical_retriever = PostgreSQLLexicalRetriever(
-            session_factory=sessionmaker(
-                bind=postgres,
-                autoflush=False,
-                autocommit=False,
-                expire_on_commit=False,
-            ),
+            session_factory=postgres_session_factory,
         )
 
         hybrid_retriever = HybridRetriever(
@@ -217,9 +229,16 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
             tool_names=("rag.search",),
         )
 
+        event_observer = PostgreSQLAgentRunEventObserver(
+            postgres_session_factory,
+        )
+
         agent_registry = InMemoryAgentRegistry()
         await agent_registry.register(
-            LLMAgent(agent_definition),
+            LLMAgent(
+                agent_definition,
+                observer=event_observer,
+            ),
         )
 
         gateway = Router()
@@ -230,7 +249,8 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
             llm_gateway=gateway,
         )
 
-        repository = InMemoryAgentRunRepository()
+        agent_run_session = postgres_session_factory()
+        repository = PostgreSQLAgentRunRepository(agent_run_session)
 
         application_service = AgentRunApplicationService(
             runtime=runtime,
@@ -274,6 +294,46 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
         assert persisted_run.status == AgentRunStatus.COMPLETED
         assert persisted_run.output == response.output
 
+        event_session = postgres_session_factory()
+        try:
+            event_repository = PostgreSQLAgentRunEventsRepository(
+                event_session,
+            )
+            events = event_repository.list(result.run_id)
+        finally:
+            event_session.close()
+
+        completed_tool_events = [
+            event
+            for event in events
+            if (
+                event.event_type == AgentExecutionEventType.TOOL_CALL_COMPLETED
+                and event.tool_name == "rag.search"
+            )
+        ]
+
+        assert len(completed_tool_events) == 1
+
+        rag_completed_event = completed_tool_events[0]
+
+        assert rag_completed_event.run_id == result.run_id
+        assert rag_completed_event.session_id == "session-cross-backend-rag-123"
+        assert rag_completed_event.call_id
+
+        assert rag_completed_event.metadata == {
+            "rag_provenance": {
+                "retrieved_count": len(expected_results),
+                "sources": [
+                    {
+                        "chunk_id": item.chunk.id,
+                        "document_id": item.chunk.document_id,
+                        "score": item.score,
+                    }
+                    for item in expected_results
+                ],
+            }
+        }
+
         semantic_results = await semantic_retriever.retrieve(
             query,
             top_k=5,
@@ -298,6 +358,21 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
         )
 
     finally:
+        if "agent_run_session" in locals():
+            agent_run_session.close()
+
+        if "result" in locals() and "postgres_session_factory" in locals():
+            cleanup_session = postgres_session_factory()
+            try:
+                cleanup_session.execute(
+                    delete(AgentRunRecord).where(
+                        AgentRunRecord.run_id == result.run_id,
+                    )
+                )
+                cleanup_session.commit()
+            finally:
+                cleanup_session.close()
+
         _cleanup_postgres(postgres, document_id)
         postgres.dispose()
 

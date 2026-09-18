@@ -26,6 +26,7 @@ from ai_platform.agents.models import (
 )
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
+from tools.models import ToolDefinition
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.agents.observability import (
@@ -420,9 +421,48 @@ async def test_llm_agent_sends_canonical_messages() -> None:
     ]
 
 
-class FakeToolCallingLLMGateway:
+class FakeRAGTool:
     def __init__(self) -> None:
+        self._definition = ToolDefinition(
+            name="rag.search",
+            description="A test RAG search tool.",
+        )
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        return {
+            "query": arguments["query"],
+            "retrieved_count": 2,
+            "results": [
+                {
+                    "chunk_id": "chunk-rag-001",
+                    "document_id": "doc-rag-001",
+                    "content": "Sensitive enterprise context.",
+                    "score": 0.91,
+                    "metadata": {
+                        "classification": "confidential",
+                    },
+                },
+                {
+                    "chunk_id": "chunk-rag-002",
+                    "document_id": "doc-rag-002",
+                    "content": "Another sensitive context.",
+                    "score": 0.83,
+                    "metadata": {
+                        "classification": "restricted",
+                    },
+                },
+            ],
+        }
+
+
+class FakeToolCallingLLMGateway:
+    def __init__(self, tool_name: str = "search") -> None:
         self.requests: list[dict[str, Any]] = []
+        self.tool_name = tool_name
 
     async def route_chat(
         self,
@@ -443,7 +483,7 @@ class FakeToolCallingLLMGateway:
                 "tool_calls": [
                     AgentToolCall(
                         call_id="call-123",
-                        name="search",
+                        name=self.tool_name,
                         arguments={
                             "query": "RAG",
                         },
@@ -1058,6 +1098,78 @@ async def test_llm_agent_emits_tool_call_lifecycle_events() -> None:
     assert tool_events[0].tool_round == 1
     assert tool_events[0].tool_name == "search"
     assert tool_events[0].call_id == "call-123"
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    await tool_registry.register(FakeRAGTool())
+
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-123",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    await agent.run(context)
+
+    completed = next(
+        event
+        for event in observer.events
+        if event.event_type == AgentExecutionEventType.TOOL_CALL_COMPLETED
+    )
+
+    assert completed.tool_name == "rag.search"
+    assert completed.call_id == "call-123"
+    assert completed.metadata == {
+        "rag_provenance": {
+            "retrieved_count": 2,
+            "sources": [
+                {
+                    "chunk_id": "chunk-rag-001",
+                    "document_id": "doc-rag-001",
+                    "score": 0.91,
+                },
+                {
+                    "chunk_id": "chunk-rag-002",
+                    "document_id": "doc-rag-002",
+                    "score": 0.83,
+                },
+            ],
+        }
+    }
+
+    serialized = str(completed.metadata)
+
+    assert "Sensitive enterprise context." not in serialized
+    assert "Another sensitive context." not in serialized
+    assert "classification" not in serialized
 
 
 @pytest.mark.asyncio

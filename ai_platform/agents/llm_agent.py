@@ -60,6 +60,62 @@ class LLMAgent:
 
         await self._observer.record(event)
 
+    @staticmethod
+    def _tool_provenance_metadata(
+        tool_name: str,
+        output: object,
+    ) -> dict[str, object]:
+        """
+        Extract bounded provenance metadata from supported tool outputs.
+
+        RAG provenance records source identity and relevance only. Tool
+        content and arbitrary payloads remain outside execution events.
+        """
+        if tool_name != "rag.search" or not isinstance(output, dict):
+            return {}
+
+        results = output.get("results")
+        if not isinstance(results, list):
+            return {}
+
+        sources = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+
+            chunk_id = result.get("chunk_id")
+            document_id = result.get("document_id")
+            score = result.get("score")
+
+            if not isinstance(chunk_id, str) or not chunk_id:
+                continue
+            if not isinstance(document_id, str) or not document_id:
+                continue
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                continue
+
+            sources.append(
+                {
+                    "chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "score": score,
+                }
+            )
+
+        if not sources:
+            return {}
+
+        retrieved_count = output.get("retrieved_count")
+        if not isinstance(retrieved_count, int) or isinstance(retrieved_count, bool):
+            retrieved_count = len(sources)
+
+        return {
+            "rag_provenance": {
+                "retrieved_count": retrieved_count,
+                "sources": sources,
+            }
+        }
+
     async def _accumulate_tool_call_messages(
         self,
         messages: list[AgentMessage],
@@ -120,6 +176,10 @@ class LLMAgent:
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
+                        metadata=self._tool_provenance_metadata(
+                            tool_call.name,
+                            tool_result.output,
+                        ),
                     )
                 )
             else:
