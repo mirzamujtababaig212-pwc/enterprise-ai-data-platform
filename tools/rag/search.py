@@ -5,6 +5,7 @@ from typing import Any
 from rag.contracts import Retriever
 from rag.governance import GovernancePolicy
 from tools.models import ToolDefinition
+from tools.execution.context import ToolExecutionContext
 
 
 class RAGSearchTool:
@@ -129,17 +130,9 @@ class RAGSearchTool:
     async def execute_with_context(
         self,
         arguments: dict[str, Any],
-        context: dict[str, Any],
+        context: ToolExecutionContext,
     ) -> dict[str, Any]:
-        governance_policy = context.get("governance_policy")
-
-        if governance_policy is not None and not isinstance(
-            governance_policy,
-            GovernancePolicy,
-        ):
-            raise TypeError("governance_policy must be a GovernancePolicy.")
-
         return await self._execute(
             arguments,
-            governance_policy=governance_policy,
+            governance_policy=context.governance_policy,
         )

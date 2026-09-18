@@ -4,6 +4,7 @@ import pytest
 
 from rag.models import DocumentChunk, RetrievalResult
 from tools.rag.search import RAGSearchTool
+from tools.execution.context import ToolExecutionContext
 from rag.governance import GovernancePolicy
 
 
@@ -241,9 +242,9 @@ async def test_rag_search_passes_governance_policy_from_context() -> None:
         {
             "query": "enterprise architecture",
         },
-        {
-            "governance_policy": policy,
-        },
+        ToolExecutionContext(
+            governance_policy=policy,
+        ),
     )
 
     assert retriever.calls[0][4] is policy

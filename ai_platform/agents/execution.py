@@ -15,6 +15,7 @@ from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.models import ToolExecutionResult
 from rag.governance import GovernancePolicy
+from tools.execution.context import ToolExecutionContext
 
 
 class AgentExecutionContext:
@@ -186,15 +187,15 @@ class AgentExecutionContext:
                 tool_call.name,
                 tool_call.arguments,
                 principal=self.user_id,
-                execution_context={
-                    "run_id": self.run_id,
-                    "call_id": tool_call.call_id,
-                    "governance_policy": self.governance_policy,
-                    "agent_name": self.agent_name,
-                    "session_id": self.session_id,
-                    "user_id": self.user_id,
-                    "request_metadata": self.metadata,
-                },
+                execution_context=ToolExecutionContext(
+                    run_id=self.run_id,
+                    call_id=tool_call.call_id,
+                    governance_policy=self.governance_policy,
+                    agent_name=self.agent_name,
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    request_metadata=self.metadata,
+                ),
             )
 
             if isinstance(result, ToolExecutionResult):

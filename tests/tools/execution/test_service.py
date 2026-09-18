@@ -12,6 +12,7 @@ from tools.execution.service import ToolExecutionService
 from tools.models import ToolDefinition
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.authorization.models import ToolAuthorizationResult
+from tools.execution.context import ToolExecutionContext
 
 
 class RecordingToolAuthorizer:
@@ -436,12 +437,11 @@ async def test_execute_passes_execution_context_to_context_aware_tool():
 
     service = ToolExecutionService(registry)
 
-    execution_context = {
-        "agent_name": "research-agent",
-        "session_id": "session-123",
-        "user_id": "user-456",
-        "governance_policy": "internal-only",
-    }
+    execution_context = ToolExecutionContext(
+        agent_name="research-agent",
+        session_id="session-123",
+        user_id="user-456",
+    )
 
     result = await service.execute(
         "context_tool",
@@ -461,7 +461,7 @@ async def test_execute_passes_execution_context_to_context_aware_tool():
 
 
 @pytest.mark.asyncio
-async def test_execute_uses_empty_context_when_none_is_provided():
+async def test_execute_passes_none_context_when_none_is_provided():
     registry = InMemoryToolRegistry()
     tool = ContextAwareTool()
 
@@ -475,7 +475,7 @@ async def test_execute_uses_empty_context_when_none_is_provided():
     )
 
     assert result.success is True
-    assert tool.received_context == {}
+    assert tool.received_context is None
 
 
 @pytest.mark.asyncio
@@ -522,9 +522,7 @@ async def test_authorization_happens_before_contextual_tool_execution():
         "context_tool",
         {},
         principal="agent:restricted",
-        execution_context={
-            "governance_policy": "internal-only",
-        },
+        execution_context=ToolExecutionContext(),
     )
 
     assert result.success is False

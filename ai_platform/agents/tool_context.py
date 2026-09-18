@@ -6,6 +6,7 @@ from ai_platform.agents.models import AgentDefinition
 from tools.execution.service import ToolExecutionService
 from tools.contracts import Tool, ToolRegistry
 from tools.models import ToolDefinition
+from tools.execution.context import ToolExecutionContext
 
 
 class AgentToolContext:
@@ -96,7 +97,7 @@ class AgentToolContext:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
-        execution_context: dict[str, Any] | None = None,
+        execution_context: ToolExecutionContext | None = None,
     ):
         """
         Execute an agent-declared tool through ToolExecutionService.

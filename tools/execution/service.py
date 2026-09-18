@@ -11,6 +11,7 @@ from tools.authorization.audit import (
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
 from tools.models import ToolExecutionResult
+from tools.execution.context import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,10 @@ class ToolExecutionService:
         *,
         principal: str | None = None,
         timeout_seconds: float | None = None,
-        execution_context: dict[str, Any] | None = None,
+        execution_context: ToolExecutionContext | dict[str, Any] | None = None,
     ) -> ToolExecutionResult:
+        execution_context = self._normalize_execution_context(execution_context)
+
         if not tool_name.strip():
             raise ValueError("Tool name must not be empty.")
 
@@ -103,7 +106,7 @@ class ToolExecutionService:
             if contextual_execute is not None:
                 execution = contextual_execute(
                     arguments,
-                    execution_context or {},
+                    execution_context,
                 )
             else:
                 execution = tool.execute(arguments)
@@ -140,22 +143,20 @@ class ToolExecutionService:
         tool_name: str,
         allowed: bool,
         reason: str | None,
-        execution_context: dict[str, Any] | None,
+        execution_context: ToolExecutionContext | None = None,
     ) -> None:
         if self.audit_sink is None:
             return
-
-        context = execution_context or {}
 
         record = ToolAuthorizationAuditRecord(
             principal=principal,
             tool_name=tool_name,
             allowed=allowed,
             reason=reason,
-            run_id=context.get("run_id"),
-            call_id=context.get("call_id"),
-            agent_name=context.get("agent_name"),
-            session_id=context.get("session_id"),
+            run_id=execution_context.run_id if execution_context else None,
+            call_id=execution_context.call_id if execution_context else None,
+            agent_name=execution_context.agent_name if execution_context else None,
+            session_id=execution_context.session_id if execution_context else None,
         )
 
         try:
@@ -168,3 +169,26 @@ class ToolExecutionService:
                 tool_name,
                 allowed,
             )
+
+    @staticmethod
+    def _normalize_execution_context(
+        execution_context: ToolExecutionContext | dict[str, Any] | None = None,
+    ) -> ToolExecutionContext | None:
+        if execution_context is None:
+            return None
+
+        if isinstance(execution_context, ToolExecutionContext):
+            return execution_context
+
+        if isinstance(execution_context, dict):
+            return ToolExecutionContext(
+                run_id=execution_context.get("run_id"),
+                call_id=execution_context.get("call_id"),
+                agent_name=execution_context.get("agent_name"),
+                session_id=execution_context.get("session_id"),
+                user_id=execution_context.get("user_id"),
+                governance_policy=execution_context.get("governance_policy"),
+                request_metadata=execution_context.get("request_metadata", {}),
+            )
+
+        raise TypeError("execution_context must be a ToolExecutionContext, dict, or None.")

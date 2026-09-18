@@ -11,6 +11,7 @@ from ai_platform.agents.tool_calls import (
     AgentToolResult,
 )
 from tools.registry.in_memory import InMemoryToolRegistry
+from tools.execution.context import ToolExecutionContext
 from ai_platform.agents.llm_messages import (
     assistant_message,
     system_message,
@@ -634,15 +635,15 @@ async def test_execution_context_maps_tool_call_to_tool_result() -> None:
             },
             "principal": "user-123",
             "timeout_seconds": None,
-            "execution_context": {
-                "run_id": None,
-                "call_id": "call-123",
-                "governance_policy": None,
-                "agent_name": "test-agent",
-                "session_id": None,
-                "user_id": "user-123",
-                "request_metadata": {},
-            },
+            "execution_context": ToolExecutionContext(
+                run_id=None,
+                call_id="call-123",
+                governance_policy=None,
+                agent_name="test-agent",
+                session_id=None,
+                user_id="user-123",
+                request_metadata={},
+            ),
         }
     ]
 
@@ -695,15 +696,15 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
             },
             "principal": "user-456",
             "timeout_seconds": None,
-            "execution_context": {
-                "run_id": "run-789",
-                "call_id": "call-123",
-                "governance_policy": None,
-                "agent_name": "test-agent",
-                "session_id": "session-123",
-                "user_id": "user-456",
-                "request_metadata": {},
-            },
+            "execution_context": ToolExecutionContext(
+                run_id="run-789",
+                call_id="call-123",
+                governance_policy=None,
+                agent_name="test-agent",
+                session_id="session-123",
+                user_id="user-456",
+                request_metadata={},
+            ),
         }
     ]
 
@@ -840,16 +841,16 @@ async def test_execution_context_propagates_governance_policy_to_tools() -> None
             },
             "principal": "user-456",
             "timeout_seconds": None,
-            "execution_context": {
-                "run_id": None,
-                "call_id": "call-123",
-                "governance_policy": policy,
-                "agent_name": "test-agent",
-                "session_id": "session-123",
-                "user_id": "user-456",
-                "request_metadata": {
+            "execution_context": ToolExecutionContext(
+                run_id=None,
+                call_id="call-123",
+                governance_policy=policy,
+                agent_name="test-agent",
+                session_id="session-123",
+                user_id="user-456",
+                request_metadata={
                     "source": "agent-api",
                 },
-            },
+            ),
         }
     ]
