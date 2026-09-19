@@ -25,6 +25,8 @@ def test_agent_run_record_columns() -> None:
         "output",
         "metadata",
         "request_snapshot",
+        "lease_id",
+        "lease_expires_at",
     }
 
 

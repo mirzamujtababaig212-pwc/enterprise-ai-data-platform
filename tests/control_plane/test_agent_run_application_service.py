@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock
+import asyncio
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -692,3 +694,167 @@ async def test_execute_allows_run_when_admission_policy_allows() -> None:
     assert completed.status == AgentRunStatus.COMPLETED
     assert completed.lease_id is None
     assert completed.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_renews_owned_running_run() -> None:
+    repository = Mock(spec=AgentRunRepository)
+
+    renewed_run = AgentRun(
+        run_id="run-heartbeat",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+    )
+    repository.heartbeat.return_value = renewed_run
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        lease_seconds=60,
+    )
+
+    sleep_calls = 0
+
+    async def sleep_once(seconds: float) -> None:
+        nonlocal sleep_calls
+
+        assert seconds == 20
+        sleep_calls += 1
+
+        if sleep_calls == 2:
+            raise asyncio.CancelledError
+
+    with patch(
+        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        side_effect=sleep_once,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await service._heartbeat_loop(
+                run_id="run-heartbeat",
+                lease_id="lease-123",
+            )
+
+    repository.heartbeat.assert_called_once()
+
+    call = repository.heartbeat.call_args
+    assert call.args[0] == "run-heartbeat"
+    assert call.kwargs["lease_id"] == "lease-123"
+    assert call.kwargs["lease_expires_at"] > datetime.now(UTC)
+
+    assert sleep_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_stops_when_lease_ownership_is_lost() -> None:
+    repository = Mock(spec=AgentRunRepository)
+    repository.heartbeat.return_value = None
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        lease_seconds=60,
+    )
+
+    async def sleep_once(seconds: float) -> None:
+        assert seconds == 20
+
+    with patch(
+        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        side_effect=sleep_once,
+    ):
+        await service._heartbeat_loop(
+            run_id="run-heartbeat",
+            lease_id="lease-123",
+        )
+
+    repository.heartbeat.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_survives_heartbeat_persistence_failure() -> None:
+    repository = Mock(spec=AgentRunRepository)
+
+    renewed_run = AgentRun(
+        run_id="run-heartbeat",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+    )
+    repository.heartbeat.side_effect = [RuntimeError("database unavailable"), renewed_run]
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        lease_seconds=60,
+    )
+
+    sleep_calls = 0
+
+    async def sleep_once(seconds: float) -> None:
+        nonlocal sleep_calls
+
+        assert seconds == 20
+        sleep_calls += 1
+
+        if sleep_calls == 3:
+            raise asyncio.CancelledError
+
+    with patch(
+        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        side_effect=sleep_once,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await service._heartbeat_loop(
+                run_id="run-heartbeat",
+                lease_id="lease-123",
+            )
+
+    assert repository.heartbeat.call_count == 2
+    assert sleep_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_starts_and_cancels_heartbeat_task() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        lease_seconds=60,
+    )
+
+    original_create_task = asyncio.create_task
+    created_tasks = []
+
+    def create_task(coro):
+        task = original_create_task(coro)
+        created_tasks.append(task)
+        return task
+
+    with patch(
+        "app.control_plane.agent_runs.application_service.asyncio.create_task",
+        side_effect=create_task,
+    ) as create_task_mock:
+        result = await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+
+    assert result.response.output == "completed"
+    create_task_mock.assert_called_once()
+
+    assert len(created_tasks) == 1
+    assert created_tasks[0].done()
+    assert created_tasks[0].cancelled()
+
+    repository.complete_if_owner.assert_called_once()

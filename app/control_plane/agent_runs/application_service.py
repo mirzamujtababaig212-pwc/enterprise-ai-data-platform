@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from ai_platform.agents.models import AgentRequest
@@ -44,6 +45,38 @@ class AgentRunApplicationService:
             admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
         )
         self._lease_seconds = lease_seconds
+
+    async def _heartbeat_loop(
+        self,
+        *,
+        run_id: str,
+        lease_id: str,
+    ) -> None:
+        interval_seconds = self._lease_seconds / 3
+
+        while True:
+            await asyncio.sleep(interval_seconds)
+
+            lease_expires_at = datetime.now(UTC) + timedelta(
+                seconds=self._lease_seconds,
+            )
+
+            try:
+                renewed_run = self._repository.heartbeat(
+                    run_id,
+                    lease_id=lease_id,
+                    lease_expires_at=lease_expires_at,
+                )
+            except Exception:
+                # Heartbeat failures must not mask the agent execution
+                # result. Ownership remains enforced by the repository's
+                # conditional terminal transition.
+                continue
+
+            if renewed_run is None:
+                # Another worker owns the run, or the run is no longer
+                # RUNNING. Do not attempt to renew it again.
+                return
 
     async def execute(
         self,
@@ -102,6 +135,13 @@ class AgentRunApplicationService:
 
         self._repository.update(run)
 
+        heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(
+                run_id=run.run_id,
+                lease_id=lease_id,
+            )
+        )
+
         try:
             response = await self._runtime.run(
                 agent_name,
@@ -130,6 +170,12 @@ class AgentRunApplicationService:
                     ) from exc
 
             raise
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         completed_at = datetime.now(UTC)
         completed_run = self._repository.complete_if_owner(
