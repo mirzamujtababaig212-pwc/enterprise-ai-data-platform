@@ -16,10 +16,16 @@ class AgentRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    REJECTED = "rejected"
 
 
 _ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] = {
-    AgentRunStatus.PENDING: frozenset({AgentRunStatus.RUNNING}),
+    AgentRunStatus.PENDING: frozenset(
+        {
+            AgentRunStatus.RUNNING,
+            AgentRunStatus.REJECTED,
+        }
+    ),
     AgentRunStatus.RUNNING: frozenset(
         {
             AgentRunStatus.COMPLETED,
@@ -28,6 +34,7 @@ _ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] 
     ),
     AgentRunStatus.COMPLETED: frozenset(),
     AgentRunStatus.FAILED: frozenset(),
+    AgentRunStatus.REJECTED: frozenset(),
 }
 
 

@@ -1,13 +1,16 @@
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest
-from delta import configure_spark_with_delta_pip
-from pyspark.sql import SparkSession
+os.environ["API_KEY"] = "super-secret-key"
 
-from ai_platform.llm_gateway.registry.provider_registry import (
+import pytest  # noqa: E402
+from delta import configure_spark_with_delta_pip  # noqa: E402
+from pyspark.sql import SparkSession  # noqa: E402
+
+from ai_platform.llm_gateway.registry.provider_registry import (  # noqa: E402
     registry,
 )
 

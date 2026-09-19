@@ -11,6 +11,8 @@ from app.control_plane.agent_runs.models import AgentRunStatus
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.schemas.agents import (
     AgentRunDetailResponse,
+    AgentRunEventListResponse,
+    AgentRunEventResponse,
     AgentRunListResponse,
     AgentRunRequest,
     AgentRunResponse,
@@ -150,4 +152,45 @@ async def get_agent_run(
         completed_at=run.completed_at,
         output=run.output,
         metadata=run.metadata,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/events",
+    response_model=AgentRunEventListResponse,
+)
+async def list_agent_run_events(
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=100),
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunEventListResponse:
+    try:
+        events = service.list_events(
+            run_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    return AgentRunEventListResponse(
+        events=[
+            AgentRunEventResponse(
+                event_type=event.event_type.value,
+                agent_name=event.agent_name,
+                run_id=event.run_id,
+                session_id=event.session_id,
+                tool_round=event.tool_round,
+                tool_name=event.tool_name,
+                call_id=event.call_id,
+                provider=event.provider,
+                model=event.model,
+                metadata=event.metadata,
+            )
+            for event in events
+        ]
     )

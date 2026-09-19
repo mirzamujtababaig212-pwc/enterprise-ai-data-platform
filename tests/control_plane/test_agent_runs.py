@@ -78,11 +78,24 @@ def test_agent_run_allows_running_to_failed_transition() -> None:
     assert failed.status is AgentRunStatus.FAILED
 
 
+def test_agent_run_allows_pending_to_rejected_transition() -> None:
+    run = make_run()
+
+    rejected = run.transition_to(AgentRunStatus.REJECTED)
+
+    assert run.status is AgentRunStatus.PENDING
+    assert rejected.status is AgentRunStatus.REJECTED
+
+
 @pytest.mark.parametrize(
     ("current_status", "target_status"),
     [
         (AgentRunStatus.PENDING, AgentRunStatus.COMPLETED),
         (AgentRunStatus.PENDING, AgentRunStatus.FAILED),
+        (AgentRunStatus.REJECTED, AgentRunStatus.PENDING),
+        (AgentRunStatus.REJECTED, AgentRunStatus.RUNNING),
+        (AgentRunStatus.REJECTED, AgentRunStatus.COMPLETED),
+        (AgentRunStatus.REJECTED, AgentRunStatus.FAILED),
         (AgentRunStatus.RUNNING, AgentRunStatus.PENDING),
         (AgentRunStatus.COMPLETED, AgentRunStatus.PENDING),
         (AgentRunStatus.COMPLETED, AgentRunStatus.RUNNING),
@@ -121,6 +134,7 @@ def test_agent_run_transition_does_not_mutate_original() -> None:
         AgentRunStatus.RUNNING,
         AgentRunStatus.COMPLETED,
         AgentRunStatus.FAILED,
+        AgentRunStatus.REJECTED,
     ],
 )
 def test_agent_run_supports_all_lifecycle_statuses(status: AgentRunStatus) -> None:

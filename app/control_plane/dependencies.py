@@ -44,6 +44,9 @@ from app.control_plane.persistence.database import SessionLocal, get_db
 from app.control_plane.agent_run_events.postgres_observer import (
     PostgreSQLAgentRunEventObserver,
 )
+from app.control_plane.agent_run_events.postgres_repository import (
+    PostgreSQLAgentRunEventsRepository,
+)
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
@@ -270,6 +273,7 @@ async def get_agent_run_application_service(
     return AgentRunApplicationService(
         runtime=_agent_runtime,
         repository=PostgreSQLAgentRunRepository(db),
+        events_repository=PostgreSQLAgentRunEventsRepository(db),
     )
 
 

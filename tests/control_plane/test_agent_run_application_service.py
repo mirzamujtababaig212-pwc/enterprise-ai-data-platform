@@ -5,7 +5,18 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
 
+from app.control_plane.agent_run_events.repository import (
+    AgentRunEventsRepository,
+)
+from app.control_plane.agent_runs.admission import AgentRunAdmissionResult
+from app.control_plane.agent_runs.exceptions import (
+    AgentRunAdmissionRejectedError,
+)
 from app.control_plane.agent_runs.models import (
     AgentRun,
     AgentRunExecutionResult,
@@ -430,3 +441,195 @@ def test_list_runs_delegates_filters_and_limit() -> None:
         status=AgentRunStatus.COMPLETED,
         limit=25,
     )
+
+
+def test_list_events_delegates_to_event_repository() -> None:
+    repository = _repository()
+    events_repository = Mock(spec=AgentRunEventsRepository)
+
+    run = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+    repository.get.return_value = run
+
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="enterprise-analyst",
+            run_id="run-123",
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_COMPLETED,
+            agent_name="enterprise-analyst",
+            run_id="run-123",
+        ),
+    ]
+    events_repository.list.return_value = events
+
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        events_repository=events_repository,
+    )
+
+    result = service.list_events(
+        "run-123",
+        limit=25,
+    )
+
+    assert result == events
+    repository.get.assert_called_once_with("run-123")
+    events_repository.list.assert_called_once_with(
+        "run-123",
+        limit=25,
+    )
+
+
+def test_list_events_raises_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    events_repository = Mock(spec=AgentRunEventsRepository)
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        events_repository=events_repository,
+    )
+
+    with pytest.raises(
+        LookupError,
+        match="Agent run 'missing-run' was not found.",
+    ):
+        service.list_events("missing-run")
+
+    repository.get.assert_called_once_with("missing-run")
+    events_repository.list.assert_not_called()
+
+
+def test_list_events_requires_event_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    runtime = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Agent run events repository is not configured.",
+    ):
+        service.list_events("run-123")
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_run_before_runtime_when_admission_denied() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    admission_policy = Mock()
+    admission_policy.evaluate = AsyncMock(
+        return_value=AgentRunAdmissionResult(
+            allowed=False,
+            reason="agent is not approved for this environment",
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        admission_policy=admission_policy,
+    )
+
+    with pytest.raises(
+        AgentRunAdmissionRejectedError,
+        match="agent is not approved for this environment",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 1
+    runtime.run.assert_not_awaited()
+
+    pending = repository.create.call_args.args[0]
+    rejected = repository.update.call_args.args[0]
+
+    assert pending.status == AgentRunStatus.PENDING
+    assert pending.started_at is None
+    assert pending.completed_at is None
+
+    assert rejected.run_id == pending.run_id
+    assert rejected.status == AgentRunStatus.REJECTED
+    assert rejected.started_at is None
+    assert rejected.completed_at is not None
+    assert rejected.metadata["admission"] == {
+        "allowed": False,
+        "reason": "agent is not approved for this environment",
+    }
+
+    admission_policy.evaluate.assert_awaited_once()
+    call = admission_policy.evaluate.await_args
+
+    assert call.kwargs["agent_name"] == "enterprise-analyst"
+    assert call.kwargs["request"].user_id == "user-1"
+    assert call.kwargs["run"].run_id == pending.run_id
+    assert call.kwargs["run"].status == AgentRunStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_execute_allows_run_when_admission_policy_allows() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    admission_policy = Mock()
+    admission_policy.evaluate = AsyncMock(
+        return_value=AgentRunAdmissionResult(
+            allowed=True,
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        admission_policy=admission_policy,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(input="Explain the platform"),
+    )
+
+    assert result.response.output == "completed"
+    runtime.run.assert_awaited_once()
+
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 2
+
+    running = repository.update.call_args_list[0].args[0]
+    completed = repository.update.call_args_list[1].args[0]
+
+    assert running.status == AgentRunStatus.RUNNING
+    assert completed.status == AgentRunStatus.COMPLETED

@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 
 TRACKING_URI = os.getenv(
     "MLFLOW_TRACKING_URI",
-    "http://mlflow:5000",
+    "http://localhost:5051",
 )
 EXPERIMENT_NAME = "integration-test-automated"
 

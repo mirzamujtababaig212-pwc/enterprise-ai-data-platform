@@ -4,12 +4,23 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.models import AgentRequest
+from ai_platform.agents.observability import AgentExecutionEvent
 from ai_platform.agents.runtime import AgentRuntime
 
+from app.control_plane.agent_runs.admission import (
+    AgentRunAdmissionPolicy,
+    AllowAllAgentRunAdmissionPolicy,
+)
+from app.control_plane.agent_runs.exceptions import (
+    AgentRunAdmissionRejectedError,
+)
 from app.control_plane.agent_runs.models import (
     AgentRun,
     AgentRunExecutionResult,
     AgentRunStatus,
+)
+from app.control_plane.agent_run_events.repository import (
+    AgentRunEventsRepository,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
 
@@ -20,9 +31,15 @@ class AgentRunApplicationService:
         *,
         runtime: AgentRuntime,
         repository: AgentRunRepository,
+        events_repository: AgentRunEventsRepository | None = None,
+        admission_policy: AgentRunAdmissionPolicy | None = None,
     ) -> None:
         self._runtime = runtime
         self._repository = repository
+        self._events_repository = events_repository
+        self._admission_policy = (
+            admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
+        )
 
     async def execute(
         self,
@@ -40,6 +57,32 @@ class AgentRunApplicationService:
         )
 
         self._repository.create(run)
+
+        admission = await self._admission_policy.evaluate(
+            agent_name=agent_name,
+            request=request,
+            run=run,
+        )
+
+        if not admission.allowed:
+            rejected_at = datetime.now(UTC)
+            rejected_run = run.transition_to(AgentRunStatus.REJECTED).model_copy(
+                update={
+                    "completed_at": rejected_at,
+                    "metadata": {
+                        **run.metadata,
+                        "admission": {
+                            "allowed": False,
+                            "reason": admission.reason,
+                        },
+                    },
+                }
+            )
+
+            self._repository.update(rejected_run)
+
+            reason = admission.reason or "Agent run admission was rejected."
+            raise AgentRunAdmissionRejectedError(reason)
 
         started_at = datetime.now(UTC)
         run = run.transition_to(AgentRunStatus.RUNNING).model_copy(
@@ -103,5 +146,28 @@ class AgentRunApplicationService:
             session_id=session_id,
             user_id=user_id,
             status=status,
+            limit=limit,
+        )
+
+    def list_events(
+        self,
+        run_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[AgentExecutionEvent]:
+        run = self._repository.get(run_id)
+
+        if run is None:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        if self._events_repository is None:
+            raise RuntimeError(
+                "Agent run events repository is not configured.",
+            )
+
+        return self._events_repository.list(
+            run_id,
             limit=limit,
         )

@@ -4,6 +4,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+
 from ai_platform.agents.models import (
     AgentRequest,
     AgentResponse,
@@ -24,6 +29,8 @@ class FakeAgentRunApplicationService:
         self.calls: list[tuple[str, AgentRequest]] = []
         self.runs = {}
         self.list_calls = []
+        self.events = {}
+        self.event_list_calls = []
 
     def get_run(self, run_id: str):
         return self.runs.get(run_id)
@@ -47,6 +54,25 @@ class FakeAgentRunApplicationService:
             }
         )
         return list(self.runs.values())[:limit]
+
+    def list_events(
+        self,
+        run_id: str,
+        *,
+        limit=100,
+    ):
+        if run_id not in self.runs:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        self.event_list_calls.append(
+            {
+                "run_id": run_id,
+                "limit": limit,
+            }
+        )
+        return list(self.events.get(run_id, []))[:limit]
 
     async def execute(
         self,
@@ -315,6 +341,7 @@ def test_get_agent_run_returns_detail() -> None:
         AgentRunStatus.RUNNING,
         AgentRunStatus.COMPLETED,
         AgentRunStatus.FAILED,
+        AgentRunStatus.REJECTED,
     ],
 )
 def test_get_agent_run_exposes_all_lifecycle_statuses(
@@ -378,6 +405,7 @@ def test_list_agent_runs_serializes_all_lifecycle_statuses() -> None:
         "running",
         "completed",
         "failed",
+        "rejected",
     }
 
     for run in runs:
@@ -403,3 +431,142 @@ def test_get_agent_run_returns_404_when_missing() -> None:
     assert response.json() == {
         "detail": "Agent run 'missing-run' was not found.",
     }
+
+
+def test_list_agent_run_events_returns_events() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-events-123"] = AgentRun(
+        run_id="run-events-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    service.events["run-events-123"] = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="enterprise-analyst",
+            run_id="run-events-123",
+            session_id="session-123",
+            metadata={"source": "test"},
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.LLM_COMPLETED,
+            agent_name="enterprise-analyst",
+            run_id="run-events-123",
+            session_id="session-123",
+            provider="mock",
+            model="mock-gpt",
+            metadata={
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        ),
+    ]
+
+    response = client.get(
+        "/api/v1/agents/runs/run-events-123/events",
+        params={"limit": 25},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "events": [
+            {
+                "event_type": "agent.started",
+                "agent_name": "enterprise-analyst",
+                "run_id": "run-events-123",
+                "session_id": "session-123",
+                "tool_round": None,
+                "tool_name": None,
+                "call_id": None,
+                "provider": None,
+                "model": None,
+                "metadata": {"source": "test"},
+            },
+            {
+                "event_type": "llm.completed",
+                "agent_name": "enterprise-analyst",
+                "run_id": "run-events-123",
+                "session_id": "session-123",
+                "tool_round": None,
+                "tool_name": None,
+                "call_id": None,
+                "provider": "mock",
+                "model": "mock-gpt",
+                "metadata": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        ],
+    }
+
+    assert service.event_list_calls == [
+        {
+            "run_id": "run-events-123",
+            "limit": 25,
+        }
+    ]
+
+
+def test_list_agent_run_events_returns_empty_for_known_run_without_events() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-empty-events"] = AgentRun(
+        run_id="run-empty-events",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    response = client.get(
+        "/api/v1/agents/runs/run-empty-events/events",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"events": []}
+
+    assert service.event_list_calls == [
+        {
+            "run_id": "run-empty-events",
+            "limit": 100,
+        }
+    ]
+
+
+def test_list_agent_run_events_returns_404_when_run_missing() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/missing-run/events",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Agent run 'missing-run' was not found.",
+    }
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"limit": 0},
+        {"limit": 101},
+    ],
+)
+def test_list_agent_run_events_rejects_invalid_limit(params) -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-123/events",
+        params=params,
+    )
+
+    assert response.status_code == 422
+    assert service.event_list_calls == []

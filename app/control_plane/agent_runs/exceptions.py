@@ -8,3 +8,7 @@ class AgentRunNotFoundError(LookupError):
 
 class InvalidAgentRunTransitionError(ValueError):
     """Raised when an agent run lifecycle transition is not allowed."""
+
+
+class AgentRunAdmissionRejectedError(RuntimeError):
+    """Raised when an agent run is not admitted for execution."""
