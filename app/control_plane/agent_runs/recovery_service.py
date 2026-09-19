@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.runtime import AgentRuntime
 
 from app.control_plane.agent_checkpoints.repository import (
@@ -44,12 +49,27 @@ class AgentRunRecoveryService:
         runtime: AgentRuntime,
         repository: AgentRunRepository,
         checkpoints_repository: AgentCheckpointsRepository,
+        observer: AgentExecutionObserver | None = None,
         lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
         self._repository = repository
         self._checkpoints_repository = checkpoints_repository
+        self._observer = observer
         self._lease_seconds = lease_seconds
+
+    async def _emit(
+        self,
+        event: AgentExecutionEvent,
+    ) -> None:
+        if self._observer is None:
+            return
+
+        try:
+            await self._observer.record(event)
+        except Exception:
+            # Recovery observability must never change recovery semantics.
+            pass
 
     async def recover(
         self,
@@ -91,7 +111,23 @@ class AgentRunRecoveryService:
                 f"Agent run '{run_id}' could not be claimed for recovery.",
             )
 
-        return await self._resume_claimed_run(run)
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name=run.agent_name,
+                run_id=run.run_id,
+                session_id=run.session_id,
+                user_id=run.user_id,
+                metadata={
+                    "recovery_type": "failed_run",
+                },
+            )
+        )
+
+        return await self._resume_claimed_run(
+            run,
+            recovery_type="failed_run",
+        )
 
     async def recover_stale_runs(
         self,
@@ -126,8 +162,26 @@ class AgentRunRecoveryService:
             if run is None:
                 continue
 
+            await self._emit(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                    agent_name=run.agent_name,
+                    run_id=run.run_id,
+                    session_id=run.session_id,
+                    user_id=run.user_id,
+                    metadata={
+                        "recovery_type": "stale_run",
+                    },
+                )
+            )
+
             try:
-                results.append(await self._resume_claimed_run(run))
+                results.append(
+                    await self._resume_claimed_run(
+                        run,
+                        recovery_type="stale_run",
+                    )
+                )
             except Exception:
                 continue
 
@@ -136,6 +190,8 @@ class AgentRunRecoveryService:
     async def _resume_claimed_run(
         self,
         run: AgentRun,
+        *,
+        recovery_type: str,
     ) -> AgentRunExecutionResult:
         if run.lease_id is None:
             raise RuntimeError(
@@ -180,6 +236,19 @@ class AgentRunRecoveryService:
             )
         except Exception as exc:
             await self._mark_failed(run, exc)
+            await self._emit(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+                    agent_name=run.agent_name,
+                    run_id=run.run_id,
+                    session_id=run.session_id,
+                    user_id=run.user_id,
+                    metadata={
+                        "recovery_type": recovery_type,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+            )
             raise
         finally:
             heartbeat_task.cancel()
@@ -201,6 +270,19 @@ class AgentRunRecoveryService:
             raise RuntimeError(
                 f"Agent run '{run.run_id}' lost lease ownership before completion.",
             )
+
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+                agent_name=run.agent_name,
+                run_id=run.run_id,
+                session_id=run.session_id,
+                user_id=run.user_id,
+                metadata={
+                    "recovery_type": recovery_type,
+                },
+            )
+        )
 
         return AgentRunExecutionResult(
             run_id=completed_run.run_id,

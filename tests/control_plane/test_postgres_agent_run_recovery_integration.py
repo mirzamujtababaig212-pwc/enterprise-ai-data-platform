@@ -11,6 +11,7 @@ from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
 )
+from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.llm_messages import user_message
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from app.control_plane.agent_checkpoints.postgres_repository import (
@@ -22,6 +23,12 @@ from app.control_plane.agent_runs.models import (
 )
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
+)
+from app.control_plane.agent_run_events.postgres_observer import (
+    PostgreSQLAgentRunEventObserver,
+)
+from app.control_plane.agent_run_events.postgres_repository import (
+    PostgreSQLAgentRunEventsRepository,
 )
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
@@ -131,6 +138,7 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
     try:
         run_repository = PostgreSQLAgentRunRepository(session)
         checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+        event_repository = PostgreSQLAgentRunEventsRepository(session)
 
         run_repository.create(
             AgentRun(
@@ -151,10 +159,13 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
 
         runtime = FakeRuntime()
 
+        event_observer = PostgreSQLAgentRunEventObserver(session_factory)
+
         service = AgentRunRecoveryService(
             runtime=runtime,
             repository=run_repository,
             checkpoints_repository=checkpoint_repository,
+            observer=event_observer,
             lease_seconds=60,
         )
 
@@ -203,6 +214,30 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
         restored_checkpoint = checkpoint_repository.get_latest(run_id)
 
         assert restored_checkpoint == checkpoint
+
+        events = event_repository.list(run_id)
+
+        assert [event.event_type for event in events] == [
+            AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+            AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+        ]
+
+        assert events[0].agent_name == "recoverable-agent"
+        assert events[0].session_id == "session-postgres"
+        assert events[0].user_id == "user-postgres"
+        assert events[0].metadata == {
+            "recovery_type": "stale_run",
+        }
+
+        assert events[1].agent_name == "recoverable-agent"
+        assert events[1].session_id == "session-postgres"
+        assert events[1].user_id == "user-postgres"
+        assert events[1].metadata == {
+            "recovery_type": "stale_run",
+        }
+
+        assert "lease_id" not in events[0].metadata
+        assert "lease_id" not in events[1].metadata
     finally:
         session.rollback()
         session.execute(

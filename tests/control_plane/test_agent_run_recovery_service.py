@@ -9,6 +9,10 @@ from ai_platform.agents.checkpoint import (
     AgentExecutionCheckpoint,
 )
 from ai_platform.agents.llm_messages import user_message
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
 from ai_platform.agents.models import (
     AgentRequest,
     AgentResponse,
@@ -193,6 +197,19 @@ class RecordingRepository(InMemoryAgentRunRepository):
         )
 
 
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events: list[AgentExecutionEvent] = []
+
+    async def record(self, event: AgentExecutionEvent) -> None:
+        self.events.append(event)
+
+
+class FailingObserver:
+    async def record(self, event: AgentExecutionEvent) -> None:
+        raise RuntimeError("event persistence unavailable")
+
+
 class FakeRuntime:
     def __init__(self) -> None:
         self.calls = []
@@ -279,6 +296,119 @@ async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
         "request_id": "req-123",
         "source": "api",
     }
+
+
+@pytest.mark.asyncio
+async def test_recovery_emits_started_and_completed_events_for_failed_run():
+    repository = InMemoryAgentRunRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    observer = RecordingObserver()
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+    )
+
+    await service.recover("run-123")
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+        AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "failed_run",
+    }
+    assert observer.events[1].metadata == {
+        "recovery_type": "failed_run",
+    }
+
+    for event in observer.events:
+        assert event.run_id == "run-123"
+        assert event.agent_name == "recoverable-agent"
+        assert event.session_id == "session-123"
+        assert event.user_id == "user-123"
+        assert "lease_id" not in event.metadata
+
+
+@pytest.mark.asyncio
+async def test_recovery_emits_started_and_failed_events_on_resume_failure():
+    repository = InMemoryAgentRunRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    observer = RecordingObserver()
+
+    class FailingRuntime:
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+        ):
+            raise ValueError("LLM provider unavailable")
+
+    service = AgentRunRecoveryService(
+        runtime=FailingRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+    )
+
+    with pytest.raises(ValueError, match="LLM provider unavailable"):
+        await service.recover("run-123")
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "failed_run",
+    }
+    assert observer.events[1].metadata == {
+        "recovery_type": "failed_run",
+        "error_type": "ValueError",
+    }
+
+    assert "lease_id" not in observer.events[1].metadata
+
+
+@pytest.mark.asyncio
+async def test_recovery_observer_failure_does_not_break_recovery():
+    repository = InMemoryAgentRunRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=FailingObserver(),
+    )
+
+    result = await service.recover("run-123")
+
+    assert result.run_id == "run-123"
+
+    run = repository.get("run-123")
+    assert run is not None
+    assert run.status is AgentRunStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -571,6 +701,50 @@ async def test_recover_stale_runs_claims_and_resumes_expired_run():
     assert recovered.lease_expires_at is None
 
     assert len(runtime.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_emits_started_and_completed_events():
+    repository = InMemoryAgentRunRepository()
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    observer = RecordingObserver()
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert len(results) == 1
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+        AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "stale_run",
+    }
+    assert observer.events[1].metadata == {
+        "recovery_type": "stale_run",
+    }
+
+    for event in observer.events:
+        assert event.run_id == "stale-run-123"
+        assert event.agent_name == "recoverable-agent"
+        assert event.session_id == "session-123"
+        assert event.user_id == "user-123"
+        assert "lease_id" not in event.metadata
 
 
 @pytest.mark.asyncio

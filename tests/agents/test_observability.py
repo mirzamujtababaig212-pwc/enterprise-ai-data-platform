@@ -180,3 +180,27 @@ def test_agent_execution_event_rejects_non_dict_metadata() -> None:
             agent_name="production-llm-agent",
             metadata=[],
         )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "expected_value"),
+    [
+        (
+            AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+            "agent.recovery.started",
+        ),
+        (
+            AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+            "agent.recovery.completed",
+        ),
+        (
+            AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+            "agent.recovery.failed",
+        ),
+    ],
+)
+def test_agent_recovery_event_types_have_stable_values(
+    event_type: AgentExecutionEventType,
+    expected_value: str,
+) -> None:
+    assert event_type.value == expected_value
