@@ -98,6 +98,7 @@ class RecordingRepository(InMemoryAgentRunRepository):
     def __init__(self) -> None:
         super().__init__()
         self.recovery_claim = None
+        self.stale_recovery_claim = None
         self.complete_call = None
         self.fail_call = None
 
@@ -117,6 +118,30 @@ class RecordingRepository(InMemoryAgentRunRepository):
         }
         return super().claim_for_recovery(
             run_id,
+            started_at=started_at,
+            lease_id=lease_id,
+            lease_expires_at=lease_expires_at,
+        )
+
+    def claim_expired_running_run(
+        self,
+        run_id,
+        *,
+        stale_before,
+        started_at,
+        lease_id,
+        lease_expires_at,
+    ):
+        self.stale_recovery_claim = {
+            "run_id": run_id,
+            "stale_before": stale_before,
+            "started_at": started_at,
+            "lease_id": lease_id,
+            "lease_expires_at": lease_expires_at,
+        }
+        return super().claim_expired_running_run(
+            run_id,
+            stale_before=stale_before,
             started_at=started_at,
             lease_id=lease_id,
             lease_expires_at=lease_expires_at,
@@ -444,3 +469,331 @@ async def test_recovery_claim_prevents_second_recovery():
         await service.recover("run-123")
 
     assert len(runtime.calls) == 1
+
+
+def stale_running_run(
+    *,
+    run_id: str = "stale-run-123",
+    request_snapshot: AgentRunRequestSnapshot | None = None,
+) -> AgentRun:
+    return AgentRun(
+        run_id=run_id,
+        agent_name="recoverable-agent",
+        session_id="session-123",
+        user_id="user-123",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 11, 0, tzinfo=UTC),
+        lease_id="expired-lease",
+        lease_expires_at=datetime(2026, 9, 19, 11, 1, tzinfo=UTC),
+        metadata={"request_id": "req-123"},
+        request_snapshot=request_snapshot,
+    )
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_limit_applies_to_stale_candidates():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        stale_running_run(
+            run_id="stale-run",
+            request_snapshot=request_snapshot(),
+        )
+    )
+    repository.create(
+        stale_running_run(
+            run_id="unexpired-run",
+            request_snapshot=request_snapshot(),
+        ).model_copy(
+            update={
+                "lease_expires_at": datetime(
+                    2026,
+                    9,
+                    19,
+                    12,
+                    5,
+                    tzinfo=UTC,
+                ),
+            }
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        limit=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].run_id == "stale-run"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_claims_and_resumes_expired_run():
+    repository = RecordingRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    runtime = FakeRuntime()
+    checkpoint_repository = FakeCheckpointRepository(checkpoint())
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=checkpoint_repository,
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert len(results) == 1
+    assert results[0].run_id == "stale-run-123"
+    assert results[0].response.output == "Recovered successfully."
+
+    recovered = repository.get("stale-run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.COMPLETED
+    assert recovered.output == "Recovered successfully."
+    assert recovered.lease_id is None
+    assert recovered.lease_expires_at is None
+
+    assert len(runtime.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_ignores_unexpired_run():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        ).model_copy(
+            update={
+                "lease_expires_at": datetime(
+                    2026,
+                    9,
+                    19,
+                    12,
+                    5,
+                    tzinfo=UTC,
+                ),
+            }
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results == []
+    assert runtime.calls == []
+
+    run = repository.get("stale-run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.RUNNING
+    assert run.lease_id == "expired-lease"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_ignores_run_without_lease_expiry():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        ).model_copy(
+            update={
+                "lease_expires_at": None,
+            }
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results == []
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_marks_run_failed_when_checkpoint_is_missing():
+    repository = RecordingRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(None),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results == []
+
+    run = repository.get("stale-run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.error_type == "RuntimeError"
+    assert "has no execution checkpoint" in run.error_message
+    assert run.lease_id is None
+    assert run.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_continues_after_one_run_fails():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        stale_running_run(
+            run_id="stale-failing",
+            request_snapshot=request_snapshot(),
+        )
+    )
+    repository.create(
+        stale_running_run(
+            run_id="stale-success",
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    class SelectiveRuntime(FakeRuntime):
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+        ):
+            self.calls.append(
+                {
+                    "agent_name": agent_name,
+                    "request": request,
+                    "checkpoint": checkpoint,
+                    "run_id": run_id,
+                }
+            )
+
+            if run_id == "stale-failing":
+                raise ValueError("temporary provider failure")
+
+            return AgentResponse(
+                agent_name=agent_name,
+                output="Recovered successfully.",
+                session_id=request.session_id,
+            )
+
+    runtime = SelectiveRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert len(results) == 1
+    assert results[0].run_id == "stale-success"
+
+    failed = repository.get("stale-failing")
+    succeeded = repository.get("stale-success")
+
+    assert failed is not None
+    assert failed.status is AgentRunStatus.FAILED
+    assert failed.error_type == "ValueError"
+    assert failed.error_message == "temporary provider failure"
+
+    assert succeeded is not None
+    assert succeeded.status is AgentRunStatus.COMPLETED
+    assert succeeded.output == "Recovered successfully."
+
+    assert {call["run_id"] for call in runtime.calls} == {
+        "stale-failing",
+        "stale-success",
+    }
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_resumes_with_new_lease_ownership():
+    repository = RecordingRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    original_lease_id = "expired-lease"
+    runtime = FakeRuntime()
+    checkpoint_repository = FakeCheckpointRepository(checkpoint())
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=checkpoint_repository,
+        lease_seconds=60,
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert len(results) == 1
+
+    assert repository.stale_recovery_claim is not None
+    new_lease_id = repository.stale_recovery_claim["lease_id"]
+
+    assert new_lease_id is not None
+    assert new_lease_id != original_lease_id
+
+    assert repository.complete_call is not None
+    assert repository.complete_call["lease_id"] == new_lease_id
+
+    recovered = repository.get("stale-run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.COMPLETED
+    assert recovered.lease_id is None
+    assert recovered.lease_expires_at is None

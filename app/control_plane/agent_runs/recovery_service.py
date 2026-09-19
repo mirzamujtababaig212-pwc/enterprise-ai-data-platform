@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from ai_platform.agents.runtime import AgentRuntime
@@ -13,7 +14,10 @@ from app.control_plane.agent_runs.models import (
     AgentRunStatus,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
-from app.control_plane.agent_runs.lease import create_lease
+from app.control_plane.agent_runs.lease import (
+    create_lease,
+    heartbeat_loop,
+)
 
 
 class AgentRunRecoveryService:
@@ -87,15 +91,80 @@ class AgentRunRecoveryService:
                 f"Agent run '{run_id}' could not be claimed for recovery.",
             )
 
+        return await self._resume_claimed_run(run)
+
+    async def recover_stale_runs(
+        self,
+        *,
+        stale_before: datetime | None = None,
+        limit: int = 100,
+    ) -> list[AgentRunExecutionResult]:
+        if limit <= 0:
+            raise ValueError("Recovery limit must be greater than zero.")
+
+        recovery_cutoff = stale_before or datetime.now(UTC)
+
+        candidates = self._repository.list_expired_running_runs(
+            stale_before=recovery_cutoff,
+            limit=limit,
+        )
+
+        results: list[AgentRunExecutionResult] = []
+
+        for candidate in candidates:
+            claimed_at = datetime.now(UTC)
+            lease_id, lease_expires_at = create_lease(self._lease_seconds)
+
+            run = self._repository.claim_expired_running_run(
+                candidate.run_id,
+                stale_before=recovery_cutoff,
+                started_at=claimed_at,
+                lease_id=lease_id,
+                lease_expires_at=lease_expires_at,
+            )
+
+            if run is None:
+                continue
+
+            try:
+                results.append(await self._resume_claimed_run(run))
+            except Exception:
+                continue
+
+        return results
+
+    async def _resume_claimed_run(
+        self,
+        run: AgentRun,
+    ) -> AgentRunExecutionResult:
         if run.lease_id is None:
-            raise RuntimeError(f"Agent run '{run.run_id}' was claimed without a lease.")
+            raise RuntimeError(
+                f"Agent run '{run.run_id}' was claimed without a lease.",
+            )
+
+        if run.request_snapshot is None:
+            exc = RuntimeError(
+                f"Agent run '{run.run_id}' has no request snapshot and " "cannot be recovered.",
+            )
+            await self._mark_failed(run, exc)
+            raise exc
+
+        heartbeat_task = asyncio.create_task(
+            heartbeat_loop(
+                self._repository,
+                run_id=run.run_id,
+                lease_id=run.lease_id,
+                lease_seconds=self._lease_seconds,
+            )
+        )
 
         try:
-            checkpoint = self._checkpoints_repository.get_latest(run_id)
+            checkpoint = self._checkpoints_repository.get_latest(run.run_id)
 
             if checkpoint is None:
                 raise RuntimeError(
-                    f"Agent run '{run_id}' has no execution checkpoint " "and cannot be recovered.",
+                    f"Agent run '{run.run_id}' has no execution checkpoint "
+                    "and cannot be recovered.",
                 )
 
             request = run.request_snapshot.to_request(
@@ -112,6 +181,12 @@ class AgentRunRecoveryService:
         except Exception as exc:
             await self._mark_failed(run, exc)
             raise
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         completed_at = datetime.now(UTC)
 
@@ -123,7 +198,9 @@ class AgentRunRecoveryService:
         )
 
         if completed_run is None:
-            raise RuntimeError(f"Agent run '{run.run_id}' lost lease ownership before completion.")
+            raise RuntimeError(
+                f"Agent run '{run.run_id}' lost lease ownership before completion.",
+            )
 
         return AgentRunExecutionResult(
             run_id=completed_run.run_id,

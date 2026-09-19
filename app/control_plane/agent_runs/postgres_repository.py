@@ -237,6 +237,33 @@ class PostgreSQLAgentRunRepository:
 
         return self.get(run_id)
 
+    def list_expired_running_runs(
+        self,
+        *,
+        stale_before: datetime,
+        limit: int = 100,
+    ) -> list[AgentRun]:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero.")
+
+        statement = (
+            select(AgentRunRecord)
+            .where(
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.lease_expires_at.is_not(None),
+                AgentRunRecord.lease_expires_at < stale_before,
+            )
+            .order_by(
+                AgentRunRecord.lease_expires_at.asc(),
+                AgentRunRecord.run_id.asc(),
+            )
+            .limit(limit)
+        )
+
+        records = self._session.scalars(statement).all()
+
+        return [self._to_domain(record) for record in records]
+
     def complete_if_owner(
         self,
         run_id: str,

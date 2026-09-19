@@ -51,6 +51,13 @@ class AgentRunRepository(Protocol):
         lease_expires_at: datetime,
     ) -> AgentRun | None: ...
 
+    def list_expired_running_runs(
+        self,
+        *,
+        stale_before: datetime,
+        limit: int = 100,
+    ) -> list[AgentRun]: ...
+
     def complete_if_owner(
         self,
         run_id: str,

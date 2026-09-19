@@ -28,6 +28,7 @@ from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
+from app.control_plane.agent_runs.lease import heartbeat_loop
 
 
 def _response(
@@ -709,12 +710,6 @@ async def test_heartbeat_loop_renews_owned_running_run() -> None:
     )
     repository.heartbeat.return_value = renewed_run
 
-    service = AgentRunApplicationService(
-        runtime=Mock(),
-        repository=repository,
-        lease_seconds=60,
-    )
-
     sleep_calls = 0
 
     async def sleep_once(seconds: float) -> None:
@@ -727,13 +722,15 @@ async def test_heartbeat_loop_renews_owned_running_run() -> None:
             raise asyncio.CancelledError
 
     with patch(
-        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        "app.control_plane.agent_runs.lease.asyncio.sleep",
         side_effect=sleep_once,
     ):
         with pytest.raises(asyncio.CancelledError):
-            await service._heartbeat_loop(
+            await heartbeat_loop(
+                repository,
                 run_id="run-heartbeat",
                 lease_id="lease-123",
+                lease_seconds=60,
             )
 
     repository.heartbeat.assert_called_once()
@@ -751,22 +748,18 @@ async def test_heartbeat_loop_stops_when_lease_ownership_is_lost() -> None:
     repository = Mock(spec=AgentRunRepository)
     repository.heartbeat.return_value = None
 
-    service = AgentRunApplicationService(
-        runtime=Mock(),
-        repository=repository,
-        lease_seconds=60,
-    )
-
     async def sleep_once(seconds: float) -> None:
         assert seconds == 20
 
     with patch(
-        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        "app.control_plane.agent_runs.lease.asyncio.sleep",
         side_effect=sleep_once,
     ):
-        await service._heartbeat_loop(
+        await heartbeat_loop(
+            repository,
             run_id="run-heartbeat",
             lease_id="lease-123",
+            lease_seconds=60,
         )
 
     repository.heartbeat.assert_called_once()
@@ -785,12 +778,6 @@ async def test_heartbeat_loop_survives_heartbeat_persistence_failure() -> None:
     )
     repository.heartbeat.side_effect = [RuntimeError("database unavailable"), renewed_run]
 
-    service = AgentRunApplicationService(
-        runtime=Mock(),
-        repository=repository,
-        lease_seconds=60,
-    )
-
     sleep_calls = 0
 
     async def sleep_once(seconds: float) -> None:
@@ -803,13 +790,15 @@ async def test_heartbeat_loop_survives_heartbeat_persistence_failure() -> None:
             raise asyncio.CancelledError
 
     with patch(
-        "app.control_plane.agent_runs.application_service.asyncio.sleep",
+        "app.control_plane.agent_runs.lease.asyncio.sleep",
         side_effect=sleep_once,
     ):
         with pytest.raises(asyncio.CancelledError):
-            await service._heartbeat_loop(
+            await heartbeat_loop(
+                repository,
                 run_id="run-heartbeat",
                 lease_id="lease-123",
+                lease_seconds=60,
             )
 
     assert repository.heartbeat.call_count == 2

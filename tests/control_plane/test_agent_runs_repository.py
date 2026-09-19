@@ -18,6 +18,8 @@ def make_run(
     session_id: str | None = None,
     user_id: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
+    lease_id: str | None = None,
+    lease_expires_at: datetime | None = None,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -25,6 +27,8 @@ def make_run(
         session_id=session_id,
         user_id=user_id,
         status=status,
+        lease_id=lease_id,
+        lease_expires_at=lease_expires_at,
     )
 
 
@@ -160,6 +164,82 @@ def test_list_applies_limit_to_latest_runs() -> None:
         "run-3",
         "run-4",
     ]
+
+
+def test_list_expired_running_runs_filters_before_limit() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    stale_before = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    repository.create(
+        make_run(
+            "unexpired-1",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        )
+    )
+    repository.create(
+        make_run(
+            "unexpired-2",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(2026, 9, 19, 12, 6, tzinfo=UTC),
+        )
+    )
+    repository.create(
+        make_run(
+            "stale-1",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(2026, 9, 19, 11, 58, tzinfo=UTC),
+        )
+    )
+    repository.create(
+        make_run(
+            "stale-2",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(2026, 9, 19, 11, 59, tzinfo=UTC),
+        )
+    )
+    repository.create(
+        make_run(
+            "completed",
+            status=AgentRunStatus.COMPLETED,
+            lease_expires_at=datetime(2026, 9, 19, 13, 0, tzinfo=UTC),
+        )
+    )
+
+    runs = repository.list_expired_running_runs(
+        stale_before=stale_before,
+        limit=1,
+    )
+
+    assert [run.run_id for run in runs] == ["stale-1"]
+
+
+def test_list_expired_running_runs_ignores_runs_without_expiry() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    stale_before = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    repository.create(
+        make_run(
+            "no-expiry",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=None,
+        )
+    )
+    repository.create(
+        make_run(
+            "stale",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(2026, 9, 19, 11, 59, tzinfo=UTC),
+        )
+    )
+
+    runs = repository.list_expired_running_runs(
+        stale_before=stale_before,
+    )
+
+    assert [run.run_id for run in runs] == ["stale"]
 
 
 def test_clear_removes_all_runs() -> None:

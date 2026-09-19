@@ -138,6 +138,31 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = claimed
             return claimed
 
+    def list_expired_running_runs(
+        self,
+        *,
+        stale_before: datetime,
+        limit: int = 100,
+    ) -> list[AgentRun]:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero.")
+
+        with self._lock:
+            runs = [
+                run
+                for run in self._runs.values()
+                if (
+                    run.status is AgentRunStatus.RUNNING
+                    and run.lease_expires_at is not None
+                    and run.lease_expires_at < stale_before
+                )
+            ]
+
+        return sorted(
+            runs,
+            key=lambda run: (run.lease_expires_at, run.run_id),
+        )[:limit]
+
     def complete_if_owner(
         self,
         run_id: str,

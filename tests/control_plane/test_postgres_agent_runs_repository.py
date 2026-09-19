@@ -640,6 +640,78 @@ def test_expired_running_run_can_be_reclaimed(repository) -> None:
     __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
     reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
 )
+def test_list_expired_running_runs_filters_before_limit(repository) -> None:
+    stale_before = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    repository.create(
+        make_run(
+            run_id="postgres-unexpired-1",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(
+                2026,
+                9,
+                19,
+                12,
+                5,
+                tzinfo=UTC,
+            ),
+        )
+    )
+    repository.create(
+        make_run(
+            run_id="postgres-unexpired-2",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(
+                2026,
+                9,
+                19,
+                12,
+                6,
+                tzinfo=UTC,
+            ),
+        )
+    )
+    repository.create(
+        make_run(
+            run_id="postgres-stale-1",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(
+                2026,
+                9,
+                19,
+                11,
+                58,
+                tzinfo=UTC,
+            ),
+        )
+    )
+    repository.create(
+        make_run(
+            run_id="postgres-stale-2",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(
+                2026,
+                9,
+                19,
+                11,
+                59,
+                tzinfo=UTC,
+            ),
+        )
+    )
+
+    runs = repository.list_expired_running_runs(
+        stale_before=stale_before,
+        limit=1,
+    )
+
+    assert [run.run_id for run in runs] == ["postgres-stale-1"]
+
+
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
 def test_claim_expired_running_run_is_atomic_across_postgres_sessions() -> None:
     import os
 

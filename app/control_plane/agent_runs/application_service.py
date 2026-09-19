@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.models import AgentRequest
@@ -25,7 +25,10 @@ from app.control_plane.agent_run_events.repository import (
     AgentRunEventsRepository,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
-from app.control_plane.agent_runs.lease import create_lease
+from app.control_plane.agent_runs.lease import (
+    create_lease,
+    heartbeat_loop,
+)
 
 
 class AgentRunApplicationService:
@@ -45,38 +48,6 @@ class AgentRunApplicationService:
             admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
         )
         self._lease_seconds = lease_seconds
-
-    async def _heartbeat_loop(
-        self,
-        *,
-        run_id: str,
-        lease_id: str,
-    ) -> None:
-        interval_seconds = self._lease_seconds / 3
-
-        while True:
-            await asyncio.sleep(interval_seconds)
-
-            lease_expires_at = datetime.now(UTC) + timedelta(
-                seconds=self._lease_seconds,
-            )
-
-            try:
-                renewed_run = self._repository.heartbeat(
-                    run_id,
-                    lease_id=lease_id,
-                    lease_expires_at=lease_expires_at,
-                )
-            except Exception:
-                # Heartbeat failures must not mask the agent execution
-                # result. Ownership remains enforced by the repository's
-                # conditional terminal transition.
-                continue
-
-            if renewed_run is None:
-                # Another worker owns the run, or the run is no longer
-                # RUNNING. Do not attempt to renew it again.
-                return
 
     async def execute(
         self,
@@ -136,9 +107,11 @@ class AgentRunApplicationService:
         self._repository.update(run)
 
         heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(
+            heartbeat_loop(
+                self._repository,
                 run_id=run.run_id,
                 lease_id=lease_id,
+                lease_seconds=self._lease_seconds,
             )
         )
 
