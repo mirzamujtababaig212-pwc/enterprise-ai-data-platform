@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.models import (
     AgentDefinition,
@@ -29,6 +30,24 @@ class Agent(Protocol):
         Execute the agent using its request and runtime capabilities.
         """
         ...
+
+
+class RecoverableAgent(Protocol):
+    """
+    Optional capability implemented by agents that support durable recovery.
+
+    Recovery is deliberately separate from the base Agent contract so that
+    ordinary agents do not need to implement resume().
+    """
+
+    @property
+    def definition(self) -> AgentDefinition: ...
+
+    async def resume(
+        self,
+        context: AgentExecutionContext,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> AgentResponse: ...
 
 
 class AgentRegistry(Protocol):

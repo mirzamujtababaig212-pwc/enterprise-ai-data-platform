@@ -24,6 +24,7 @@ def test_agent_run_record_columns() -> None:
         "error_message",
         "output",
         "metadata",
+        "request_snapshot",
     }
 
 

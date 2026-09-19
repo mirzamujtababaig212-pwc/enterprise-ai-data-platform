@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.contracts import AgentRegistry
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import (
@@ -60,6 +61,97 @@ class AgentRuntime:
         self._llm_gateway = llm_gateway if llm_gateway is not None else UnavailableLLMGateway()
         self._memory_context_builder = memory_context_builder
         self._memory_service = memory_service
+
+    async def resume(
+        self,
+        agent_name: str,
+        request: AgentRequest,
+        checkpoint: AgentExecutionCheckpoint,
+        *,
+        run_id: str | None = None,
+    ) -> AgentResponse:
+        """
+        Resume a recoverable agent from a durable execution checkpoint.
+
+        The checkpoint conversation is authoritative continuation state.
+        Memory is intentionally not rebuilt and successful episodic memory
+        write-back is intentionally skipped during recovery.
+        """
+        if not agent_name.strip():
+            raise ValueError("Agent name must not be empty.")
+
+        if not isinstance(checkpoint, AgentExecutionCheckpoint):
+            raise TypeError("AgentRuntime checkpoint must be an AgentExecutionCheckpoint.")
+
+        agent = await self._registry.get(agent_name)
+
+        if agent is None:
+            raise LookupError(f"Agent '{agent_name}' is not registered.")
+
+        if not agent.definition.enabled:
+            raise RuntimeError(f"Agent '{agent_name}' is disabled.")
+
+        resume_agent = getattr(agent, "resume", None)
+
+        if resume_agent is None or not callable(resume_agent):
+            raise TypeError(f"Agent '{agent_name}' does not support durable recovery.")
+
+        if checkpoint.agent_name != agent_name:
+            raise ValueError("Checkpoint agent_name does not match the requested agent.")
+
+        if checkpoint.run_id != run_id:
+            raise ValueError("Checkpoint run_id does not match the AgentRuntime run_id.")
+
+        if agent.definition.tool_names:
+            if self._tool_registry is None:
+                raise RuntimeError(
+                    f"Agent '{agent_name}' declares tools but " "no ToolRegistry is configured."
+                )
+
+            tool_context = AgentToolContext(
+                self._tool_registry,
+                agent.definition,
+                execution_service=self._tool_execution_service,
+            )
+        else:
+            if self._tool_registry is not None:
+                tool_context = AgentToolContext(
+                    self._tool_registry,
+                    agent.definition,
+                    execution_service=self._tool_execution_service,
+                )
+            else:
+
+                class EmptyToolRegistry:
+                    async def get(
+                        self,
+                        name: str,
+                    ):
+                        return None
+
+                    async def list_tools(self):
+                        return []
+
+                tool_context = AgentToolContext(
+                    EmptyToolRegistry(),
+                    agent.definition,
+                )
+
+        llm_context = AgentLLMContext(
+            self._llm_gateway,
+            agent.definition.llm_config,
+        )
+
+        context = AgentExecutionContext(
+            request,
+            tools=tool_context,
+            llm=llm_context,
+            history=checkpoint.messages,
+            memory=None,
+            run_id=run_id,
+        )
+
+        return await resume_agent(context, checkpoint)
 
     async def run(
         self,

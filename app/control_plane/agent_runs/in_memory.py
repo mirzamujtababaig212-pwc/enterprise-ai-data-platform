@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from threading import Lock
 
 from app.control_plane.agent_runs.exceptions import (
@@ -49,6 +51,31 @@ class InMemoryAgentRunRepository:
             self._runs[run.run_id] = run
 
         return run
+
+    def claim_for_recovery(
+        self,
+        run_id: str,
+        *,
+        started_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.status != AgentRunStatus.FAILED:
+                return None
+
+            claimed = run.transition_to(AgentRunStatus.RUNNING).model_copy(
+                update={
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "error_type": None,
+                    "error_message": None,
+                    "output": None,
+                }
+            )
+
+            self._runs[run_id] = claimed
+            return claimed
 
     def list(
         self,

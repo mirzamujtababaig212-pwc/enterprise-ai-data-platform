@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from app.control_plane.agent_runs.exceptions import (
     DuplicateAgentRunError,
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 from app.control_plane.persistence.models import AgentRunRecord
 
 
@@ -36,6 +37,11 @@ class PostgreSQLAgentRunRepository:
             error_message=run.error_message,
             output=run.output,
             run_metadata=dict(run.metadata),
+            request_snapshot=(
+                run.request_snapshot.model_dump(mode="json")
+                if run.request_snapshot is not None
+                else None
+            ),
         )
 
         try:
@@ -97,6 +103,11 @@ class PostgreSQLAgentRunRepository:
         record.error_message = run.error_message
         record.output = run.output
         record.run_metadata = dict(run.metadata)
+        record.request_snapshot = (
+            run.request_snapshot.model_dump(mode="json")
+            if run.request_snapshot is not None
+            else None
+        )
 
         try:
             self._session.flush()
@@ -109,6 +120,41 @@ class PostgreSQLAgentRunRepository:
             raise
 
         return run
+
+    def claim_for_recovery(
+        self,
+        run_id: str,
+        *,
+        started_at: datetime,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.FAILED.value,
+            )
+            .values(
+                status=AgentRunStatus.RUNNING.value,
+                started_at=started_at,
+                completed_at=None,
+                error_type=None,
+                error_message=None,
+                output=None,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                return None
+
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
 
     def list(
         self,
@@ -160,6 +206,11 @@ class PostgreSQLAgentRunRepository:
             error_message=record.error_message,
             output=record.output,
             metadata=dict(record.run_metadata),
+            request_snapshot=(
+                AgentRunRequestSnapshot.model_validate(record.request_snapshot)
+                if record.request_snapshot is not None
+                else None
+            ),
         )
 
 

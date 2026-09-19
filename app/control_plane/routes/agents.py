@@ -8,7 +8,10 @@ from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
 from app.control_plane.agent_runs.models import AgentRunStatus
-from app.control_plane.dependencies import get_agent_run_application_service
+from app.control_plane.dependencies import (
+    get_agent_run_application_service,
+    get_agent_run_recovery_service,
+)
 from app.control_plane.schemas.agents import (
     AgentRunDetailResponse,
     AgentRunEventListResponse,
@@ -17,6 +20,10 @@ from app.control_plane.schemas.agents import (
     AgentRunRequest,
     AgentRunResponse,
 )
+from app.control_plane.agent_runs.recovery_service import (
+    AgentRunRecoveryService,
+)
+
 
 router = APIRouter(
     prefix="/api/v1/agents",
@@ -56,7 +63,47 @@ async def run_agent(
 
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return AgentRunResponse(
+        run_id=response.run_id,
+        agent_name=response.response.agent_name,
+        output=response.response.output,
+        session_id=response.response.session_id,
+        metadata=response.response.metadata,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/recover",
+    response_model=AgentRunResponse,
+)
+async def recover_agent_run(
+    run_id: str,
+    service: AgentRunRecoveryService = Depends(
+        get_agent_run_recovery_service,
+    ),
+) -> AgentRunResponse:
+    try:
+        response = await service.recover(run_id)
+
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -96,7 +143,7 @@ async def list_agent_runs(
             selected_status = AgentRunStatus(run_status)
         except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid agent run status: {run_status}",
             ) from exc
 

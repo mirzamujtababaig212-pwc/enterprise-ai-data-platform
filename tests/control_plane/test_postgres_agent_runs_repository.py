@@ -9,6 +9,9 @@ from app.control_plane.agent_runs.exceptions import (
     DuplicateAgentRunError,
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+from ai_platform.agents.models import AgentRequest
+from rag.governance.policy import GovernancePolicy
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
 )
@@ -50,6 +53,7 @@ def make_run(
     error_message: str | None = None,
     output=None,
     metadata: dict | None = None,
+    request_snapshot: AgentRunRequestSnapshot | None = None,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -63,6 +67,7 @@ def make_run(
         error_message=error_message,
         output=output,
         metadata={} if metadata is None else metadata,
+        request_snapshot=request_snapshot,
     )
 
 
@@ -93,6 +98,57 @@ def test_create_and_get_round_trip(repository) -> None:
     assert restored.started_at == started_at
     assert restored.output == {"step": "started"}
     assert restored.metadata == {"source": "test", "attempt": 1}
+
+
+def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
+    request = AgentRequest(
+        input="Find vehicle incidents for fleet-42",
+        session_id="session-123",
+        user_id="user-456",
+        memory_namespace="fleet-memory",
+        governance_policy=GovernancePolicy(
+            required_metadata={
+                "tenant_id": "tenant-1",
+                "classification": "internal",
+            }
+        ),
+        metadata={
+            "request_id": "req-789",
+            "source": "control_plane",
+        },
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    run = make_run(
+        run_id="snapshot-round-trip",
+        session_id=request.session_id,
+        user_id=request.user_id,
+        request_snapshot=snapshot,
+    )
+
+    repository.create(run)
+
+    restored = repository.get(run.run_id)
+
+    assert restored is not None
+    assert restored.request_snapshot is not None
+    assert restored.request_snapshot.schema_version == 1
+
+    reconstructed = restored.request_snapshot.to_request(
+        session_id=restored.session_id,
+        user_id=restored.user_id,
+    )
+
+    assert reconstructed.input == request.input
+    assert reconstructed.session_id == request.session_id
+    assert reconstructed.user_id == request.user_id
+    assert reconstructed.memory_namespace == request.memory_namespace
+    assert reconstructed.governance_policy is not None
+    assert reconstructed.governance_policy.required_metadata == (
+        request.governance_policy.required_metadata
+    )
+    assert reconstructed.metadata == request.metadata
 
 
 def test_get_missing_run_returns_none(repository) -> None:
@@ -139,6 +195,98 @@ def test_create_rejects_duplicate_run_id(repository) -> None:
         match="agent run already exists: run-1",
     ):
         repository.create(make_run())
+
+
+def test_claim_for_recovery_claims_failed_run(repository) -> None:
+    failed = make_run(
+        status=AgentRunStatus.FAILED,
+        started_at=datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
+        completed_at=datetime(2026, 9, 17, 10, 5, tzinfo=UTC),
+        error_type="RuntimeError",
+        error_message="previous attempt failed",
+        output={"partial": "output"},
+        metadata={"attempt": 1},
+    )
+    repository.create(failed)
+
+    recovery_started_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    claimed = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=recovery_started_at,
+    )
+
+    assert claimed is not None
+    assert claimed.run_id == failed.run_id
+    assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.started_at == recovery_started_at
+    assert claimed.completed_at is None
+    assert claimed.error_type is None
+    assert claimed.error_message is None
+    assert claimed.output is None
+    assert claimed.metadata == failed.metadata
+
+    restored = repository.get(failed.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.started_at == recovery_started_at
+
+
+def test_claim_for_recovery_returns_none_for_non_failed_run(repository) -> None:
+    running = make_run(status=AgentRunStatus.RUNNING)
+    repository.create(running)
+
+    claimed = repository.claim_for_recovery(
+        running.run_id,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert claimed is None
+
+    restored = repository.get(running.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+
+
+def test_claim_for_recovery_returns_none_for_missing_run(repository) -> None:
+    claimed = repository.claim_for_recovery(
+        "does-not-exist",
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert claimed is None
+
+
+def test_claim_for_recovery_can_only_claim_once(repository) -> None:
+    failed = make_run(
+        status=AgentRunStatus.FAILED,
+        error_type="RuntimeError",
+        error_message="previous attempt failed",
+    )
+    repository.create(failed)
+
+    first_started_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    second_started_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    first_claim = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=first_started_at,
+    )
+    second_claim = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=second_started_at,
+    )
+
+    assert first_claim is not None
+    assert first_claim.status is AgentRunStatus.RUNNING
+    assert first_claim.started_at == first_started_at
+
+    assert second_claim is None
+
+    restored = repository.get(failed.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.started_at == first_started_at
 
 
 def test_update_round_trip(repository) -> None:

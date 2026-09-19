@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.control_plane.agent_runs.exceptions import (
     InvalidAgentRunTransitionError,
 )
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 
 
 class AgentRunStatus(StrEnum):
@@ -33,7 +34,11 @@ _ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] 
         }
     ),
     AgentRunStatus.COMPLETED: frozenset(),
-    AgentRunStatus.FAILED: frozenset(),
+    AgentRunStatus.FAILED: frozenset(
+        {
+            AgentRunStatus.RUNNING,
+        }
+    ),
     AgentRunStatus.REJECTED: frozenset(),
 }
 
@@ -60,6 +65,7 @@ class AgentRun(BaseModel):
 
     output: Any | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    request_snapshot: AgentRunRequestSnapshot | None = None
 
     def transition_to(self, status: AgentRunStatus) -> "AgentRun":
         allowed_statuses = _ALLOWED_AGENT_RUN_TRANSITIONS[self.status]

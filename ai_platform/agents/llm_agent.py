@@ -225,32 +225,23 @@ class LLMAgent:
                 )
             )
 
-    async def run(
+    async def _continue(
         self,
         context: AgentExecutionContext,
+        messages: list[AgentMessage],
+        *,
+        tool_rounds: int,
     ) -> AgentResponse:
         """
-        Execute the agent interaction.
+        Continue an agent execution from an existing conversation state.
 
-        The agent emits provider-neutral lifecycle events when an
-        execution observer is configured.
+        ``messages`` is authoritative continuation state. In particular,
+        a resumed execution must not rebuild the conversation from the
+        original request, history, or memory because the checkpoint may
+        already contain completed tool results.
         """
-        if not isinstance(context, AgentExecutionContext):
-            raise TypeError("LLMAgent context must be an AgentExecutionContext.")
-
-        await self._emit(
-            AgentExecutionEvent(
-                event_type=AgentExecutionEventType.AGENT_STARTED,
-                agent_name=self.definition.name,
-                run_id=context.run_id,
-                session_id=context.session_id,
-            )
-        )
-
         try:
-            messages = list(context.build_llm_messages())
             tools = await context.tools.list_tools()
-            tool_rounds = 0
 
             while True:
                 await self._emit(
@@ -347,3 +338,84 @@ class LLMAgent:
                 )
             )
             raise
+
+    async def run(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentResponse:
+        """
+        Execute a new agent interaction.
+        """
+        if not isinstance(context, AgentExecutionContext):
+            raise TypeError("LLMAgent context must be an AgentExecutionContext.")
+
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name=self.definition.name,
+                run_id=context.run_id,
+                session_id=context.session_id,
+            )
+        )
+
+        try:
+            messages = list(context.build_llm_messages())
+        except Exception as exc:
+            await self._emit(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.AGENT_FAILED,
+                    agent_name=self.definition.name,
+                    run_id=context.run_id,
+                    session_id=context.session_id,
+                    tool_round=0,
+                    metadata={
+                        "error_type": type(exc).__name__,
+                    },
+                )
+            )
+            raise
+
+        return await self._continue(
+            context,
+            messages,
+            tool_rounds=0,
+        )
+
+    async def resume(
+        self,
+        context: AgentExecutionContext,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> AgentResponse:
+        """
+        Resume an agent from a durable execution checkpoint.
+
+        The checkpoint conversation is the authoritative continuation
+        state. Completed tools represented by the checkpoint are not
+        executed again.
+        """
+        if not isinstance(context, AgentExecutionContext):
+            raise TypeError("LLMAgent context must be an AgentExecutionContext.")
+
+        if not isinstance(
+            checkpoint,
+            AgentExecutionCheckpoint,
+        ):
+            raise TypeError("LLMAgent checkpoint must be an AgentExecutionCheckpoint.")
+
+        if checkpoint.agent_name != self.definition.name:
+            raise ValueError("Checkpoint agent_name does not match the LLMAgent definition.")
+
+        if context.run_id != checkpoint.run_id:
+            raise ValueError("Checkpoint run_id does not match the AgentExecutionContext.")
+
+        if checkpoint.position is not AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
+            raise ValueError("LLMAgent can only resume from an after-tool-execution checkpoint.")
+
+        messages = list(checkpoint.messages)
+        tool_rounds = checkpoint.tool_round
+
+        return await self._continue(
+            context,
+            messages,
+            tool_rounds=tool_rounds,
+        )

@@ -429,17 +429,20 @@ async def test_llm_agent_sends_canonical_messages() -> None:
 
 
 class FakeRAGTool:
-    def __init__(self) -> None:
+    def __init__(self, name: str = "rag.search") -> None:
         self._definition = ToolDefinition(
-            name="rag.search",
+            name=name,
             description="A test RAG search tool.",
         )
+        self.execute_count = 0
 
     @property
     def definition(self) -> ToolDefinition:
         return self._definition
 
     async def execute(self, arguments):
+        self.execute_count += 1
+
         return {
             "query": arguments["query"],
             "retrieved_count": 2,
@@ -856,6 +859,49 @@ class FakeMultiRoundToolCallingLLMGateway:
                 "prompt_tokens": 20,
                 "completion_tokens": 5,
                 "total_tokens": 25,
+            },
+        }
+
+
+class FakeResumeContinuationLLMGateway:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, Any]] = []
+
+    async def route_chat(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.requests.append(request)
+
+        if len(self.requests) == 1:
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "",
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="call-2",
+                        name="search",
+                        arguments={
+                            "query": "follow-up",
+                        },
+                    ),
+                ],
+            }
+
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": "Resumed execution completed successfully.",
+            "usage": {
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "total_tokens": 40,
             },
         }
 
@@ -1652,3 +1698,329 @@ async def test_llm_agent_emits_agent_failed_on_tool_loop_limit() -> None:
     assert observer.events[-1].metadata == {
         "error_type": "AgentToolLoopLimitError",
     }
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_uses_checkpoint_messages_without_replaying_tool() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+        tool_names=("search",),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-resume-1",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-resume-1",
+        agent_name=definition.name,
+        session_id="session-456",
+        user_id="user-123",
+        messages=(
+            system_message("You are a production LLM agent."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-completed-1",
+                        name="search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+            tool_result_message(
+                call_id="call-completed-1",
+                tool_name="search",
+                output={
+                    "query": "RAG",
+                    "retrieved_count": 2,
+                },
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    agent = LLMAgent(definition)
+
+    response = await agent.resume(context, checkpoint)
+
+    assert response.output == "Generated answer."
+    assert response.metadata["tool_rounds"] == 1
+    assert tool.execute_count == 0
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["messages"] == [
+        {
+            "role": "system",
+            "content": "You are a production LLM agent.",
+        },
+        {
+            "role": "user",
+            "content": "Find information about RAG.",
+        },
+        {
+            "role": "assistant",
+            "content": "I searched for the information.",
+            "tool_calls": [
+                {
+                    "call_id": "call-completed-1",
+                    "name": "search",
+                    "arguments": {"query": "RAG"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": (
+                '{"call_id": "call-completed-1", '
+                '"output": {"query": "RAG", "retrieved_count": 2}, '
+                '"success": true, "tool_name": "search"}'
+            ),
+            "tool_call_id": "call-completed-1",
+            "tool_name": "search",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_continues_with_new_tool_call_and_checkpoint() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+        tool_names=("search",),
+    )
+
+    gateway = FakeResumeContinuationLLMGateway()
+    checkpoint_handler = FakeAgentCheckpointHandler()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+            metadata={"request_id": "request-789"},
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-resume-2",
+    )
+
+    original_checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-resume-2",
+        agent_name=definition.name,
+        session_id="session-456",
+        user_id="user-123",
+        messages=(
+            system_message("You are a production LLM agent."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-1",
+                        name="search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the initial information.",
+            ),
+            tool_result_message(
+                call_id="call-1",
+                tool_name="search",
+                output={
+                    "query": "RAG",
+                    "retrieved_count": 2,
+                },
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={"request_id": "request-789"},
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    response = await agent.resume(context, original_checkpoint)
+
+    assert response.output == "Resumed execution completed successfully."
+    assert response.metadata["tool_rounds"] == 2
+
+    assert tool.execute_count == 1
+    assert len(gateway.requests) == 2
+
+    assert gateway.requests[0]["messages"][-1] == {
+        "role": "tool",
+        "content": (
+            '{"call_id": "call-1", '
+            '"output": {"query": "RAG", "retrieved_count": 2}, '
+            '"success": true, "tool_name": "search"}'
+        ),
+        "tool_call_id": "call-1",
+        "tool_name": "search",
+    }
+
+    resumed_tool_result = gateway.requests[1]["messages"][-1]
+
+    assert resumed_tool_result["role"] == "tool"
+    assert resumed_tool_result["tool_call_id"] == "call-2"
+    assert resumed_tool_result["tool_name"] == "search"
+    assert '"call_id": "call-2"' in resumed_tool_result["content"]
+    assert '"query": "follow-up"' in resumed_tool_result["content"]
+    assert '"success": true' in resumed_tool_result["content"]
+
+    assert len(checkpoint_handler.checkpoints) == 1
+
+    new_checkpoint = checkpoint_handler.checkpoints[0]
+
+    assert new_checkpoint.run_id == original_checkpoint.run_id
+    assert new_checkpoint.agent_name == original_checkpoint.agent_name
+    assert new_checkpoint.tool_round == 2
+    assert new_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert new_checkpoint.metadata == original_checkpoint.metadata
+    assert len(new_checkpoint.messages) == 6
+
+    assert new_checkpoint.messages[:4] == original_checkpoint.messages
+    assert new_checkpoint.messages[4] == assistant_tool_call_message(
+        tool_calls=(
+            AgentToolCall(
+                call_id="call-2",
+                name="search",
+                arguments={"query": "follow-up"},
+            ),
+        ),
+        content="",
+    )
+    assert new_checkpoint.messages[5].role is AgentMessageRole.TOOL
+    assert '"call_id": "call-2"' in new_checkpoint.messages[5].content
+    assert '"query": "follow-up"' in new_checkpoint.messages[5].content
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_rejects_mismatched_agent() -> None:
+    context, _ = make_context()
+    context = AgentExecutionContext(
+        context.request,
+        tools=context.tools,
+        llm=context.llm,
+        run_id="run-1",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=1,
+        run_id="run-1",
+        agent_name="different-agent",
+        session_id=None,
+        user_id=None,
+        messages=(system_message("System."),),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test agent.",
+            system_prompt="System.",
+            model="mock-gpt",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="agent_name does not match",
+    ):
+        await agent.resume(context, checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_rejects_mismatched_run_id() -> None:
+    context, _ = make_context()
+    context = AgentExecutionContext(
+        context.request,
+        tools=context.tools,
+        llm=context.llm,
+        run_id="run-context",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=1,
+        run_id="run-checkpoint",
+        agent_name="test-llm-agent",
+        session_id=None,
+        user_id=None,
+        messages=(system_message("System."),),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test agent.",
+            system_prompt="System.",
+            model="mock-gpt",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="run_id does not match",
+    ):
+        await agent.resume(context, checkpoint)

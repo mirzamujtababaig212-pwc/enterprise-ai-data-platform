@@ -154,6 +154,11 @@ class AgentRunRecord(Base):
         default=dict,
     )
 
+    request_snapshot: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
 
 class AgentRunEventRecord(Base):
     __tablename__ = "agent_run_events"

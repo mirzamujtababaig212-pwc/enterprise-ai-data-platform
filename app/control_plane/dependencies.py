@@ -65,6 +65,12 @@ from rag.evaluation.stores.release_decision import (
 )
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
 from rag.stores.factory import VectorStoreFactory
+from app.control_plane.agent_checkpoints.postgres_repository import (
+    PostgreSQLAgentCheckpointsRepository,
+)
+from app.control_plane.agent_runs.recovery_service import (
+    AgentRunRecoveryService,
+)
 
 _llm_router = Router()
 
@@ -280,6 +286,18 @@ async def get_agent_run_application_service(
         runtime=_agent_runtime,
         repository=PostgreSQLAgentRunRepository(db),
         events_repository=PostgreSQLAgentRunEventsRepository(db),
+    )
+
+
+async def get_agent_run_recovery_service(
+    db: Session = Depends(get_db),
+) -> AgentRunRecoveryService:
+    await _initialize_agents()
+
+    return AgentRunRecoveryService(
+        runtime=_agent_runtime,
+        repository=PostgreSQLAgentRunRepository(db),
+        checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
     )
 
 

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.control_plane.agent_runs.models import AgentRunStatus
+from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
 )
@@ -646,3 +646,195 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             with SessionLocal() as session:
                 session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
                 session.commit()
+
+
+def test_production_agent_run_recovers_from_postgres_checkpoint() -> None:
+    """Recover a failed agent run from its real PostgreSQL checkpoint."""
+
+    import asyncio
+
+    from ai_platform.agents.checkpoint import (
+        AgentCheckpointPosition,
+        AgentExecutionCheckpoint,
+    )
+    from ai_platform.agents.llm_messages import AgentMessage, AgentMessageRole
+    from app.control_plane.agent_runs.recovery_service import (
+        AgentRunRecoveryService,
+    )
+    from app.control_plane.agent_runs.request_snapshot import (
+        AgentRunRequestSnapshot,
+    )
+    from app.control_plane.agent_runs.postgres_repository import (
+        PostgreSQLAgentRunRepository,
+    )
+    from app.control_plane.agent_checkpoints.postgres_repository import (
+        PostgreSQLAgentCheckpointsRepository,
+    )
+    from app.control_plane.persistence.models import (
+        AgentRunCheckpointRecord,
+    )
+
+    import app.control_plane.dependencies as dependencies
+
+    run_id = "integration-recovery-postgres-run"
+    session_id = "integration-recovery-session"
+    recovery_run_session = None
+    recovery_checkpoint_session = None
+
+    try:
+        asyncio.run(dependencies._initialize_agents())
+
+        request_payload = {
+            "input": "Continue the vehicle risk analysis.",
+            "session_id": session_id,
+            "user_id": "integration-test-user",
+            "metadata": {
+                "test": "production-agent-run-recovery",
+            },
+        }
+
+        from ai_platform.agents.models import AgentRequest
+
+        request = AgentRequest(
+            input=request_payload["input"],
+            session_id=request_payload["session_id"],
+            user_id=request_payload["user_id"],
+            metadata=request_payload["metadata"],
+        )
+
+        snapshot = AgentRunRequestSnapshot.from_request(request)
+
+        with SessionLocal() as session:
+            run_repository = PostgreSQLAgentRunRepository(session)
+
+            failed_run = AgentRun(
+                run_id=run_id,
+                agent_name="enterprise-analyst",
+                session_id=session_id,
+                user_id="integration-test-user",
+                status=AgentRunStatus.FAILED,
+                error_type="RuntimeError",
+                error_message="simulated interrupted execution",
+                metadata=request_payload["metadata"],
+                request_snapshot=snapshot,
+            )
+
+            run_repository.create(failed_run)
+
+        checkpoint = AgentExecutionCheckpoint(
+            schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+            run_id=run_id,
+            agent_name="enterprise-analyst",
+            session_id=session_id,
+            user_id="integration-test-user",
+            messages=(
+                AgentMessage(
+                    role=AgentMessageRole.USER,
+                    content="Find the vehicle risk.",
+                ),
+                AgentMessage(
+                    role=AgentMessageRole.ASSISTANT,
+                    content="I retrieved the relevant vehicle information.",
+                ),
+                AgentMessage(
+                    role=AgentMessageRole.TOOL,
+                    content=(
+                        '{"call_id":"call-recovery-1",'
+                        '"tool_name":"rag.search",'
+                        '"success":true,'
+                        '"output":{"query":"vehicle risk",'
+                        '"retrieved_count":1}}'
+                    ),
+                ),
+            ),
+            tool_round=1,
+            position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+            metadata={
+                "source": "integration-test",
+            },
+        )
+
+        with SessionLocal() as session:
+            checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+            checkpoint_repository.save(checkpoint)
+
+        recovery_run_session = SessionLocal()
+        recovery_checkpoint_session = SessionLocal()
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=dependencies._agent_runtime,
+            repository=PostgreSQLAgentRunRepository(
+                recovery_run_session,
+            ),
+            checkpoints_repository=PostgreSQLAgentCheckpointsRepository(
+                recovery_checkpoint_session,
+            ),
+        )
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(
+                return_value={
+                    "reply": "Recovered successfully from the durable checkpoint.",
+                    "provider": "integration-test",
+                    "model": "integration-test-model",
+                    "usage": {
+                        "prompt_tokens": 20,
+                        "completion_tokens": 10,
+                        "total_tokens": 30,
+                    },
+                    "tool_calls": [],
+                }
+            ),
+        ) as mock_route_chat:
+            result = asyncio.run(
+                recovery_service.recover(run_id),
+            )
+
+        assert result.run_id == run_id
+        assert result.response.output == ("Recovered successfully from the durable checkpoint.")
+        assert mock_route_chat.await_count == 1
+
+        with SessionLocal() as session:
+            run_repository = PostgreSQLAgentRunRepository(session)
+            restored_run = run_repository.get(run_id)
+
+            checkpoints = list(
+                session.scalars(
+                    select(AgentRunCheckpointRecord)
+                    .where(AgentRunCheckpointRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunCheckpointRecord.created_at.asc(),
+                        AgentRunCheckpointRecord.id.asc(),
+                    )
+                )
+            )
+
+        assert restored_run is not None
+        assert restored_run.status is AgentRunStatus.COMPLETED
+        assert restored_run.output == ("Recovered successfully from the durable checkpoint.")
+        assert restored_run.error_type is None
+        assert restored_run.error_message is None
+        assert restored_run.completed_at is not None
+
+        assert len(checkpoints) == 1
+        assert checkpoints[0].run_id == run_id
+
+        # Recovery must not execute the already-completed tool again.
+        assert mock_route_chat.await_count == 1
+
+        # A completed run cannot be claimed for a second recovery.
+        with pytest.raises(ValueError, match="not eligible for recovery"):
+            asyncio.run(
+                recovery_service.recover(run_id),
+            )
+
+    finally:
+        if recovery_run_session is not None:
+            recovery_run_session.close()
+
+        if recovery_checkpoint_session is not None:
+            recovery_checkpoint_session.close()
+
+        with SessionLocal() as session:
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+            session.commit()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from typing import Protocol
 
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
@@ -21,6 +23,13 @@ class AgentRunRepository(Protocol):
         *,
         commit: bool = True,
     ) -> AgentRun: ...
+
+    def claim_for_recovery(
+        self,
+        run_id: str,
+        *,
+        started_at: datetime,
+    ) -> AgentRun | None: ...
 
     def list(
         self,

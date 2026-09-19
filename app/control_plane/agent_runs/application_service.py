@@ -19,6 +19,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunExecutionResult,
     AgentRunStatus,
 )
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 from app.control_plane.agent_run_events.repository import (
     AgentRunEventsRepository,
 )
@@ -54,6 +55,7 @@ class AgentRunApplicationService:
             user_id=request.user_id,
             status=AgentRunStatus.PENDING,
             metadata=dict(request.metadata),
+            request_snapshot=AgentRunRequestSnapshot.from_request(request),
         )
 
         self._repository.create(run)
