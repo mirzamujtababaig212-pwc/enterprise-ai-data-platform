@@ -542,3 +542,74 @@ class RAGChunkRecord(Base):
     document: Mapped[RAGDocumentRecord] = relationship(
         back_populates="chunks",
     )
+
+
+class AgentRunCheckpointRecord(Base):
+    __tablename__ = "agent_run_checkpoints"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    agent_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    position: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    tool_round: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    checkpoint_payload: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_agent_run_checkpoints_run_created_at",
+            "run_id",
+            "created_at",
+        ),
+    )

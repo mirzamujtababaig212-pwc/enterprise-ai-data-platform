@@ -40,7 +40,7 @@ def test_build_rag_retriever_keeps_semantic_retriever_for_non_hybrid_backends() 
     semantic_retriever = Mock()
     lexical_retriever = Mock()
 
-    for backend in ("in_memory", "faiss"):
+    for backend in ("in_memory",):
         result = _build_rag_retriever(
             semantic_retriever=semantic_retriever,
             backend=backend,

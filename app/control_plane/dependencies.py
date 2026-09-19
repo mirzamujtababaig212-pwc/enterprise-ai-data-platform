@@ -47,6 +47,9 @@ from app.control_plane.agent_run_events.postgres_observer import (
 from app.control_plane.agent_run_events.postgres_repository import (
     PostgreSQLAgentRunEventsRepository,
 )
+from app.control_plane.agent_checkpoints.postgres_handler import (
+    PostgreSQLAgentCheckpointHandler,
+)
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
@@ -75,6 +78,7 @@ _agent_observer = CompositeAgentExecutionObserver(
         PostgreSQLAgentRunEventObserver(SessionLocal),
     ]
 )
+_agent_checkpoint_handler = PostgreSQLAgentCheckpointHandler(SessionLocal)
 
 _tool_authorization_audit_sink = ToolAuthorizationAuditObserver(
     _agent_observer,
@@ -248,12 +252,14 @@ async def _initialize_agents() -> None:
             LLMAgent(
                 analyst_definition,
                 observer=_agent_observer,
+                checkpoint_handler=_agent_checkpoint_handler,
             )
         )
         await _agent_registry.register(
             LLMAgent(
                 rag_analyst_definition,
                 observer=_agent_observer,
+                checkpoint_handler=_agent_checkpoint_handler,
             )
         )
 

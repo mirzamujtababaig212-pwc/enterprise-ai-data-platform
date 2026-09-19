@@ -302,3 +302,347 @@ def test_production_control_plane_persists_failed_agent_run() -> None:
                 )
 
             assert remaining_events == []
+
+
+class DeterministicRAGRetriever:
+    """Deterministic retriever for production control-plane integration tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        min_score: float | None = None,
+        metadata_filter: dict | None = None,
+        governance_policy=None,
+    ):
+        from rag.models import DocumentChunk, RetrievalResult
+
+        self.calls.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "min_score": min_score,
+                "metadata_filter": metadata_filter,
+                "governance_policy": governance_policy,
+            }
+        )
+
+        return [
+            RetrievalResult(
+                chunk=DocumentChunk(
+                    id="integration-rag-chunk-1",
+                    document_id="integration-rag-document-1",
+                    content="DELDAI provides an enterprise AI operating layer.",
+                    metadata={
+                        "source": "integration-test",
+                        "document_type": "architecture",
+                    },
+                    chunk_index=0,
+                ),
+                score=0.97,
+            ),
+            RetrievalResult(
+                chunk=DocumentChunk(
+                    id="integration-rag-chunk-2",
+                    document_id="integration-rag-document-1",
+                    content="The platform governs agents, models, tools, and enterprise workflows.",
+                    metadata={
+                        "source": "integration-test",
+                        "document_type": "architecture",
+                    },
+                    chunk_index=1,
+                ),
+                score=0.91,
+            ),
+        ]
+
+
+def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
+    """Exercise real RAG tool execution and durable checkpoint persistence."""
+
+    from ai_platform.agents.checkpoint import (
+        AgentCheckpointPosition,
+        AgentExecutionCheckpoint,
+    )
+    from ai_platform.agents.tool_calls import AgentToolCall
+    from app.control_plane.persistence.models import AgentRunCheckpointRecord
+
+    import app.control_plane.dependencies as dependencies
+
+    client = TestClient(app)
+    session_id = "production-rag-checkpoint-integration-session"
+
+    run_id: str | None = None
+    original_retriever = dependencies._rag_retriever
+
+    rag_tool = None
+
+    try:
+        # The production RAGSearchTool is created during _initialize_agents().
+        # Ensure initialization has happened before replacing its retriever.
+        import asyncio
+
+        asyncio.run(dependencies._initialize_agents())
+
+        rag_tool = asyncio.run(dependencies._tool_registry.get("rag.search"))
+
+        assert rag_tool is not None
+        assert rag_tool.definition.name == "rag.search"
+
+        deterministic_retriever = DeterministicRAGRetriever()
+
+        # RAGSearchTool intentionally keeps its retriever private. This test
+        # replaces only that dependency while preserving the real tool and
+        # all production control-plane execution layers.
+        rag_tool._retriever = deterministic_retriever
+
+        responses = [
+            {
+                "reply": "",
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="call-rag-checkpoint-1",
+                        name="rag.search",
+                        arguments={
+                            "query": "What is DELDAI's enterprise AI architecture?",
+                            "top_k": 2,
+                        },
+                    )
+                ],
+            },
+            {
+                "reply": (
+                    "DELDAI provides an enterprise AI operating layer "
+                    "for governing agents, models, tools, and workflows."
+                ),
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 40,
+                    "completion_tokens": 20,
+                    "total_tokens": 60,
+                },
+                "tool_calls": [],
+            },
+        ]
+
+        async def _deterministic_route_chat(request: dict) -> dict:
+            return responses.pop(0)
+
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(side_effect=_deterministic_route_chat),
+        ) as mock_route_chat:
+            response = client.post(
+                "/api/v1/agents/enterprise-rag-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                },
+                json={
+                    "input": "Explain DELDAI's enterprise AI architecture.",
+                    "session_id": session_id,
+                    "user_id": "integration-test-user",
+                    "metadata": {
+                        "test": "production-rag-checkpoint-persistence",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert mock_route_chat.await_count == 2
+        assert responses == []
+
+        payload = response.json()
+
+        assert payload["run_id"]
+        assert payload["agent_name"] == "enterprise-rag-analyst"
+        assert payload["session_id"] == session_id
+        assert (
+            payload["output"] == "DELDAI provides an enterprise AI operating layer "
+            "for governing agents, models, tools, and workflows."
+        )
+
+        run_id = payload["run_id"]
+
+        assert len(deterministic_retriever.calls) == 1
+        assert deterministic_retriever.calls[0]["query"] == (
+            "What is DELDAI's enterprise AI architecture?"
+        )
+        assert deterministic_retriever.calls[0]["top_k"] == 2
+        assert deterministic_retriever.calls[0]["min_score"] is None
+        assert deterministic_retriever.calls[0]["metadata_filter"] is None
+
+        with SessionLocal() as session:
+            run_record = session.scalar(
+                select(AgentRunRecord).where(
+                    AgentRunRecord.run_id == run_id,
+                )
+            )
+
+            events = list(
+                session.scalars(
+                    select(AgentRunEventRecord)
+                    .where(AgentRunEventRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunEventRecord.created_at.asc(),
+                        AgentRunEventRecord.id.asc(),
+                    )
+                )
+            )
+
+            checkpoints = list(
+                session.scalars(
+                    select(AgentRunCheckpointRecord)
+                    .where(AgentRunCheckpointRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunCheckpointRecord.created_at.asc(),
+                        AgentRunCheckpointRecord.id.asc(),
+                    )
+                )
+            )
+
+        assert run_record is not None
+        assert run_record.status == AgentRunStatus.COMPLETED
+        assert run_record.agent_name == "enterprise-rag-analyst"
+        assert run_record.session_id == session_id
+        assert run_record.user_id == "integration-test-user"
+
+        assert [event.event_type for event in events] == [
+            "agent.started",
+            "llm.requested",
+            "llm.completed",
+            "tool.call.requested",
+            "tool.call.completed",
+            "llm.requested",
+            "llm.completed",
+            "agent.completed",
+        ]
+
+        assert all(event.run_id == run_id for event in events)
+        assert all(event.agent_name == "enterprise-rag-analyst" for event in events)
+        assert all(event.session_id == session_id for event in events)
+
+        tool_requested = next(
+            event for event in events if event.event_type == "tool.call.requested"
+        )
+        tool_completed = next(
+            event for event in events if event.event_type == "tool.call.completed"
+        )
+
+        assert tool_requested.tool_name == "rag.search"
+        assert tool_requested.call_id == "call-rag-checkpoint-1"
+        assert tool_requested.tool_round == 1
+
+        assert tool_completed.tool_name == "rag.search"
+        assert tool_completed.call_id == "call-rag-checkpoint-1"
+        assert tool_completed.tool_round == 1
+
+        assert len(checkpoints) == 1
+
+        checkpoint_record = checkpoints[0]
+
+        assert checkpoint_record.run_id == run_id
+        assert checkpoint_record.agent_name == "enterprise-rag-analyst"
+        assert checkpoint_record.session_id == session_id
+        assert checkpoint_record.user_id == "integration-test-user"
+        assert checkpoint_record.schema_version == 1
+        assert checkpoint_record.position == AgentCheckpointPosition.AFTER_TOOL_EXECUTION.value
+        assert checkpoint_record.tool_round == 1
+
+        checkpoint = AgentExecutionCheckpoint.from_dict(dict(checkpoint_record.checkpoint_payload))
+
+        assert checkpoint.run_id == run_id
+        assert checkpoint.agent_name == "enterprise-rag-analyst"
+        assert checkpoint.session_id == session_id
+        assert checkpoint.user_id == "integration-test-user"
+        assert checkpoint.schema_version == 1
+        assert checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+        assert checkpoint.tool_round == 1
+
+        assert checkpoint.messages
+        tool_message = checkpoint.messages[-1]
+
+        assert tool_message.role.value == "tool"
+
+        import json
+
+        tool_payload = json.loads(tool_message.content)
+
+        assert tool_payload["call_id"] == "call-rag-checkpoint-1"
+        assert tool_payload["tool_name"] == "rag.search"
+        assert tool_payload["success"] is True
+
+        assert tool_payload["output"]["query"] == ("What is DELDAI's enterprise AI architecture?")
+        assert tool_payload["output"]["retrieved_count"] == 2
+
+        retrieved_results = tool_payload["output"]["results"]
+
+        assert len(retrieved_results) == 2
+        assert retrieved_results[0]["chunk_id"] == "integration-rag-chunk-1"
+        assert retrieved_results[0]["document_id"] == "integration-rag-document-1"
+        assert retrieved_results[0]["content"] == (
+            "DELDAI provides an enterprise AI operating layer."
+        )
+        assert retrieved_results[0]["score"] == 0.97
+
+        assert retrieved_results[1]["chunk_id"] == "integration-rag-chunk-2"
+        assert retrieved_results[1]["document_id"] == "integration-rag-document-1"
+        assert retrieved_results[1]["content"] == (
+            "The platform governs agents, models, tools, and enterprise workflows."
+        )
+        assert retrieved_results[1]["score"] == 0.91
+
+        # Verify the checkpoint contains the retrieval output but does not
+        # contain execution infrastructure objects.
+        assert "governance_policy" not in checkpoint.metadata
+        assert "request_metadata" not in checkpoint.metadata
+
+        with SessionLocal() as session:
+            repository = PostgreSQLAgentRunRepository(session)
+            persisted_run = repository.get(run_id)
+
+        assert persisted_run is not None
+        assert persisted_run.status is AgentRunStatus.COMPLETED
+
+        # Parent deletion must cascade to durable events and checkpoints.
+        with SessionLocal() as session:
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+            session.commit()
+
+        with SessionLocal() as session:
+            remaining_events = list(
+                session.scalars(
+                    select(AgentRunEventRecord).where(AgentRunEventRecord.run_id == run_id)
+                )
+            )
+            remaining_checkpoints = list(
+                session.scalars(
+                    select(AgentRunCheckpointRecord).where(
+                        AgentRunCheckpointRecord.run_id == run_id
+                    )
+                )
+            )
+
+        assert remaining_events == []
+        assert remaining_checkpoints == []
+
+        run_id = None
+
+    finally:
+        if rag_tool is not None:
+            rag_tool._retriever = original_retriever
+
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+                session.commit()
