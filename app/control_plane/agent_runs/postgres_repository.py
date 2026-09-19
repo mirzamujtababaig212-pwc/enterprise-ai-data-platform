@@ -237,6 +237,84 @@ class PostgreSQLAgentRunRepository:
 
         return self.get(run_id)
 
+    def complete_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        output,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.lease_id == lease_id,
+            )
+            .values(
+                status=AgentRunStatus.COMPLETED.value,
+                completed_at=completed_at,
+                output=output,
+                lease_id=None,
+                lease_expires_at=None,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                self._session.rollback()
+                return None
+
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
+    def fail_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.lease_id == lease_id,
+            )
+            .values(
+                status=AgentRunStatus.FAILED.value,
+                completed_at=completed_at,
+                error_type=error_type,
+                error_message=error_message,
+                lease_id=None,
+                lease_expires_at=None,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                self._session.rollback()
+                return None
+
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
     def list(
         self,
         *,

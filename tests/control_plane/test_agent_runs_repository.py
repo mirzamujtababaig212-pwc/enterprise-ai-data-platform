@@ -324,3 +324,114 @@ def test_expired_running_run_can_be_reclaimed() -> None:
     assert claimed.error_type is None
     assert claimed.error_message is None
     assert claimed.output is None
+
+
+def test_complete_if_owner_clears_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-complete").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        output={"answer": "done"},
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.completed_at == completed_at
+    assert result.output == {"answer": "done"}
+    assert result.lease_id is None
+    assert result.lease_expires_at is None
+
+
+def test_complete_if_owner_rejects_wrong_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-complete-wrong").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-b",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        output={"answer": "stale"},
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
+
+
+def test_fail_if_owner_clears_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-fail").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.fail_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        error_type="RuntimeError",
+        error_message="agent failed",
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.FAILED
+    assert result.completed_at == completed_at
+    assert result.error_type == "RuntimeError"
+    assert result.error_message == "agent failed"
+    assert result.lease_id is None
+    assert result.lease_expires_at is None
+
+
+def test_fail_if_owner_rejects_wrong_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-fail-wrong").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.fail_if_owner(
+        run.run_id,
+        lease_id="lease-b",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        error_type="RuntimeError",
+        error_message="stale executor",
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"

@@ -138,6 +138,60 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = claimed
             return claimed
 
+    def complete_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        output,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+                return None
+
+            completed = run.transition_to(AgentRunStatus.COMPLETED).model_copy(
+                update={
+                    "completed_at": completed_at,
+                    "output": output,
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = completed
+            return completed
+
+    def fail_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+                return None
+
+            failed = run.transition_to(AgentRunStatus.FAILED).model_copy(
+                update={
+                    "completed_at": completed_at,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = failed
+            return failed
+
     def list(
         self,
         *,

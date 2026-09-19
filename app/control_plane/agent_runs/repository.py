@@ -51,6 +51,25 @@ class AgentRunRepository(Protocol):
         lease_expires_at: datetime,
     ) -> AgentRun | None: ...
 
+    def complete_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        output,
+    ) -> AgentRun | None: ...
+
+    def fail_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun | None: ...
+
     def list(
         self,
         *,
