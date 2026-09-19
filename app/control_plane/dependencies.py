@@ -305,6 +305,20 @@ async def get_agent_run_recovery_service(
     )
 
 
+async def build_agent_run_recovery_service(
+    db: Session,
+) -> AgentRunRecoveryService:
+    await _initialize_agents()
+    app_settings = Settings.from_environment()
+
+    return AgentRunRecoveryService(
+        runtime=_agent_runtime,
+        repository=PostgreSQLAgentRunRepository(db),
+        checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
+        lease_seconds=app_settings.agent_run_lease_duration_seconds,
+    )
+
+
 def get_llm_router() -> Router:
     return _llm_router
 
