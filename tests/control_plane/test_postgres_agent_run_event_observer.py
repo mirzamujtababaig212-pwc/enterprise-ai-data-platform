@@ -21,6 +21,7 @@ def make_event(
         agent_name="vehicle-agent",
         run_id=run_id,
         session_id="session-1",
+        user_id="user-1",
         metadata={"source": "test"},
     )
 

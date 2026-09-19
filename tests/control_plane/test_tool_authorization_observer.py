@@ -47,6 +47,7 @@ async def test_authorization_record_is_translated_to_agent_event() -> None:
             agent_name="enterprise-rag-analyst",
             run_id="run-123",
             session_id="session-789",
+            user_id="user-123",
             tool_name="rag.search",
             call_id="call-456",
             metadata={
@@ -58,7 +59,7 @@ async def test_authorization_record_is_translated_to_agent_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authorization_record_does_not_persist_principal() -> None:
+async def test_authorization_record_persists_principal_as_user_id() -> None:
     observer = RecordingAgentExecutionObserver()
     audit_observer = ToolAuthorizationAuditObserver(observer)
 
@@ -76,6 +77,7 @@ async def test_authorization_record_does_not_persist_principal() -> None:
 
     event = observer.events[0]
 
+    assert event.user_id == "sensitive-user-id"
     assert "principal" not in event.metadata
     assert "sensitive-user-id" not in event.metadata
     assert event.event_type is AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION

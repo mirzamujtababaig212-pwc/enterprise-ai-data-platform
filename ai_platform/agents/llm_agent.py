@@ -159,6 +159,7 @@ class LLMAgent:
                     agent_name=self.definition.name,
                     run_id=context.run_id,
                     session_id=context.session_id,
+                    user_id=context.user_id,
                     tool_round=tool_round,
                     tool_name=tool_call.name,
                     call_id=tool_call.call_id,
@@ -180,6 +181,7 @@ class LLMAgent:
                         agent_name=self.definition.name,
                         run_id=context.run_id,
                         session_id=context.session_id,
+                        user_id=context.user_id,
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
@@ -196,6 +198,7 @@ class LLMAgent:
                         agent_name=self.definition.name,
                         run_id=context.run_id,
                         session_id=context.session_id,
+                        user_id=context.user_id,
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
@@ -250,6 +253,7 @@ class LLMAgent:
                         agent_name=self.definition.name,
                         run_id=context.run_id,
                         session_id=context.session_id,
+                        user_id=context.user_id,
                         tool_round=tool_rounds,
                     )
                 )
@@ -268,6 +272,7 @@ class LLMAgent:
                         agent_name=self.definition.name,
                         run_id=context.run_id,
                         session_id=context.session_id,
+                        user_id=context.user_id,
                         tool_round=tool_rounds,
                         provider=result.provider,
                         model=result.model,
@@ -286,6 +291,7 @@ class LLMAgent:
                             agent_name=self.definition.name,
                             run_id=context.run_id,
                             session_id=context.session_id,
+                            user_id=context.user_id,
                             tool_round=tool_rounds,
                             provider=result.provider,
                             model=result.model,
@@ -331,6 +337,7 @@ class LLMAgent:
                     agent_name=self.definition.name,
                     run_id=context.run_id,
                     session_id=context.session_id,
+                    user_id=context.user_id,
                     tool_round=tool_rounds,
                     metadata={
                         "error_type": type(exc).__name__,
@@ -355,6 +362,7 @@ class LLMAgent:
                 agent_name=self.definition.name,
                 run_id=context.run_id,
                 session_id=context.session_id,
+                user_id=context.user_id,
             )
         )
 
@@ -367,6 +375,7 @@ class LLMAgent:
                     agent_name=self.definition.name,
                     run_id=context.run_id,
                     session_id=context.session_id,
+                    user_id=context.user_id,
                     tool_round=0,
                     metadata={
                         "error_type": type(exc).__name__,

@@ -24,7 +24,6 @@ from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
 )
 
-
 router = APIRouter(
     prefix="/api/v1/agents",
     tags=["agents"],
@@ -231,6 +230,7 @@ async def list_agent_run_events(
                 agent_name=event.agent_name,
                 run_id=event.run_id,
                 session_id=event.session_id,
+                user_id=event.user_id,
                 tool_round=event.tool_round,
                 tool_name=event.tool_name,
                 call_id=event.call_id,

@@ -37,6 +37,7 @@ class ToolAuthorizationAuditObserver(ToolAuthorizationAuditSink):
             agent_name=record.agent_name,
             run_id=record.run_id,
             session_id=record.session_id,
+            user_id=record.principal,
             tool_name=record.tool_name,
             call_id=record.call_id,
             metadata={

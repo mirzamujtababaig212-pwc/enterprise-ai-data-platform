@@ -449,6 +449,7 @@ def test_list_agent_run_events_returns_events() -> None:
             agent_name="enterprise-analyst",
             run_id="run-events-123",
             session_id="session-123",
+            user_id="user-123",
             metadata={"source": "test"},
         ),
         AgentExecutionEvent(
@@ -456,6 +457,7 @@ def test_list_agent_run_events_returns_events() -> None:
             agent_name="enterprise-analyst",
             run_id="run-events-123",
             session_id="session-123",
+            user_id="user-123",
             provider="mock",
             model="mock-gpt",
             metadata={
@@ -479,6 +481,7 @@ def test_list_agent_run_events_returns_events() -> None:
                 "agent_name": "enterprise-analyst",
                 "run_id": "run-events-123",
                 "session_id": "session-123",
+                "user_id": "user-123",
                 "tool_round": None,
                 "tool_name": None,
                 "call_id": None,
@@ -491,6 +494,7 @@ def test_list_agent_run_events_returns_events() -> None:
                 "agent_name": "enterprise-analyst",
                 "run_id": "run-events-123",
                 "session_id": "session-123",
+                "user_id": "user-123",
                 "tool_round": None,
                 "tool_name": None,
                 "call_id": None,

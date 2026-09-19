@@ -1108,6 +1108,7 @@ async def test_llm_agent_emits_normal_execution_lifecycle_events() -> None:
     context = AgentExecutionContext(
         AgentRequest(
             input="Explain RAG.",
+            user_id="user-123",
             session_id="session-456",
         ),
         tools=tools,
@@ -1160,6 +1161,7 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     context = AgentExecutionContext(
         AgentRequest(
             input="Explain RAG.",
+            user_id="user-123",
             session_id="session-456",
         ),
         tools=tools,
@@ -1183,10 +1185,13 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
 
     assert started.agent_name == "production-llm-agent"
     assert started.session_id == "session-456"
+    assert started.user_id == "user-123"
 
     assert llm_requested.tool_round == 0
+    assert llm_requested.user_id == "user-123"
 
     assert llm_completed.tool_round == 0
+    assert llm_completed.user_id == "user-123"
     assert llm_completed.provider == "fake"
     assert llm_completed.model == "gpt-test"
     assert llm_completed.metadata == {
@@ -1196,6 +1201,7 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     }
 
     assert completed.tool_round == 0
+    assert completed.user_id == "user-123"
     assert completed.provider == "fake"
     assert completed.model == "gpt-test"
 

@@ -13,6 +13,7 @@ def test_agent_execution_event_accepts_valid_event() -> None:
         event_type=AgentExecutionEventType.LLM_COMPLETED,
         agent_name="production-llm-agent",
         session_id="session-123",
+        user_id="user-123",
         tool_round=1,
         provider="openai",
         model="gpt-test",
@@ -24,6 +25,7 @@ def test_agent_execution_event_accepts_valid_event() -> None:
     assert event.event_type == (AgentExecutionEventType.LLM_COMPLETED)
     assert event.agent_name == "production-llm-agent"
     assert event.session_id == "session-123"
+    assert event.user_id == "user-123"
     assert event.tool_round == 1
     assert event.provider == "openai"
     assert event.model == "gpt-test"
@@ -64,6 +66,31 @@ def test_agent_execution_event_rejects_non_string_run_id() -> None:
             event_type=AgentExecutionEventType.AGENT_STARTED,
             agent_name="production-llm-agent",
             run_id=123,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("user_id", ["", "   "])
+def test_agent_execution_event_rejects_empty_user_id(user_id: str) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Agent execution event user_id must not be empty",
+    ):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="production-llm-agent",
+            user_id=user_id,
+        )
+
+
+def test_agent_execution_event_rejects_non_string_user_id() -> None:
+    with pytest.raises(
+        TypeError,
+        match="Agent execution event user_id must be a string or None",
+    ):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="production-llm-agent",
+            user_id=123,  # type: ignore[arg-type]
         )
 
 

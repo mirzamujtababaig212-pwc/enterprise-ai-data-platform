@@ -34,6 +34,7 @@ class AgentExecutionEvent:
     agent_name: str
     run_id: str | None = None
     session_id: str | None = None
+    user_id: str | None = None
     tool_round: int | None = None
     tool_name: str | None = None
     call_id: str | None = None
@@ -64,6 +65,13 @@ class AgentExecutionEvent:
 
             if not self.session_id.strip():
                 raise ValueError("Agent execution event session_id must not be empty.")
+
+        if self.user_id is not None:
+            if not isinstance(self.user_id, str):
+                raise TypeError("Agent execution event user_id must be a string or None.")
+
+            if not self.user_id.strip():
+                raise ValueError("Agent execution event user_id must not be empty.")
 
         if self.tool_round is not None:
             if not isinstance(self.tool_round, int):

@@ -201,6 +201,12 @@ class AgentRunEventRecord(Base):
         index=True,
     )
 
+    user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
     tool_round: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
