@@ -189,6 +189,10 @@ def test_claim_for_recovery_assigns_lease() -> None:
 
     assert claimed is not None
     assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.started_at is not None
+    assert claimed.lease_id is not None
+    assert claimed.lease_expires_at is not None
+    assert claimed.lease_expires_at > claimed.started_at
     assert claimed.lease_id == "lease-1"
     assert claimed.lease_expires_at == lease_expires_at
 

@@ -94,6 +94,80 @@ class FakeCheckpointRepository:
         return self.value
 
 
+class RecordingRepository(InMemoryAgentRunRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.recovery_claim = None
+        self.complete_call = None
+        self.fail_call = None
+
+    def claim_for_recovery(
+        self,
+        run_id,
+        *,
+        started_at,
+        lease_id,
+        lease_expires_at,
+    ):
+        self.recovery_claim = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "lease_id": lease_id,
+            "lease_expires_at": lease_expires_at,
+        }
+        return super().claim_for_recovery(
+            run_id,
+            started_at=started_at,
+            lease_id=lease_id,
+            lease_expires_at=lease_expires_at,
+        )
+
+    def complete_if_owner(
+        self,
+        run_id,
+        *,
+        lease_id,
+        completed_at,
+        output,
+    ):
+        self.complete_call = {
+            "run_id": run_id,
+            "lease_id": lease_id,
+            "completed_at": completed_at,
+            "output": output,
+        }
+        return super().complete_if_owner(
+            run_id,
+            lease_id=lease_id,
+            completed_at=completed_at,
+            output=output,
+        )
+
+    def fail_if_owner(
+        self,
+        run_id,
+        *,
+        lease_id,
+        completed_at,
+        error_type,
+        error_message,
+    ):
+        self.fail_call = {
+            "run_id": run_id,
+            "lease_id": lease_id,
+            "completed_at": completed_at,
+            "error_type": error_type,
+            "error_message": error_message,
+        }
+        return super().fail_if_owner(
+            run_id,
+            lease_id=lease_id,
+            completed_at=completed_at,
+            error_type=error_type,
+            error_message=error_message,
+        )
+
+
 class FakeRuntime:
     def __init__(self) -> None:
         self.calls = []
@@ -124,7 +198,7 @@ class FakeRuntime:
 
 @pytest.mark.asyncio
 async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
-    repository = InMemoryAgentRunRepository()
+    repository = RecordingRepository()
 
     run = failed_run(
         request_snapshot=request_snapshot(),
@@ -145,6 +219,14 @@ async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
     assert isinstance(result, AgentRunExecutionResult)
     assert result.run_id == "run-123"
     assert result.response.output == "Recovered successfully."
+
+    assert repository.recovery_claim is not None
+    assert repository.recovery_claim["lease_id"] is not None
+    assert repository.recovery_claim["lease_expires_at"] is not None
+    assert repository.recovery_claim["lease_expires_at"] > repository.recovery_claim["started_at"]
+
+    assert repository.complete_call is not None
+    assert repository.complete_call["lease_id"] == repository.recovery_claim["lease_id"]
 
     recovered = repository.get("run-123")
 
@@ -242,7 +324,7 @@ async def test_recovery_marks_run_failed_when_checkpoint_is_missing():
 
 @pytest.mark.asyncio
 async def test_recovery_marks_run_failed_when_runtime_resume_fails():
-    repository = InMemoryAgentRunRepository()
+    repository = RecordingRepository()
 
     repository.create(
         failed_run(
@@ -281,6 +363,11 @@ async def test_recovery_marks_run_failed_when_runtime_resume_fails():
     assert run.status is AgentRunStatus.FAILED
     assert run.error_type == "ValueError"
     assert run.error_message == "LLM provider unavailable"
+
+    assert repository.recovery_claim is not None
+    assert repository.recovery_claim["lease_id"] is not None
+    assert repository.fail_call is not None
+    assert repository.fail_call["lease_id"] == repository.recovery_claim["lease_id"]
 
 
 @pytest.mark.asyncio

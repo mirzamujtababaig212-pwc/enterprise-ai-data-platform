@@ -281,11 +281,13 @@ async def get_agent_run_application_service(
     db: Session = Depends(get_db),
 ) -> AgentRunApplicationService:
     await _initialize_agents()
+    app_settings = Settings.from_environment()
 
     return AgentRunApplicationService(
         runtime=_agent_runtime,
         repository=PostgreSQLAgentRunRepository(db),
         events_repository=PostgreSQLAgentRunEventsRepository(db),
+        lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 
 
@@ -293,11 +295,13 @@ async def get_agent_run_recovery_service(
     db: Session = Depends(get_db),
 ) -> AgentRunRecoveryService:
     await _initialize_agents()
+    app_settings = Settings.from_environment()
 
     return AgentRunRecoveryService(
         runtime=_agent_runtime,
         repository=PostgreSQLAgentRunRepository(db),
         checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
+        lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 
 

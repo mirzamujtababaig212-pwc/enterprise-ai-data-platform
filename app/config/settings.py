@@ -14,6 +14,7 @@ class Settings:
     log_level: str
     provider_credentials: dict[str, Any]
     external_evaluation_release_required: bool
+    agent_run_lease_duration_seconds: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -41,5 +42,8 @@ class Settings:
                 .strip()
                 .lower()
                 in {"1", "true", "yes", "on"}
+            ),
+            agent_run_lease_duration_seconds=int(
+                os.getenv("AGENT_RUN_LEASE_DURATION_SECONDS", "60")
             ),
         )

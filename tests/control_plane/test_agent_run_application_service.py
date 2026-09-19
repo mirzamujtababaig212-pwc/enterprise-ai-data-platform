@@ -46,6 +46,54 @@ def _repository() -> Mock:
     repository = Mock(spec=AgentRunRepository)
     repository.create.side_effect = lambda run: run
     repository.update.side_effect = lambda run: run
+
+    def complete_if_owner(
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at,
+        output,
+    ) -> AgentRun:
+        running = repository.update.call_args_list[0].args[0]
+        completed = running.transition_to(
+            AgentRunStatus.COMPLETED,
+        ).model_copy(
+            update={
+                "completed_at": completed_at,
+                "output": output,
+                "lease_id": None,
+                "lease_expires_at": None,
+            }
+        )
+        repository.completed_run = completed
+        return completed
+
+    def fail_if_owner(
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun:
+        running = repository.update.call_args_list[0].args[0]
+        failed = running.transition_to(
+            AgentRunStatus.FAILED,
+        ).model_copy(
+            update={
+                "completed_at": completed_at,
+                "error_type": error_type,
+                "error_message": error_message,
+                "lease_id": None,
+                "lease_expires_at": None,
+            }
+        )
+        repository.failed_run = failed
+        return failed
+
+    repository.complete_if_owner.side_effect = complete_if_owner
+    repository.fail_if_owner.side_effect = fail_if_owner
+
     return repository
 
 
@@ -75,11 +123,12 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     assert response.response.output == "completed"
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 2
+    assert repository.update.call_count == 1
+    repository.complete_if_owner.assert_called_once()
 
     pending = repository.create.call_args.args[0]
     running = repository.update.call_args_list[0].args[0]
-    completed = repository.update.call_args_list[1].args[0]
+    completed = repository.completed_run
 
     assert pending.status == AgentRunStatus.PENDING
     assert pending.agent_name == "enterprise-analyst"
@@ -89,6 +138,12 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     assert pending.completed_at is None
 
     assert running.run_id == pending.run_id
+    assert running.lease_id is not None
+    assert running.lease_expires_at is not None
+    assert running.lease_expires_at > running.started_at
+
+    assert repository.complete_if_owner.call_args.args[0] == running.run_id
+    assert repository.complete_if_owner.call_args.kwargs["lease_id"] == running.lease_id
     assert running.status == AgentRunStatus.RUNNING
     assert running.started_at is not None
     assert running.completed_at is None
@@ -100,6 +155,8 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     assert completed.output == "completed"
     assert completed.error_type is None
     assert completed.error_message is None
+    assert completed.lease_id is None
+    assert completed.lease_expires_at is None
 
     runtime.run.assert_awaited_once_with(
         "enterprise-analyst",
@@ -129,13 +186,12 @@ async def test_execute_uses_one_run_id_across_lifecycle() -> None:
         request=AgentRequest(input="Hello"),
     )
 
-    runs = [
-        repository.create.call_args.args[0],
-        repository.update.call_args_list[0].args[0],
-        repository.update.call_args_list[1].args[0],
-    ]
+    created_run = repository.create.call_args.args[0]
+    running_run = repository.update.call_args_list[0].args[0]
+    completed_run_id = repository.complete_if_owner.call_args.args[0]
 
-    assert len({run.run_id for run in runs}) == 1
+    assert created_run.run_id == running_run.run_id
+    assert completed_run_id == running_run.run_id
 
 
 @pytest.mark.asyncio
@@ -189,14 +245,20 @@ async def test_execute_persists_failed_run_and_reraises_runtime_error() -> None:
         )
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 2
+    assert repository.update.call_count == 1
+    repository.fail_if_owner.assert_called_once()
 
     pending = repository.create.call_args.args[0]
     running = repository.update.call_args_list[0].args[0]
-    failed = repository.update.call_args_list[1].args[0]
+    failed = repository.failed_run
 
     assert pending.status == AgentRunStatus.PENDING
     assert running.status == AgentRunStatus.RUNNING
+    assert running.lease_id is not None
+    assert running.lease_expires_at is not None
+
+    assert repository.fail_if_owner.call_args.args[0] == running.run_id
+    assert repository.fail_if_owner.call_args.kwargs["lease_id"] == running.lease_id
 
     assert failed.run_id == pending.run_id
     assert failed.status == AgentRunStatus.FAILED
@@ -205,6 +267,8 @@ async def test_execute_persists_failed_run_and_reraises_runtime_error() -> None:
     assert failed.error_type == "RuntimeError"
     assert failed.error_message == "agent execution failed"
     assert failed.output is None
+    assert failed.lease_id is None
+    assert failed.lease_expires_at is None
 
 
 @pytest.mark.asyncio
@@ -227,11 +291,16 @@ async def test_execute_persists_failed_run_for_lookup_error() -> None:
             request=AgentRequest(input="Hello"),
         )
 
-    failed = repository.update.call_args_list[-1].args[0]
+    repository.fail_if_owner.assert_called_once()
+
+    failed = repository.failed_run
+    running = repository.update.call_args_list[0].args[0]
 
     assert failed.status == AgentRunStatus.FAILED
     assert failed.error_type == "LookupError"
     assert failed.error_message == "agent not found"
+    assert repository.fail_if_owner.call_args.args[0] == running.run_id
+    assert repository.fail_if_owner.call_args.kwargs["lease_id"] == running.lease_id
 
 
 @pytest.mark.asyncio
@@ -316,18 +385,7 @@ async def test_execute_preserves_runtime_error_when_failed_persistence_fails() -
     runtime = Mock()
     runtime.run = AsyncMock(side_effect=original_error)
 
-    update_calls = 0
-
-    def update_with_failed_persistence(run: AgentRun) -> AgentRun:
-        nonlocal update_calls
-        update_calls += 1
-
-        if update_calls == 2:
-            raise RuntimeError("failed-state persistence failed")
-
-        return run
-
-    repository.update.side_effect = update_with_failed_persistence
+    repository.fail_if_owner.side_effect = RuntimeError("failed-state persistence failed")
 
     service = AgentRunApplicationService(
         runtime=runtime,
@@ -342,7 +400,8 @@ async def test_execute_preserves_runtime_error_when_failed_persistence_fails() -
 
     assert exc_info.value is original_error
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 2
+    assert repository.update.call_count == 1
+    repository.fail_if_owner.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -352,18 +411,7 @@ async def test_execute_surfaces_completed_persistence_failure() -> None:
     runtime = Mock()
     runtime.run = AsyncMock(return_value=_response())
 
-    update_calls = 0
-
-    def update_with_completed_persistence_failure(run: AgentRun) -> AgentRun:
-        nonlocal update_calls
-        update_calls += 1
-
-        if update_calls == 2:
-            raise RuntimeError("completed-state persistence failed")
-
-        return run
-
-    repository.update.side_effect = update_with_completed_persistence_failure
+    repository.complete_if_owner.side_effect = RuntimeError("completed-state persistence failed")
 
     service = AgentRunApplicationService(
         runtime=runtime,
@@ -381,7 +429,8 @@ async def test_execute_surfaces_completed_persistence_failure() -> None:
 
     runtime.run.assert_awaited_once()
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 2
+    assert repository.update.call_count == 1
+    repository.complete_if_owner.assert_called_once()
 
 
 def test_get_run_returns_none_for_missing_run() -> None:
@@ -626,10 +675,20 @@ async def test_execute_allows_run_when_admission_policy_allows() -> None:
     runtime.run.assert_awaited_once()
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 2
+    assert repository.update.call_count == 1
+    repository.complete_if_owner.assert_called_once()
 
     running = repository.update.call_args_list[0].args[0]
-    completed = repository.update.call_args_list[1].args[0]
+    completed = repository.completed_run
 
     assert running.status == AgentRunStatus.RUNNING
+    assert running.lease_id is not None
+    assert running.lease_expires_at is not None
+    assert running.lease_expires_at > running.started_at
+
+    assert repository.complete_if_owner.call_args.args[0] == running.run_id
+    assert repository.complete_if_owner.call_args.kwargs["lease_id"] == running.lease_id
+
     assert completed.status == AgentRunStatus.COMPLETED
+    assert completed.lease_id is None
+    assert completed.lease_expires_at is None

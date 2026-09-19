@@ -13,6 +13,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunStatus,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
+from app.control_plane.agent_runs.lease import create_lease
 
 
 class AgentRunRecoveryService:
@@ -39,10 +40,12 @@ class AgentRunRecoveryService:
         runtime: AgentRuntime,
         repository: AgentRunRepository,
         checkpoints_repository: AgentCheckpointsRepository,
+        lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
         self._repository = repository
         self._checkpoints_repository = checkpoints_repository
+        self._lease_seconds = lease_seconds
 
     async def recover(
         self,
@@ -70,16 +73,22 @@ class AgentRunRecoveryService:
             )
 
         claimed_at = datetime.now(UTC)
+        lease_id, lease_expires_at = create_lease(self._lease_seconds)
 
         run = self._repository.claim_for_recovery(
             run_id,
             started_at=claimed_at,
+            lease_id=lease_id,
+            lease_expires_at=lease_expires_at,
         )
 
         if run is None:
             raise RuntimeError(
                 f"Agent run '{run_id}' could not be claimed for recovery.",
             )
+
+        if run.lease_id is None:
+            raise RuntimeError(f"Agent run '{run.run_id}' was claimed without a lease.")
 
         try:
             checkpoint = self._checkpoints_repository.get_latest(run_id)
@@ -106,16 +115,15 @@ class AgentRunRecoveryService:
 
         completed_at = datetime.now(UTC)
 
-        completed_run = run.transition_to(
-            AgentRunStatus.COMPLETED,
-        ).model_copy(
-            update={
-                "completed_at": completed_at,
-                "output": response.output,
-            }
+        completed_run = self._repository.complete_if_owner(
+            run.run_id,
+            lease_id=run.lease_id,
+            completed_at=completed_at,
+            output=response.output,
         )
 
-        self._repository.update(completed_run)
+        if completed_run is None:
+            raise RuntimeError(f"Agent run '{run.run_id}' lost lease ownership before completion.")
 
         return AgentRunExecutionResult(
             run_id=completed_run.run_id,
@@ -129,18 +137,14 @@ class AgentRunRecoveryService:
     ) -> None:
         failed_at = datetime.now(UTC)
 
-        failed_run = run.transition_to(
-            AgentRunStatus.FAILED,
-        ).model_copy(
-            update={
-                "completed_at": failed_at,
-                "error_type": type(exc).__name__,
-                "error_message": str(exc),
-            }
-        )
-
         try:
-            self._repository.update(failed_run)
+            self._repository.fail_if_owner(
+                run.run_id,
+                lease_id=run.lease_id,
+                completed_at=failed_at,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
         except Exception:
             # Recovery must preserve the original execution failure.
             pass

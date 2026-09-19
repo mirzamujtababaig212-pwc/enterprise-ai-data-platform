@@ -3,8 +3,13 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock
 
+from app.config.settings import Settings
+from app.control_plane.agent_runs.application_service import AgentRunApplicationService
+from app.control_plane.agent_runs.recovery_service import AgentRunRecoveryService
 from app.control_plane.dependencies import (
     _build_rag_retriever,
+    get_agent_run_application_service,
+    get_agent_run_recovery_service,
     get_usage_store,
 )
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
@@ -93,3 +98,69 @@ def test_build_rag_retriever_requires_lexical_retriever_for_hybrid_backend() -> 
             semantic_retriever=Mock(),
             backend="postgres",
         )
+
+
+@pytest.mark.asyncio
+async def test_get_agent_run_application_service_uses_configured_lease_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=123,
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies.Settings.from_environment",
+        classmethod(lambda cls: configured_settings),
+    )
+
+    async def initialize_agents() -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+
+    service = await get_agent_run_application_service(db=Mock())
+
+    assert isinstance(service, AgentRunApplicationService)
+    assert service._lease_seconds == 123
+
+
+@pytest.mark.asyncio
+async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=123,
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies.Settings.from_environment",
+        classmethod(lambda cls: configured_settings),
+    )
+
+    async def initialize_agents() -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+
+    service = await get_agent_run_recovery_service(db=Mock())
+
+    assert isinstance(service, AgentRunRecoveryService)
+    assert service._lease_seconds == 123
