@@ -412,6 +412,71 @@ async def test_recovery_observer_failure_does_not_break_recovery():
 
 
 @pytest.mark.asyncio
+async def test_recovery_emits_failed_event_when_lease_ownership_is_lost():
+    observer = RecordingObserver()
+
+    class OwnershipLostRepository(RecordingRepository):
+        def complete_if_owner(
+            self,
+            run_id,
+            *,
+            lease_id,
+            completed_at,
+            output,
+        ):
+            self.complete_call = {
+                "run_id": run_id,
+                "lease_id": lease_id,
+                "completed_at": completed_at,
+                "output": output,
+            }
+            return None
+
+    ownership_lost_repository = OwnershipLostRepository()
+    ownership_lost_repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=ownership_lost_repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="lost lease ownership before completion",
+    ):
+        await service.recover("run-123")
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "failed_run",
+    }
+    assert observer.events[1].metadata == {
+        "recovery_type": "failed_run",
+        "error_type": "RuntimeError",
+    }
+
+    assert ownership_lost_repository.complete_call is not None
+    assert ownership_lost_repository.fail_call is None
+
+    run = ownership_lost_repository.get("run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.RUNNING
+    assert run.lease_id is not None
+    assert "lease_id" not in observer.events[1].metadata
+
+
+@pytest.mark.asyncio
 async def test_recovery_does_not_recover_run_without_request_snapshot():
     repository = InMemoryAgentRunRepository()
 
