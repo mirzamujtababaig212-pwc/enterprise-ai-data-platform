@@ -29,6 +29,26 @@ class AgentRunRepository(Protocol):
         run_id: str,
         *,
         started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None: ...
+
+    def heartbeat(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None: ...
+
+    def claim_expired_running_run(
+        self,
+        run_id: str,
+        *,
+        stale_before: datetime,
+        started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
     ) -> AgentRun | None: ...
 
     def list(

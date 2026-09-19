@@ -57,6 +57,8 @@ class InMemoryAgentRunRepository:
         run_id: str,
         *,
         started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
     ) -> AgentRun | None:
         with self._lock:
             run = self._runs.get(run_id)
@@ -71,6 +73,65 @@ class InMemoryAgentRunRepository:
                     "error_type": None,
                     "error_message": None,
                     "output": None,
+                    "lease_id": lease_id,
+                    "lease_expires_at": lease_expires_at,
+                }
+            )
+
+            self._runs[run_id] = claimed
+            return claimed
+
+    def heartbeat(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+                return None
+
+            updated = run.model_copy(
+                update={
+                    "lease_expires_at": lease_expires_at,
+                }
+            )
+
+            self._runs[run_id] = updated
+            return updated
+
+    def claim_expired_running_run(
+        self,
+        run_id: str,
+        *,
+        stale_before: datetime,
+        started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_expires_at is None
+                or run.lease_expires_at >= stale_before
+            ):
+                return None
+
+            claimed = run.model_copy(
+                update={
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "error_type": None,
+                    "error_message": None,
+                    "output": None,
+                    "lease_id": lease_id,
+                    "lease_expires_at": lease_expires_at,
                 }
             )
 

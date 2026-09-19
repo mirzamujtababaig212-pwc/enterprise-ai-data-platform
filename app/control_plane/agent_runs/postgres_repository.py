@@ -33,6 +33,8 @@ class PostgreSQLAgentRunRepository:
             status=run.status.value,
             started_at=run.started_at,
             completed_at=run.completed_at,
+            lease_id=run.lease_id,
+            lease_expires_at=run.lease_expires_at,
             error_type=run.error_type,
             error_message=run.error_message,
             output=run.output,
@@ -99,6 +101,8 @@ class PostgreSQLAgentRunRepository:
         record.status = run.status.value
         record.started_at = run.started_at
         record.completed_at = run.completed_at
+        record.lease_id = run.lease_id
+        record.lease_expires_at = run.lease_expires_at
         record.error_type = run.error_type
         record.error_message = run.error_message
         record.output = run.output
@@ -126,6 +130,8 @@ class PostgreSQLAgentRunRepository:
         run_id: str,
         *,
         started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
     ) -> AgentRun | None:
         statement = (
             update(AgentRunRecord)
@@ -140,6 +146,81 @@ class PostgreSQLAgentRunRepository:
                 error_type=None,
                 error_message=None,
                 output=None,
+                lease_id=lease_id,
+                lease_expires_at=lease_expires_at,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                return None
+
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
+    def heartbeat(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.lease_id == lease_id,
+            )
+            .values(
+                lease_expires_at=lease_expires_at,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                self._session.rollback()
+                return None
+
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
+    def claim_expired_running_run(
+        self,
+        run_id: str,
+        *,
+        stale_before: datetime,
+        started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.lease_expires_at < stale_before,
+            )
+            .values(
+                started_at=started_at,
+                completed_at=None,
+                error_type=None,
+                error_message=None,
+                output=None,
+                lease_id=lease_id,
+                lease_expires_at=lease_expires_at,
             )
         )
 
@@ -201,6 +282,12 @@ class PostgreSQLAgentRunRepository:
             ),
             completed_at=(
                 _ensure_aware(record.completed_at) if record.completed_at is not None else None
+            ),
+            lease_id=record.lease_id,
+            lease_expires_at=(
+                _ensure_aware(record.lease_expires_at)
+                if record.lease_expires_at is not None
+                else None
             ),
             error_type=record.error_type,
             error_message=record.error_message,

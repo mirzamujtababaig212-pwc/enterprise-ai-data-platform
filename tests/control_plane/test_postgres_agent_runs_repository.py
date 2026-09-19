@@ -49,6 +49,8 @@ def make_run(
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
+    lease_id: str | None = None,
+    lease_expires_at: datetime | None = None,
     error_type: str | None = None,
     error_message: str | None = None,
     output=None,
@@ -63,6 +65,8 @@ def make_run(
         status=status,
         started_at=started_at,
         completed_at=completed_at,
+        lease_id=lease_id,
+        lease_expires_at=lease_expires_at,
         error_type=error_type,
         error_message=error_message,
         output=output,
@@ -214,6 +218,8 @@ def test_claim_for_recovery_claims_failed_run(repository) -> None:
     claimed = repository.claim_for_recovery(
         failed.run_id,
         started_at=recovery_started_at,
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
     )
 
     assert claimed is not None
@@ -239,6 +245,8 @@ def test_claim_for_recovery_returns_none_for_non_failed_run(repository) -> None:
     claimed = repository.claim_for_recovery(
         running.run_id,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
     )
 
     assert claimed is None
@@ -252,6 +260,8 @@ def test_claim_for_recovery_returns_none_for_missing_run(repository) -> None:
     claimed = repository.claim_for_recovery(
         "does-not-exist",
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
     )
 
     assert claimed is None
@@ -271,10 +281,14 @@ def test_claim_for_recovery_can_only_claim_once(repository) -> None:
     first_claim = repository.claim_for_recovery(
         failed.run_id,
         started_at=first_started_at,
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
     )
     second_claim = repository.claim_for_recovery(
         failed.run_id,
         started_at=second_started_at,
+        lease_id="lease-2",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
     )
 
     assert first_claim is not None
@@ -478,3 +492,247 @@ def test_repository_implements_contract(repository) -> None:
     contract: AgentRunRepository = repository
 
     assert contract is not None
+
+
+def test_claim_for_recovery_persists_lease(repository) -> None:
+    failed = make_run(status=AgentRunStatus.FAILED)
+    repository.create(failed)
+
+    started_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    claimed = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=started_at,
+        lease_id="lease-recovery",
+        lease_expires_at=expires_at,
+    )
+
+    assert claimed is not None
+    assert claimed.lease_id == "lease-recovery"
+    assert claimed.lease_expires_at == expires_at
+
+    restored = repository.get(failed.run_id)
+    assert restored is not None
+    assert restored.lease_id == "lease-recovery"
+    assert restored.lease_expires_at == expires_at
+
+
+def test_heartbeat_extends_matching_lease(repository) -> None:
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    run = make_run(
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-1",
+        lease_expires_at=expires_at,
+    )
+    repository.create(run)
+
+    new_expiry = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    updated = repository.heartbeat(
+        run.run_id,
+        lease_id="lease-1",
+        lease_expires_at=new_expiry,
+    )
+
+    assert updated is not None
+    assert updated.lease_id == "lease-1"
+    assert updated.lease_expires_at == new_expiry
+
+
+def test_heartbeat_rejects_wrong_lease(repository) -> None:
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    run = make_run(
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-1",
+        lease_expires_at=expires_at,
+    )
+    repository.create(run)
+
+    result = repository.heartbeat(
+        run.run_id,
+        lease_id="wrong-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.lease_id == "lease-1"
+    assert restored.lease_expires_at == expires_at
+
+
+def test_heartbeat_rejects_non_running_run(repository) -> None:
+    run = make_run(
+        status=AgentRunStatus.COMPLETED,
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    result = repository.heartbeat(
+        run.run_id,
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+
+
+def test_unexpired_running_run_cannot_be_reclaimed(repository) -> None:
+    run = make_run(
+        status=AgentRunStatus.RUNNING,
+        lease_id="old-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        started_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+
+    assert claimed is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.lease_id == "old-lease"
+
+
+def test_expired_running_run_can_be_reclaimed(repository) -> None:
+    run = make_run(
+        status=AgentRunStatus.RUNNING,
+        lease_id="old-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        output={"partial": True},
+    )
+    repository.create(run)
+
+    started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        started_at=started_at,
+        lease_id="new-lease",
+        lease_expires_at=expires_at,
+    )
+
+    assert claimed is not None
+    assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.started_at == started_at
+    assert claimed.lease_id == "new-lease"
+    assert claimed.lease_expires_at == expires_at
+    assert claimed.output is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.lease_id == "new-lease"
+    assert restored.lease_expires_at == expires_at
+
+
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
+def test_claim_expired_running_run_is_atomic_across_postgres_sessions() -> None:
+    import os
+
+    from sqlalchemy import create_engine, delete
+    from sqlalchemy.orm import sessionmaker
+
+    from app.control_plane.persistence.models import AgentRunRecord
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-stale-claim-race"
+    stale_before = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+    expired_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    setup_session = session_factory()
+    try:
+        setup_repository = PostgreSQLAgentRunRepository(setup_session)
+        setup_repository.create(
+            make_run(
+                run_id=run_id,
+                status=AgentRunStatus.RUNNING,
+                lease_id="expired-lease",
+                lease_expires_at=expired_at,
+            )
+        )
+    finally:
+        setup_session.close()
+
+    session_a = session_factory()
+    session_b = session_factory()
+
+    try:
+        repository_a = PostgreSQLAgentRunRepository(session_a)
+        repository_b = PostgreSQLAgentRunRepository(session_b)
+
+        claimed_a = repository_a.claim_expired_running_run(
+            run_id,
+            stale_before=stale_before,
+            started_at=started_at,
+            lease_id="recovery-lease-a",
+            lease_expires_at=lease_expires_at,
+        )
+        claimed_b = repository_b.claim_expired_running_run(
+            run_id,
+            stale_before=stale_before,
+            started_at=started_at,
+            lease_id="recovery-lease-b",
+            lease_expires_at=lease_expires_at,
+        )
+
+        winners = [claimed for claimed in (claimed_a, claimed_b) if claimed is not None]
+
+        assert len(winners) == 1
+        assert winners[0].lease_id in {"recovery-lease-a", "recovery-lease-b"}
+
+        with session_factory() as verification_session:
+            verification_repository = PostgreSQLAgentRunRepository(verification_session)
+            restored = verification_repository.get(run_id)
+
+        assert restored is not None
+        assert restored.status is AgentRunStatus.RUNNING
+        assert restored.lease_id == winners[0].lease_id
+        assert restored.lease_expires_at == lease_expires_at
+    finally:
+        session_a.close()
+        session_b.close()
+
+        cleanup_session = session_factory()
+        try:
+            cleanup_session.execute(
+                delete(AgentRunRecord).where(
+                    AgentRunRecord.run_id == run_id,
+                )
+            )
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            engine.dispose()

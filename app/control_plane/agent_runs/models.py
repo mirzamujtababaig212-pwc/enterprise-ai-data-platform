@@ -60,6 +60,9 @@ class AgentRun(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
+    lease_id: str | None = None
+    lease_expires_at: datetime | None = None
+
     error_type: str | None = None
     error_message: str | None = None
 

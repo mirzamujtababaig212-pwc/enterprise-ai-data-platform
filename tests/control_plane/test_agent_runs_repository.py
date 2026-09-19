@@ -170,3 +170,157 @@ def test_clear_removes_all_runs() -> None:
 
     assert repository.get("run-1") is None
     assert repository.list() == []
+
+
+def test_claim_for_recovery_assigns_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+    failed = make_run("run-recovery", status=AgentRunStatus.FAILED)
+    repository.create(failed)
+
+    started_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    claimed = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=started_at,
+        lease_id="lease-1",
+        lease_expires_at=lease_expires_at,
+    )
+
+    assert claimed is not None
+    assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.lease_id == "lease-1"
+    assert claimed.lease_expires_at == lease_expires_at
+
+
+def test_heartbeat_extends_matching_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    run = make_run("run-heartbeat").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-1",
+            "lease_expires_at": expires_at,
+        }
+    )
+    repository.create(run)
+
+    new_expiry = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    updated = repository.heartbeat(
+        run.run_id,
+        lease_id="lease-1",
+        lease_expires_at=new_expiry,
+    )
+
+    assert updated is not None
+    assert updated.lease_id == "lease-1"
+    assert updated.lease_expires_at == new_expiry
+
+
+def test_heartbeat_rejects_wrong_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    run = make_run("run-heartbeat").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-1",
+            "lease_expires_at": expires_at,
+        }
+    )
+    repository.create(run)
+
+    result = repository.heartbeat(
+        run.run_id,
+        lease_id="lease-wrong",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_heartbeat_rejects_non_running_run() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-completed", status=AgentRunStatus.COMPLETED).model_copy(
+        update={
+            "lease_id": "lease-1",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.heartbeat(
+        run.run_id,
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_unexpired_running_run_cannot_be_reclaimed() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    lease_expires_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    run = make_run("run-stale").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "old-lease",
+            "lease_expires_at": lease_expires_at,
+        }
+    )
+    repository.create(run)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        started_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+
+    assert claimed is None
+    assert repository.get(run.run_id) == run
+
+
+def test_expired_running_run_can_be_reclaimed() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    old_expiry = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    run = make_run("run-stale").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "old-lease",
+            "lease_expires_at": old_expiry,
+            "error_type": "RuntimeError",
+            "error_message": "old failure",
+            "output": {"partial": True},
+        }
+    )
+    repository.create(run)
+
+    new_started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    new_expiry = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        started_at=new_started_at,
+        lease_id="new-lease",
+        lease_expires_at=new_expiry,
+    )
+
+    assert claimed is not None
+    assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.started_at == new_started_at
+    assert claimed.lease_id == "new-lease"
+    assert claimed.lease_expires_at == new_expiry
+    assert claimed.completed_at is None
+    assert claimed.error_type is None
+    assert claimed.error_message is None
+    assert claimed.output is None
