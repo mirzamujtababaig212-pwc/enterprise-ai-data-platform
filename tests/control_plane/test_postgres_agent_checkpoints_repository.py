@@ -1,5 +1,15 @@
-from sqlalchemy import create_engine, inspect
+import pytest
+from sqlalchemy import create_engine, delete, inspect
 from sqlalchemy.orm import sessionmaker
+
+from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.postgres_repository import (
+    PostgreSQLAgentRunRepository,
+)
+from app.control_plane.persistence.models import (
+    AgentRunCheckpointRecord,
+    AgentRunRecord,
+)
 
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
@@ -170,3 +180,116 @@ def test_repository_implements_contract() -> None:
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture()
+def postgres_repository():
+    import os
+
+    if os.getenv("RUN_POSTGRES_INTEGRATION") != "1":
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}")
+
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    session = session_factory()
+
+    try:
+        yield engine, session, PostgreSQLAgentCheckpointsRepository(session)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_postgres_save_and_get_latest_round_trip(postgres_repository) -> None:
+    _, session, checkpoint_repository = postgres_repository
+    run_id = "checkpoint-postgres-round-trip"
+    run_repository = PostgreSQLAgentRunRepository(session)
+
+    try:
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="vehicle-agent",
+                session_id="session-1",
+                user_id="user-1",
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+
+        checkpoint = make_checkpoint(
+            run_id=run_id,
+            metadata={
+                "source": "postgres_integration",
+                "tool": "vehicle_lookup",
+            },
+        )
+
+        result = checkpoint_repository.save(checkpoint)
+        restored = checkpoint_repository.get_latest(run_id)
+
+        assert result == checkpoint
+        assert restored == checkpoint
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
+        )
+        session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+        session.commit()
+
+
+def test_postgres_get_latest_returns_newest_checkpoint(
+    postgres_repository,
+) -> None:
+    _, session, checkpoint_repository = postgres_repository
+    run_id = "checkpoint-postgres-newest"
+    run_repository = PostgreSQLAgentRunRepository(session)
+
+    try:
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="vehicle-agent",
+                session_id="session-1",
+                user_id="user-1",
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+
+        first = make_checkpoint(
+            run_id=run_id,
+            tool_round=1,
+            metadata={"sequence": 1},
+        )
+        second = make_checkpoint(
+            run_id=run_id,
+            tool_round=2,
+            metadata={"sequence": 2},
+        )
+
+        checkpoint_repository.save(first)
+        checkpoint_repository.save(second)
+
+        restored = checkpoint_repository.get_latest(run_id)
+
+        assert restored == second
+        assert restored is not None
+        assert restored.tool_round == 2
+        assert restored.metadata == {"sequence": 2}
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
+        )
+        session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+        session.commit()
