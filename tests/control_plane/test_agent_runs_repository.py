@@ -519,3 +519,69 @@ def test_fail_if_owner_rejects_wrong_lease():
     assert restored is not None
     assert restored.status is AgentRunStatus.RUNNING
     assert restored.lease_id == "lease-a"
+
+
+def test_cancel_if_owner_clears_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-cancel").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.CANCELLED
+    assert result.completed_at == completed_at
+    assert result.lease_id is None
+    assert result.lease_expires_at is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.CANCELLED
+    assert restored.lease_id is None
+    assert restored.lease_expires_at is None
+
+
+def test_cancel_if_owner_rejects_wrong_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-cancel-wrong").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-b",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_cancelled_run_is_terminal() -> None:
+    run = make_run("run-cancelled", status=AgentRunStatus.RUNNING)
+
+    cancelled = run.transition_to(AgentRunStatus.CANCELLED)
+
+    assert cancelled.status is AgentRunStatus.CANCELLED
+
+    with pytest.raises(Exception):
+        cancelled.transition_to(AgentRunStatus.RUNNING)

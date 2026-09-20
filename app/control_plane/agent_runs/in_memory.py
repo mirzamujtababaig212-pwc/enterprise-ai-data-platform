@@ -217,6 +217,30 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = failed
             return failed
 
+    def cancel_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+                return None
+
+            cancelled = run.transition_to(AgentRunStatus.CANCELLED).model_copy(
+                update={
+                    "completed_at": completed_at,
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = cancelled
+            return cancelled
+
     def list(
         self,
         *,

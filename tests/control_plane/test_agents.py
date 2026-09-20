@@ -405,7 +405,9 @@ def test_list_agent_runs_serializes_all_lifecycle_statuses() -> None:
         "running",
         "completed",
         "failed",
+        "cancelled",
         "rejected",
+        "cancelled",
     }
 
     for run in runs:

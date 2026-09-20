@@ -41,6 +41,12 @@ class AgentRunResponse(BaseModel):
     )
 
 
+class AgentRunCancellationResponse(BaseModel):
+    run_id: str = Field(min_length=1)
+    status: str
+    message: str
+
+
 class AgentRunDetailResponse(BaseModel):
     run_id: str
     agent_name: str

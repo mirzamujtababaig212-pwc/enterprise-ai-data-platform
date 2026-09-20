@@ -1047,3 +1047,59 @@ def test_complete_if_owner_is_atomic_across_postgres_sessions() -> None:
         finally:
             cleanup_session.close()
             engine.dispose()
+
+
+def test_cancel_if_owner_persists_cancelled_run_and_clears_lease(repository) -> None:
+    run = make_run(
+        run_id="run-cancel",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.CANCELLED
+    assert result.completed_at == completed_at
+    assert result.lease_id is None
+    assert result.lease_expires_at is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.CANCELLED
+    assert restored.lease_id is None
+    assert restored.lease_expires_at is None
+
+
+def test_cancel_if_owner_rejects_wrong_lease(repository) -> None:
+    run = make_run(
+        run_id="run-cancel-wrong",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-b",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)

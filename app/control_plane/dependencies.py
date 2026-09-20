@@ -55,6 +55,7 @@ from app.control_plane.agent_run_events.tool_authorization_observer import (
 )
 from tools.execution.service import ToolExecutionService
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
+from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
@@ -76,6 +77,7 @@ _llm_router = Router()
 
 _agent_registry = InMemoryAgentRegistry()
 _tool_registry = InMemoryToolRegistry()
+_agent_run_cancellation_registry = AgentRunCancellationRegistry()
 
 _agent_observer = CompositeAgentExecutionObserver(
     [
@@ -287,6 +289,7 @@ async def get_agent_run_application_service(
         runtime=_agent_runtime,
         repository=PostgreSQLAgentRunRepository(db),
         events_repository=PostgreSQLAgentRunEventsRepository(db),
+        cancellation_registry=_agent_run_cancellation_registry,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 

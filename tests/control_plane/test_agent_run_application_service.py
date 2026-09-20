@@ -94,8 +94,28 @@ def _repository() -> Mock:
         repository.failed_run = failed
         return failed
 
+    def cancel_if_owner(
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at,
+    ) -> AgentRun:
+        running = repository.update.call_args_list[0].args[0]
+        cancelled = running.transition_to(
+            AgentRunStatus.CANCELLED,
+        ).model_copy(
+            update={
+                "completed_at": completed_at,
+                "lease_id": None,
+                "lease_expires_at": None,
+            }
+        )
+        repository.cancelled_run = cancelled
+        return cancelled
+
     repository.complete_if_owner.side_effect = complete_if_owner
     repository.fail_if_owner.side_effect = fail_if_owner
+    repository.cancel_if_owner.side_effect = cancel_if_owner
 
     return repository
 
@@ -847,3 +867,179 @@ async def test_execute_starts_and_cancels_heartbeat_task() -> None:
     assert created_tasks[0].cancelled()
 
     repository.complete_if_owner.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_cancelled_run_and_reraises_cancelled_error() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+
+    started = asyncio.Event()
+
+    async def run_agent(*args, **kwargs):
+        started.set()
+        await asyncio.Future()
+
+    runtime.run = AsyncMock(side_effect=run_agent)
+
+    from app.control_plane.agent_runs.cancellation import (
+        AgentRunCancellationRegistry,
+    )
+
+    registry = AgentRunCancellationRegistry()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        cancellation_registry=registry,
+    )
+
+    execution_task = asyncio.create_task(
+        service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Long running task",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+    )
+
+    await started.wait()
+
+    running = repository.update.call_args_list[0].args[0]
+
+    assert running.status == AgentRunStatus.RUNNING
+    assert registry.cancel(running.run_id) is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+
+    repository.cancel_if_owner.assert_called_once()
+
+    cancelled = repository.cancelled_run
+
+    assert cancelled.run_id == running.run_id
+    assert cancelled.status == AgentRunStatus.CANCELLED
+    assert cancelled.started_at == running.started_at
+    assert cancelled.completed_at is not None
+    assert cancelled.output is None
+    assert cancelled.error_type is None
+    assert cancelled.error_message is None
+    assert cancelled.lease_id is None
+    assert cancelled.lease_expires_at is None
+
+    assert repository.cancel_if_owner.call_args.args[0] == running.run_id
+    assert repository.cancel_if_owner.call_args.kwargs["lease_id"] == running.lease_id
+    assert repository.cancel_if_owner.call_args.kwargs["completed_at"] is not None
+
+    repository.fail_if_owner.assert_not_called()
+    repository.complete_if_owner.assert_not_called()
+
+
+def test_cancel_raises_lookup_error_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    runtime = Mock()
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        LookupError,
+        match="Agent run 'missing-run' was not found.",
+    ):
+        service.cancel("missing-run")
+
+    repository.get.assert_called_once_with("missing-run")
+
+
+def test_cancel_rejects_non_running_run() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="completed-run",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+    repository.get.return_value = run
+
+    runtime = Mock()
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Agent run 'completed-run' is not cancellable from status 'completed'",
+    ):
+        service.cancel("completed-run")
+
+    repository.get.assert_called_once_with("completed-run")
+
+
+def test_cancel_signals_registered_running_task() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="running-run",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        started_at=datetime.now(UTC),
+    )
+    repository.get.return_value = run
+
+    cancellation_registry = Mock()
+
+    runtime = Mock()
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        cancellation_registry=cancellation_registry,
+    )
+
+    cancellation_registry.cancel.return_value = True
+
+    result = service.cancel("running-run")
+
+    assert result is run
+    cancellation_registry.cancel.assert_called_once_with("running-run")
+    repository.get.assert_called_once_with("running-run")
+
+
+def test_cancel_rejects_running_run_without_active_task() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="running-run",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        started_at=datetime.now(UTC),
+    )
+    repository.get.return_value = run
+
+    cancellation_registry = Mock()
+    cancellation_registry.cancel.return_value = False
+
+    runtime = Mock()
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        cancellation_registry=cancellation_registry,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="running but has no active execution task in this process",
+    ):
+        service.cancel("running-run")
+
+    cancellation_registry.cancel.assert_called_once_with("running-run")

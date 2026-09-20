@@ -13,6 +13,7 @@ from app.control_plane.dependencies import (
     get_agent_run_recovery_service,
 )
 from app.control_plane.schemas.agents import (
+    AgentRunCancellationResponse,
     AgentRunDetailResponse,
     AgentRunEventListResponse,
     AgentRunEventResponse,
@@ -168,6 +169,45 @@ async def list_agent_runs(
             )
             for run in runs
         ]
+    )
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=AgentRunCancellationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_agent_run(
+    run_id: str,
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunCancellationResponse:
+    try:
+        run = service.cancel(run_id)
+
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return AgentRunCancellationResponse(
+        run_id=run.run_id,
+        status=run.status.value,
+        message="Cancellation requested.",
     )
 
 

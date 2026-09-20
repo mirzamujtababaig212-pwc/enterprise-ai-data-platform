@@ -8,6 +8,9 @@ from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.observability import AgentExecutionEvent
 from ai_platform.agents.runtime import AgentRuntime
 
+from app.control_plane.agent_runs.cancellation import (
+    AgentRunCancellationRegistry,
+)
 from app.control_plane.agent_runs.admission import (
     AgentRunAdmissionPolicy,
     AllowAllAgentRunAdmissionPolicy,
@@ -39,6 +42,7 @@ class AgentRunApplicationService:
         repository: AgentRunRepository,
         events_repository: AgentRunEventsRepository | None = None,
         admission_policy: AgentRunAdmissionPolicy | None = None,
+        cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
@@ -48,6 +52,7 @@ class AgentRunApplicationService:
             admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
         )
         self._lease_seconds = lease_seconds
+        self._cancellation_registry = cancellation_registry
 
     async def execute(
         self,
@@ -115,12 +120,39 @@ class AgentRunApplicationService:
             )
         )
 
+        execution_task = asyncio.current_task()
+        if execution_task is None:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            raise RuntimeError("Agent run execution is not attached to an asyncio task.")
+
+        if self._cancellation_registry is not None:
+            self._cancellation_registry.register(run.run_id, execution_task)
+
         try:
             response = await self._runtime.run(
                 agent_name,
                 request,
                 run_id=run.run_id,
             )
+        except asyncio.CancelledError:
+            cancelled_at = datetime.now(UTC)
+
+            try:
+                self._repository.cancel_if_owner(
+                    run.run_id,
+                    lease_id=lease_id,
+                    completed_at=cancelled_at,
+                )
+            except Exception:
+                # Cancellation must continue to propagate even if terminal
+                # cancellation persistence fails.
+                pass
+
+            raise
         except Exception as exc:
             failed_at = datetime.now(UTC)
 
@@ -144,6 +176,12 @@ class AgentRunApplicationService:
 
             raise
         finally:
+            if self._cancellation_registry is not None:
+                self._cancellation_registry.unregister(
+                    run.run_id,
+                    execution_task,
+                )
+
             heartbeat_task.cancel()
             try:
                 await heartbeat_task
@@ -168,6 +206,32 @@ class AgentRunApplicationService:
 
     def get_run(self, run_id: str) -> AgentRun | None:
         return self._repository.get(run_id)
+
+    def cancel(self, run_id: str) -> AgentRun:
+        run = self._repository.get(run_id)
+
+        if run is None:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        if run.status is not AgentRunStatus.RUNNING:
+            raise ValueError(
+                f"Agent run '{run_id}' is not cancellable from status " f"'{run.status.value}'.",
+            )
+
+        if self._cancellation_registry is None:
+            raise RuntimeError(
+                "Agent run cancellation is not configured.",
+            )
+
+        if not self._cancellation_registry.cancel(run_id):
+            raise RuntimeError(
+                f"Agent run '{run_id}' is running but has no active execution "
+                "task in this process.",
+            )
+
+        return run
 
     def list_runs(
         self,

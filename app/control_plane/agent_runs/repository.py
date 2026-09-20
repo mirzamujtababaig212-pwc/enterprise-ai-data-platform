@@ -77,6 +77,14 @@ class AgentRunRepository(Protocol):
         error_message: str,
     ) -> AgentRun | None: ...
 
+    def cancel_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        completed_at: datetime,
+    ) -> AgentRun | None: ...
+
     def list(
         self,
         *,
