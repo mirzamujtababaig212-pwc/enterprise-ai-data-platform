@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, func
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    PrimaryKeyConstraint,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -169,6 +179,72 @@ class AgentRunRecord(Base):
     request_snapshot: Mapped[dict | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"),
         nullable=True,
+    )
+
+
+class ToolExecutionIdempotencyRecord(Base):
+    __tablename__ = "tool_execution_idempotency"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+    )
+
+    call_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    tool_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    success: Mapped[bool] = mapped_column(
+        nullable=False,
+    )
+
+    output: Mapped[object | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
+    error: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    failure_category: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "run_id",
+            "call_id",
+            "tool_name",
+            name="pk_tool_execution_idempotency",
+        ),
     )
 
 

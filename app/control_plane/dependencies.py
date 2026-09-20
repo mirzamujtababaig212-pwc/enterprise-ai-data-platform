@@ -53,6 +53,9 @@ from app.control_plane.agent_checkpoints.postgres_handler import (
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
+from app.control_plane.tool_execution.postgres_idempotency import (
+    PostgreSQLToolExecutionIdempotencyStore,
+)
 from tools.execution.service import ToolExecutionService
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
@@ -92,9 +95,14 @@ _tool_authorization_audit_sink = ToolAuthorizationAuditObserver(
     _agent_observer,
 )
 
+_tool_idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
+    SessionLocal,
+)
+
 _tool_execution_service = ToolExecutionService(
     _tool_registry,
     audit_sink=_tool_authorization_audit_sink,
+    idempotency_store=_tool_idempotency_store,
 )
 
 _memory_store = MemoryStoreFactory.create()

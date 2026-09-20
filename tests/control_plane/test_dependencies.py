@@ -13,7 +13,11 @@ from app.control_plane.dependencies import (
     get_usage_store,
 )
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
+from app.control_plane.tool_execution.postgres_idempotency import (
+    PostgreSQLToolExecutionIdempotencyStore,
+)
 from rag.retrieval import HybridRetriever
+from tools.execution.service import ToolExecutionService
 
 
 def test_get_usage_store_creates_repository_from_injected_session() -> None:
@@ -29,6 +33,20 @@ def test_get_usage_store_creates_repository_from_injected_session() -> None:
     assert store_one is not store_two
     assert store_one._session is session_one
     assert store_two._session is session_two
+
+
+def test_tool_execution_service_uses_durable_idempotency_store() -> None:
+    from app.control_plane import dependencies
+
+    assert isinstance(dependencies._tool_execution_service, ToolExecutionService)
+    assert isinstance(
+        dependencies._tool_execution_service.idempotency_store,
+        PostgreSQLToolExecutionIdempotencyStore,
+    )
+    assert (
+        dependencies._tool_execution_service.idempotency_store._session_factory
+        is dependencies.SessionLocal
+    )
 
 
 def test_get_external_evaluation_dispatcher_is_lazy() -> None:
