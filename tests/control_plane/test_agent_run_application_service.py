@@ -1123,9 +1123,10 @@ def test_cancel_rejects_non_running_run() -> None:
         service.cancel("completed-run")
 
     repository.get.assert_called_once_with("completed-run")
+    repository.request_cancellation.assert_not_called()
 
 
-def test_cancel_signals_registered_running_task() -> None:
+def test_cancel_persists_intent_then_signals_registered_running_task() -> None:
     repository = _repository()
 
     run = AgentRun(
@@ -1136,9 +1137,17 @@ def test_cancel_signals_registered_running_task() -> None:
         lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         started_at=datetime.now(UTC),
     )
+    requested_run = run.model_copy(
+        update={
+            "cancellation_requested": True,
+            "cancellation_requested_at": datetime.now(UTC),
+        }
+    )
     repository.get.return_value = run
+    repository.request_cancellation.return_value = requested_run
 
     cancellation_registry = Mock()
+    cancellation_registry.cancel.return_value = True
 
     runtime = Mock()
     service = AgentRunApplicationService(
@@ -1147,16 +1156,17 @@ def test_cancel_signals_registered_running_task() -> None:
         cancellation_registry=cancellation_registry,
     )
 
-    cancellation_registry.cancel.return_value = True
-
     result = service.cancel("running-run")
 
-    assert result is run
-    cancellation_registry.cancel.assert_called_once_with("running-run")
+    assert result is requested_run
     repository.get.assert_called_once_with("running-run")
+    repository.request_cancellation.assert_called_once()
+    request_kwargs = repository.request_cancellation.call_args.kwargs
+    assert request_kwargs["requested_at"].tzinfo is UTC
+    cancellation_registry.cancel.assert_called_once_with("running-run")
 
 
-def test_cancel_rejects_running_run_without_active_task() -> None:
+def test_cancel_returns_durable_intent_when_local_task_is_missing() -> None:
     repository = _repository()
 
     run = AgentRun(
@@ -1167,7 +1177,14 @@ def test_cancel_rejects_running_run_without_active_task() -> None:
         lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         started_at=datetime.now(UTC),
     )
+    requested_run = run.model_copy(
+        update={
+            "cancellation_requested": True,
+            "cancellation_requested_at": datetime.now(UTC),
+        }
+    )
     repository.get.return_value = run
+    repository.request_cancellation.return_value = requested_run
 
     cancellation_registry = Mock()
     cancellation_registry.cancel.return_value = False
@@ -1179,10 +1196,73 @@ def test_cancel_rejects_running_run_without_active_task() -> None:
         cancellation_registry=cancellation_registry,
     )
 
+    result = service.cancel("running-run")
+
+    assert result is requested_run
+    repository.request_cancellation.assert_called_once()
+    cancellation_registry.cancel.assert_called_once_with("running-run")
+
+
+def test_cancel_rejects_when_cancellation_intent_cannot_be_persisted() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="running-run",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        started_at=datetime.now(UTC),
+    )
+    repository.get.return_value = run
+    repository.request_cancellation.return_value = None
+
+    runtime = Mock()
+    cancellation_registry = Mock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        cancellation_registry=cancellation_registry,
+    )
+
     with pytest.raises(
         RuntimeError,
-        match="running but has no active execution task in this process",
+        match="could not accept cancellation",
     ):
         service.cancel("running-run")
 
-    cancellation_registry.cancel.assert_called_once_with("running-run")
+    repository.request_cancellation.assert_called_once()
+    cancellation_registry.cancel.assert_not_called()
+
+
+def test_cancel_does_not_require_local_registry_when_intent_is_persisted() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="running-run",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-123",
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        started_at=datetime.now(UTC),
+    )
+    requested_run = run.model_copy(
+        update={
+            "cancellation_requested": True,
+            "cancellation_requested_at": datetime.now(UTC),
+        }
+    )
+    repository.get.return_value = run
+    repository.request_cancellation.return_value = requested_run
+
+    runtime = Mock()
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = service.cancel("running-run")
+
+    assert result is requested_run
+    repository.request_cancellation.assert_called_once()

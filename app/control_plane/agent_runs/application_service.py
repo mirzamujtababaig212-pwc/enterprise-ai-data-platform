@@ -250,18 +250,20 @@ class AgentRunApplicationService:
                 f"Agent run '{run_id}' is not cancellable from status " f"'{run.status.value}'.",
             )
 
-        if self._cancellation_registry is None:
+        requested = self._repository.request_cancellation(
+            run_id,
+            requested_at=datetime.now(UTC),
+        )
+
+        if requested is None:
             raise RuntimeError(
-                "Agent run cancellation is not configured.",
+                f"Agent run '{run_id}' could not accept cancellation.",
             )
 
-        if not self._cancellation_registry.cancel(run_id):
-            raise RuntimeError(
-                f"Agent run '{run_id}' is running but has no active execution "
-                "task in this process.",
-            )
+        if self._cancellation_registry is not None:
+            self._cancellation_registry.cancel(run_id)
 
-        return run
+        return requested
 
     def list_runs(
         self,
