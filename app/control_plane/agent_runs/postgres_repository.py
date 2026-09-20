@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,8 @@ class PostgreSQLAgentRunRepository:
             completed_at=run.completed_at,
             lease_id=run.lease_id,
             lease_expires_at=run.lease_expires_at,
+            cancellation_requested=run.cancellation_requested,
+            cancellation_requested_at=run.cancellation_requested_at,
             error_type=run.error_type,
             error_message=run.error_message,
             output=run.output,
@@ -103,6 +105,8 @@ class PostgreSQLAgentRunRepository:
         record.completed_at = run.completed_at
         record.lease_id = run.lease_id
         record.lease_expires_at = run.lease_expires_at
+        record.cancellation_requested = run.cancellation_requested
+        record.cancellation_requested_at = run.cancellation_requested_at
         record.error_type = run.error_type
         record.error_message = run.error_message
         record.output = run.output
@@ -378,6 +382,42 @@ class PostgreSQLAgentRunRepository:
 
         return self.get(run_id)
 
+    def request_cancellation(
+        self,
+        run_id: str,
+        *,
+        requested_at: datetime,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+            )
+            .values(
+                cancellation_requested=True,
+                cancellation_requested_at=func.coalesce(
+                    AgentRunRecord.cancellation_requested_at,
+                    requested_at,
+                ),
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                self._session.rollback()
+                return None
+
+            self._session.commit()
+
+        except Exception:
+            self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
     def list(
         self,
         *,
@@ -428,6 +468,12 @@ class PostgreSQLAgentRunRepository:
             lease_expires_at=(
                 _ensure_aware(record.lease_expires_at)
                 if record.lease_expires_at is not None
+                else None
+            ),
+            cancellation_requested=record.cancellation_requested,
+            cancellation_requested_at=(
+                _ensure_aware(record.cancellation_requested_at)
+                if record.cancellation_requested_at is not None
                 else None
             ),
             error_type=record.error_type,

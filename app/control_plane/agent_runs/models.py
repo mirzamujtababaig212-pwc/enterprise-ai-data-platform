@@ -66,6 +66,9 @@ class AgentRun(BaseModel):
     lease_id: str | None = None
     lease_expires_at: datetime | None = None
 
+    cancellation_requested: bool = False
+    cancellation_requested_at: datetime | None = None
+
     error_type: str | None = None
     error_message: str | None = None
 

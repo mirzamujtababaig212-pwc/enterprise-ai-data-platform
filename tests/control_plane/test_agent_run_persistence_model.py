@@ -27,6 +27,8 @@ def test_agent_run_record_columns() -> None:
         "request_snapshot",
         "lease_id",
         "lease_expires_at",
+        "cancellation_requested",
+        "cancellation_requested_at",
     }
 
 

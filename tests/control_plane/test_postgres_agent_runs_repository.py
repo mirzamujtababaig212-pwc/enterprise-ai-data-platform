@@ -1204,3 +1204,99 @@ def test_cancel_if_owner_rejects_wrong_lease(repository) -> None:
     assert restored.status is AgentRunStatus.RUNNING
     assert restored.lease_id == "lease-a"
     assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+
+def test_request_cancellation_persists_intent(repository) -> None:
+    requested_at = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+
+    run = make_run(
+        run_id="run-cancel-request",
+        status=AgentRunStatus.RUNNING,
+    )
+    repository.create(run)
+
+    result = repository.request_cancellation(
+        run.run_id,
+        requested_at=requested_at,
+    )
+
+    assert result is not None
+    assert result.cancellation_requested is True
+    assert result.cancellation_requested_at == requested_at
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.cancellation_requested is True
+    assert restored.cancellation_requested_at == requested_at
+
+
+def test_request_cancellation_is_idempotent_and_preserves_first_timestamp(
+    repository,
+) -> None:
+    first_requested_at = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    second_requested_at = datetime(2026, 9, 20, 12, 5, tzinfo=UTC)
+
+    run = make_run(
+        run_id="run-cancel-idempotent",
+        status=AgentRunStatus.RUNNING,
+    )
+    repository.create(run)
+
+    first = repository.request_cancellation(
+        run.run_id,
+        requested_at=first_requested_at,
+    )
+    second = repository.request_cancellation(
+        run.run_id,
+        requested_at=second_requested_at,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cancellation_requested is True
+    assert second.cancellation_requested is True
+    assert first.cancellation_requested_at == first_requested_at
+    assert second.cancellation_requested_at == first_requested_at
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.cancellation_requested is True
+    assert restored.cancellation_requested_at == first_requested_at
+
+
+def test_request_cancellation_rejects_non_running_run(repository) -> None:
+    requested_at = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+
+    for status in (
+        AgentRunStatus.PENDING,
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.CANCELLED,
+        AgentRunStatus.REJECTED,
+    ):
+        run = make_run(
+            run_id=f"cancel-{status.value}",
+            status=status,
+        )
+        repository.create(run)
+
+        result = repository.request_cancellation(
+            run.run_id,
+            requested_at=requested_at,
+        )
+
+        assert result is None
+
+        restored = repository.get(run.run_id)
+        assert restored is not None
+        assert restored.cancellation_requested is False
+        assert restored.cancellation_requested_at is None
+
+
+def test_request_cancellation_rejects_missing_run(repository) -> None:
+    result = repository.request_cancellation(
+        "does-not-exist",
+        requested_at=datetime(2026, 9, 20, 12, 0, tzinfo=UTC),
+    )
+
+    assert result is None

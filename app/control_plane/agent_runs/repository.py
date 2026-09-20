@@ -94,3 +94,10 @@ class AgentRunRepository(Protocol):
         status: AgentRunStatus | None = None,
         limit: int = 100,
     ) -> list[AgentRun]: ...
+
+    def request_cancellation(
+        self,
+        run_id: str,
+        *,
+        requested_at: datetime,
+    ) -> AgentRun | None: ...

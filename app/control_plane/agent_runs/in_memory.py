@@ -270,3 +270,32 @@ class InMemoryAgentRunRepository:
     def clear(self) -> None:
         with self._lock:
             self._runs.clear()
+
+    def request_cancellation(
+        self,
+        run_id: str,
+        *,
+        requested_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None:
+                return None
+
+            if run.status is not AgentRunStatus.RUNNING:
+                return None
+
+            if run.cancellation_requested:
+                return run
+
+            requested = run.model_copy(
+                update={
+                    "cancellation_requested": True,
+                    "cancellation_requested_at": requested_at,
+                }
+            )
+
+            self._runs[run_id] = requested
+
+            return requested

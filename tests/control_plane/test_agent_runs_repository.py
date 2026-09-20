@@ -576,6 +576,108 @@ def test_cancel_if_owner_rejects_wrong_lease() -> None:
     assert repository.get(run.run_id) == run
 
 
+def test_request_cancellation_marks_running_run() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run(
+        "run-cancellation-request",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-a",
+    )
+    repository.create(run)
+
+    requested_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    result = repository.request_cancellation(
+        run.run_id,
+        requested_at=requested_at,
+    )
+
+    assert result is not None
+    assert result.cancellation_requested is True
+    assert result.cancellation_requested_at == requested_at
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.cancellation_requested is True
+    assert restored.cancellation_requested_at == requested_at
+
+
+def test_request_cancellation_is_idempotent_and_preserves_first_timestamp() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run(
+        "run-cancellation-idempotent",
+        status=AgentRunStatus.RUNNING,
+        lease_id="lease-a",
+    )
+    repository.create(run)
+
+    first_requested_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    second_requested_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+
+    first = repository.request_cancellation(
+        run.run_id,
+        requested_at=first_requested_at,
+    )
+    second = repository.request_cancellation(
+        run.run_id,
+        requested_at=second_requested_at,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cancellation_requested is True
+    assert second.cancellation_requested is True
+    assert first.cancellation_requested_at == first_requested_at
+    assert second.cancellation_requested_at == first_requested_at
+
+
+def test_request_cancellation_returns_none_for_missing_run() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    result = repository.request_cancellation(
+        "missing",
+        requested_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        AgentRunStatus.PENDING,
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.CANCELLED,
+        AgentRunStatus.REJECTED,
+    ],
+)
+def test_request_cancellation_returns_none_for_non_running_run(
+    status: AgentRunStatus,
+) -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run(
+        f"run-cancellation-{status.value}",
+        status=status,
+    )
+    repository.create(run)
+
+    result = repository.request_cancellation(
+        run.run_id,
+        requested_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.cancellation_requested is False
+    assert restored.cancellation_requested_at is None
+
+
 def test_cancelled_run_is_terminal() -> None:
     run = make_run("run-cancelled", status=AgentRunStatus.RUNNING)
 
