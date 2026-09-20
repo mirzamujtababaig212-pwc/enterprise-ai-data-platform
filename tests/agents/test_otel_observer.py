@@ -194,6 +194,77 @@ def test_agent_failed_creates_error_agent_span() -> None:
     assert span.attributes["agent.name"] == "test-agent"
 
 
+def test_agent_cancelled_creates_error_agent_span() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_CANCELLED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.run")
+
+    assert span.status.status_code is trace.StatusCode.ERROR
+    assert span.attributes["agent.name"] == "test-agent"
+
+
+def test_agent_cancelled_closes_active_llm_and_tool_spans() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.LLM_REQUESTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.TOOL_CALL_REQUESTED,
+                agent_name="test-agent",
+                tool_name="search_documents",
+                call_id="call-123",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_CANCELLED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    spans = exporter.get_finished_spans()
+
+    assert {span.name for span in spans} == {
+        "agent.llm.request",
+        "agent.tool.call",
+        "agent.run",
+    }
+
+    assert span_by_name(exporter, "agent.llm.request").status.status_code is trace.StatusCode.ERROR
+    assert span_by_name(exporter, "agent.tool.call").status.status_code is trace.StatusCode.ERROR
+    assert span_by_name(exporter, "agent.run").status.status_code is trace.StatusCode.ERROR
+
+
 def test_llm_span_records_provider_model_and_tool_round() -> None:
     observer, exporter = make_observer()
 

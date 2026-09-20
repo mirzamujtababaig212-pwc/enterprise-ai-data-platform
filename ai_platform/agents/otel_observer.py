@@ -75,6 +75,14 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             )
             return
 
+        if event.event_type is AgentExecutionEventType.AGENT_CANCELLED:
+            self._finish_agent_span(
+                task,
+                event,
+                status=trace.StatusCode.ERROR,
+            )
+            return
+
         if event.event_type is AgentExecutionEventType.LLM_REQUESTED:
             self._start_llm_span(task, event)
             return

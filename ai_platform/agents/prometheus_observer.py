@@ -10,7 +10,7 @@ from ai_platform.agents.observer import AgentExecutionObserver
 
 AGENT_EXECUTIONS_TOTAL = Counter(
     "deldai_agent_executions_total",
-    "Total agent executions completed or failed.",
+    "Total agent executions by terminal status.",
     [
         "agent_name",
         "status",
@@ -70,6 +70,13 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
             AGENT_EXECUTIONS_TOTAL.labels(
                 agent_name=event.agent_name,
                 status="failed",
+            ).inc()
+            return
+
+        if event.event_type is AgentExecutionEventType.AGENT_CANCELLED:
+            AGENT_EXECUTIONS_TOTAL.labels(
+                agent_name=event.agent_name,
+                status="cancelled",
             ).inc()
             return
 

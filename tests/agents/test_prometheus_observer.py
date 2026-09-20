@@ -90,6 +90,39 @@ def test_failed_agent_execution_increments_failed_counter():
     assert after == before + 1
 
 
+def test_cancelled_agent_execution_increments_cancelled_counter():
+    observer = PrometheusAgentExecutionObserver()
+
+    before = _sample_value(
+        AGENT_EXECUTIONS_TOTAL,
+        {
+            "agent_name": "test-agent",
+            "status": "cancelled",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_CANCELLED,
+                agent_name="test-agent",
+                session_id="session-cancelled",
+                metadata={"secret": "must-not-be-a-label"},
+            )
+        )
+    )
+
+    after = _sample_value(
+        AGENT_EXECUTIONS_TOTAL,
+        {
+            "agent_name": "test-agent",
+            "status": "cancelled",
+        },
+    )
+
+    assert after == before + 1
+
+
 def test_llm_request_increments_provider_model_counter():
     observer = PrometheusAgentExecutionObserver()
 
