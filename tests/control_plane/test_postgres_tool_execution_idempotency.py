@@ -17,6 +17,10 @@ from tools.execution.idempotency import (
     ToolIdempotencyClaimStatus,
 )
 from tools.models import ToolExecutionFailureCategory, ToolExecutionResult
+from tests.tools.execution.test_service import FakeTool
+from tools.execution.context import ToolExecutionContext
+from tools.execution.service import ToolExecutionService
+from tools.registry.in_memory import InMemoryToolRegistry
 
 
 def make_key(
@@ -127,6 +131,54 @@ async def test_completed_result_is_replayed(repository) -> None:
     assert record.status == ToolIdempotencyClaimStatus.COMPLETED.value
     assert record.success is True
     assert record.output == {"value": 42}
+
+
+@pytest.mark.asyncio
+async def test_completed_result_replays_across_restarted_tool_service(
+    repository,
+) -> None:
+    _, session_factory, _ = repository
+
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+    first_service = ToolExecutionService(
+        registry,
+        idempotency_store=first_store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-restart-replay",
+        call_id="call-restart-replay",
+    )
+
+    first = await first_service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert tool.execution_count == 1
+
+    # Simulate a process restart: create a new store and service instance.
+    second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+    second_service = ToolExecutionService(
+        registry,
+        idempotency_store=second_store,
+    )
+
+    replay = await second_service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=context,
+    )
+
+    assert replay.success is True
+    assert replay == first
+    assert tool.execution_count == 1
 
 
 @pytest.mark.asyncio

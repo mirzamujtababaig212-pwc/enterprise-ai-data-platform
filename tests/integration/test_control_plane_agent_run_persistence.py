@@ -555,7 +555,7 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert checkpoint_record.agent_name == "enterprise-rag-analyst"
         assert checkpoint_record.session_id == session_id
         assert checkpoint_record.user_id == "integration-test-user"
-        assert checkpoint_record.schema_version == 1
+        assert checkpoint_record.schema_version == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
         assert checkpoint_record.position == AgentCheckpointPosition.AFTER_TOOL_EXECUTION.value
         assert checkpoint_record.tool_round == 1
 
@@ -565,7 +565,7 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert checkpoint.agent_name == "enterprise-rag-analyst"
         assert checkpoint.session_id == session_id
         assert checkpoint.user_id == "integration-test-user"
-        assert checkpoint.schema_version == 1
+        assert checkpoint.schema_version == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
         assert checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
         assert checkpoint.tool_round == 1
 
@@ -640,6 +640,226 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
 
     finally:
         if rag_tool is not None:
+            rag_tool._retriever = original_retriever
+
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+                session.commit()
+
+
+def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> None:
+    """Verify checkpoint failure does not lose a completed tool execution."""
+
+    import asyncio
+
+    from ai_platform.agents.tool_calls import AgentToolCall
+    from app.control_plane.agent_runs.postgres_repository import (
+        PostgreSQLAgentRunRepository,
+    )
+    from app.control_plane.persistence.models import (
+        AgentRunCheckpointRecord,
+        ToolExecutionIdempotencyRecord,
+    )
+    from app.control_plane.tool_execution.postgres_idempotency import (
+        PostgreSQLToolExecutionIdempotencyStore,
+    )
+    from tools.execution.context import ToolExecutionContext
+    from tools.execution.service import ToolExecutionService
+
+    import app.control_plane.dependencies as dependencies
+
+    client = TestClient(app)
+    session_id = "production-rag-checkpoint-failure-integration-session"
+
+    run_id: str | None = None
+    rag_tool = None
+    original_retriever = None
+
+    try:
+        asyncio.run(dependencies._initialize_agents())
+
+        rag_tool = asyncio.run(dependencies._tool_registry.get("rag.search"))
+
+        assert rag_tool is not None
+        assert rag_tool.definition.name == "rag.search"
+
+        original_retriever = rag_tool._retriever
+        deterministic_retriever = DeterministicRAGRetriever()
+        rag_tool._retriever = deterministic_retriever
+
+        agent = asyncio.run(dependencies._agent_registry.get("enterprise-rag-analyst"))
+        assert agent is not None
+
+        assert agent._checkpoint_handler is dependencies._agent_checkpoint_handler
+
+        responses = [
+            {
+                "reply": "",
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="call-rag-checkpoint-failure-1",
+                        name="rag.search",
+                        arguments={
+                            "query": "What is DELDAI's enterprise AI architecture?",
+                            "top_k": 2,
+                        },
+                    )
+                ],
+            },
+            {
+                "reply": (
+                    "DELDAI provides an enterprise AI operating layer "
+                    "for governing agents, models, tools, and workflows."
+                ),
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 40,
+                    "completion_tokens": 20,
+                    "total_tokens": 60,
+                },
+                "tool_calls": [],
+            },
+        ]
+
+        async def _deterministic_route_chat(request: dict) -> dict:
+            return responses.pop(0)
+
+        def _failing_checkpoint_save(self, checkpoint, *, commit=True):
+            raise RuntimeError("deterministic checkpoint persistence failure")
+
+        with (
+            patch(
+                "app.control_plane.dependencies._llm_router.route_chat",
+                new=AsyncMock(side_effect=_deterministic_route_chat),
+            ) as mock_route_chat,
+            patch(
+                "app.control_plane.agent_checkpoints.postgres_handler."
+                "PostgreSQLAgentCheckpointsRepository.save",
+                new=_failing_checkpoint_save,
+            ),
+        ):
+            response = client.post(
+                "/api/v1/agents/enterprise-rag-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                },
+                json={
+                    "input": "Explain DELDAI's enterprise AI architecture.",
+                    "session_id": session_id,
+                    "user_id": "integration-test-user",
+                    "metadata": {
+                        "test": "production-rag-checkpoint-failure",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert mock_route_chat.await_count == 2
+        assert responses == []
+
+        payload = response.json()
+        run_id = payload["run_id"]
+
+        assert payload["output"] == (
+            "DELDAI provides an enterprise AI operating layer "
+            "for governing agents, models, tools, and workflows."
+        )
+
+        assert len(deterministic_retriever.calls) == 1
+
+        with SessionLocal() as session:
+            run_repository = PostgreSQLAgentRunRepository(session)
+            run = run_repository.get(run_id)
+
+            checkpoints = list(
+                session.scalars(
+                    select(AgentRunCheckpointRecord).where(
+                        AgentRunCheckpointRecord.run_id == run_id
+                    )
+                )
+            )
+
+            idempotency_records = list(
+                session.scalars(
+                    select(ToolExecutionIdempotencyRecord).where(
+                        ToolExecutionIdempotencyRecord.run_id == run_id,
+                        ToolExecutionIdempotencyRecord.call_id == "call-rag-checkpoint-failure-1",
+                        ToolExecutionIdempotencyRecord.tool_name == "rag.search",
+                    )
+                )
+            )
+
+        assert run is not None
+        assert run.status is AgentRunStatus.COMPLETED
+        assert run.output == payload["output"]
+
+        # The checkpoint failure is intentionally swallowed by the production
+        # PostgreSQL checkpoint handler contract. Therefore no checkpoint
+        # should have been persisted.
+        assert checkpoints == []
+
+        # The tool result must nevertheless be durable.
+        assert len(idempotency_records) == 1
+
+        idempotency_record = idempotency_records[0]
+
+        assert idempotency_record.status == "completed"
+        assert idempotency_record.success is True
+        assert idempotency_record.output["query"] == (
+            "What is DELDAI's enterprise AI architecture?"
+        )
+        assert idempotency_record.output["retrieved_count"] == 2
+
+        # Reconstruct the production PostgreSQL-backed execution service and
+        # replay the same logical tool call. The durable result must be
+        # returned without invoking the tool again.
+        replay_store = PostgreSQLToolExecutionIdempotencyStore(SessionLocal)
+        replay_service = ToolExecutionService(
+            dependencies._tool_registry,
+            idempotency_store=replay_store,
+        )
+
+        replay_context = ToolExecutionContext(
+            run_id=run_id,
+            call_id="call-rag-checkpoint-failure-1",
+            agent_name="enterprise-rag-analyst",
+            session_id=session_id,
+            user_id="integration-test-user",
+            request_metadata={
+                "test": "production-rag-checkpoint-failure",
+            },
+        )
+
+        replay = asyncio.run(
+            replay_service.execute(
+                "rag.search",
+                {
+                    "query": "What is DELDAI's enterprise AI architecture?",
+                    "top_k": 2,
+                },
+                principal="integration-test-user",
+                execution_context=replay_context,
+            )
+        )
+
+        assert replay.success is True
+        assert replay.output == idempotency_record.output
+
+        # The original tool execution happened exactly once. The replay was
+        # served entirely from PostgreSQL idempotency state.
+        assert len(deterministic_retriever.calls) == 1
+
+    finally:
+        if rag_tool is not None and original_retriever is not None:
             rag_tool._retriever = original_retriever
 
         if run_id is not None:

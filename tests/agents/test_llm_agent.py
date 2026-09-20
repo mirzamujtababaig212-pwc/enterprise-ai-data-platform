@@ -36,6 +36,9 @@ from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.models import ToolDefinition
 from tools.rag.search import RAGSearchTool
+from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
+from tools.execution.service import ToolExecutionService
+from tools.execution.context import ToolExecutionContext
 from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
 from ai_platform.agents.llm_agent import LLMAgent
@@ -932,6 +935,18 @@ class FakeAgentCheckpointHandler:
         self.checkpoints.append(checkpoint)
 
 
+class FailingAgentCheckpointHandler:
+    def __init__(self) -> None:
+        self.attempted_checkpoints: list[AgentExecutionCheckpoint] = []
+
+    async def save(
+        self,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> None:
+        self.attempted_checkpoints.append(checkpoint)
+        raise RuntimeError("checkpoint persistence failed")
+
+
 @pytest.mark.asyncio
 async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
     definition = AgentDefinition(
@@ -992,6 +1007,186 @@ async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
     assert checkpoint.messages[-1].role is AgentMessageRole.TOOL
     assert "call-123" in checkpoint.messages[-1].content
     assert len(checkpoint.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_checkpoint_failure_occurs_after_tool_side_effect() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FailingAgentCheckpointHandler()
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+            metadata={"request_id": "request-789"},
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-checkpoint-failure-1",
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="checkpoint persistence failed",
+    ):
+        await agent.run(context)
+
+    assert tool.execute_count == 1
+    assert len(gateway.requests) == 1
+
+    assert len(checkpoint_handler.attempted_checkpoints) == 1
+
+    attempted_checkpoint = checkpoint_handler.attempted_checkpoints[0]
+
+    assert attempted_checkpoint.run_id == "run-checkpoint-failure-1"
+    assert attempted_checkpoint.tool_round == 1
+    assert attempted_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert attempted_checkpoint.messages[-1].role is AgentMessageRole.TOOL
+    assert "call-123" in attempted_checkpoint.messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_checkpoint_failure_preserves_idempotent_tool_result() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FailingAgentCheckpointHandler()
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    idempotency_store = InMemoryToolExecutionIdempotencyStore()
+    execution_service = ToolExecutionService(
+        tool_registry,
+        idempotency_store=idempotency_store,
+    )
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+        execution_service=execution_service,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+            metadata={"request_id": "request-789"},
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-checkpoint-idempotency-1",
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="checkpoint persistence failed",
+    ):
+        await agent.run(context)
+
+    assert tool.execute_count == 1
+    assert len(gateway.requests) == 1
+    assert len(checkpoint_handler.attempted_checkpoints) == 1
+
+    replay_service = ToolExecutionService(
+        tool_registry,
+        idempotency_store=idempotency_store,
+    )
+
+    replay_context = ToolExecutionContext(
+        run_id="run-checkpoint-idempotency-1",
+        call_id="call-123",
+        agent_name="production-llm-agent",
+        session_id="session-456",
+        user_id="user-123",
+        request_metadata={"request_id": "request-789"},
+    )
+
+    replay = await replay_service.execute(
+        "search",
+        {"query": "RAG"},
+        execution_context=replay_context,
+    )
+
+    assert replay.success is True
+    assert replay.output == {
+        "query": "RAG",
+        "retrieved_count": 2,
+        "results": [
+            {
+                "chunk_id": "chunk-rag-001",
+                "document_id": "doc-rag-001",
+                "content": "Sensitive enterprise context.",
+                "score": 0.91,
+                "metadata": {
+                    "classification": "confidential",
+                },
+            },
+            {
+                "chunk_id": "chunk-rag-002",
+                "document_id": "doc-rag-002",
+                "content": "Another sensitive context.",
+                "score": 0.83,
+                "metadata": {
+                    "classification": "restricted",
+                },
+            },
+        ],
+    }
+
+    assert tool.execute_count == 1
 
 
 @pytest.mark.asyncio
