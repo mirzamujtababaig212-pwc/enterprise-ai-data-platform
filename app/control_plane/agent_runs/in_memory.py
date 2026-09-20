@@ -63,7 +63,7 @@ class InMemoryAgentRunRepository:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status != AgentRunStatus.FAILED:
+            if run is None or run.status != AgentRunStatus.FAILED or run.cancellation_requested:
                 return None
 
             claimed = run.transition_to(AgentRunStatus.RUNNING).model_copy(
@@ -118,6 +118,7 @@ class InMemoryAgentRunRepository:
             if (
                 run is None
                 or run.status is not AgentRunStatus.RUNNING
+                or run.cancellation_requested
                 or run.lease_expires_at is None
                 or run.lease_expires_at >= stale_before
             ):
@@ -153,6 +154,7 @@ class InMemoryAgentRunRepository:
                 for run in self._runs.values()
                 if (
                     run.status is AgentRunStatus.RUNNING
+                    and not run.cancellation_requested
                     and run.lease_expires_at is not None
                     and run.lease_expires_at < stale_before
                 )

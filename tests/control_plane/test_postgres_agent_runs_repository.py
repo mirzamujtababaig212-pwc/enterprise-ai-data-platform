@@ -268,6 +268,49 @@ def test_claim_for_recovery_returns_none_for_non_failed_run(repository) -> None:
     assert restored.status is AgentRunStatus.RUNNING
 
 
+def test_claim_for_recovery_returns_none_for_cancellation_requested_run(
+    repository,
+) -> None:
+    run = make_run(
+        status=AgentRunStatus.FAILED,
+    ).model_copy(
+        update={
+            "cancellation_requested": True,
+            "cancellation_requested_at": datetime(
+                2026,
+                9,
+                19,
+                11,
+                58,
+                tzinfo=UTC,
+            ),
+        }
+    )
+    repository.create(run)
+
+    claimed = repository.claim_for_recovery(
+        run.run_id,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+
+    assert claimed is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.FAILED
+    assert restored.cancellation_requested is True
+    assert restored.cancellation_requested_at == datetime(
+        2026,
+        9,
+        19,
+        11,
+        58,
+        tzinfo=UTC,
+    )
+
+
 def test_claim_for_recovery_returns_none_for_missing_run(repository) -> None:
     claimed = repository.claim_for_recovery(
         "does-not-exist",
@@ -615,6 +658,52 @@ def test_unexpired_running_run_cannot_be_reclaimed(repository) -> None:
     assert restored.lease_id == "old-lease"
 
 
+def test_expired_running_run_returns_none_for_cancellation_requested_run(
+    repository,
+) -> None:
+    run = make_run(
+        status=AgentRunStatus.RUNNING,
+        lease_id="old-lease",
+        lease_expires_at=datetime(
+            2026,
+            9,
+            19,
+            11,
+            59,
+            tzinfo=UTC,
+        ),
+    ).model_copy(
+        update={
+            "cancellation_requested": True,
+            "cancellation_requested_at": datetime(
+                2026,
+                9,
+                19,
+                11,
+                58,
+                tzinfo=UTC,
+            ),
+        }
+    )
+    repository.create(run)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        started_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert claimed is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "old-lease"
+    assert restored.cancellation_requested is True
+
+
 def test_expired_running_run_can_be_reclaimed(repository) -> None:
     run = make_run(
         status=AgentRunStatus.RUNNING,
@@ -681,6 +770,32 @@ def test_list_expired_running_runs_filters_before_limit(repository) -> None:
                 6,
                 tzinfo=UTC,
             ),
+        )
+    )
+    repository.create(
+        make_run(
+            run_id="postgres-cancelled-stale",
+            status=AgentRunStatus.RUNNING,
+            lease_expires_at=datetime(
+                2026,
+                9,
+                19,
+                11,
+                57,
+                tzinfo=UTC,
+            ),
+        ).model_copy(
+            update={
+                "cancellation_requested": True,
+                "cancellation_requested_at": datetime(
+                    2026,
+                    9,
+                    19,
+                    11,
+                    56,
+                    tzinfo=UTC,
+                ),
+            }
         )
     )
     repository.create(

@@ -142,6 +142,7 @@ class PostgreSQLAgentRunRepository:
             .where(
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.FAILED.value,
+                AgentRunRecord.cancellation_requested.is_(False),
             )
             .values(
                 status=AgentRunStatus.RUNNING.value,
@@ -216,6 +217,7 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_expires_at < stale_before,
+                AgentRunRecord.cancellation_requested.is_(False),
             )
             .values(
                 started_at=started_at,
@@ -256,6 +258,7 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_expires_at.is_not(None),
                 AgentRunRecord.lease_expires_at < stale_before,
+                AgentRunRecord.cancellation_requested.is_(False),
             )
             .order_by(
                 AgentRunRecord.lease_expires_at.asc(),

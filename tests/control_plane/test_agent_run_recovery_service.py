@@ -666,6 +666,50 @@ async def test_recovery_claim_prevents_second_recovery():
     assert len(runtime.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_recovery_does_not_claim_cancellation_requested_failed_run():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        ).model_copy(
+            update={
+                "cancellation_requested": True,
+                "cancellation_requested_at": datetime(
+                    2026,
+                    9,
+                    19,
+                    11,
+                    59,
+                    tzinfo=UTC,
+                ),
+            }
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="could not be claimed for recovery",
+    ):
+        await service.recover("run-123")
+
+    assert runtime.calls == []
+
+    run = repository.get("run-123")
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.cancellation_requested is True
+
+
 def stale_running_run(
     *,
     run_id: str = "stale-run-123",
@@ -883,6 +927,51 @@ async def test_recover_stale_runs_ignores_run_without_lease_expiry():
 
     assert results == []
     assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_ignores_cancellation_requested_run():
+    repository = InMemoryAgentRunRepository()
+
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+        ).model_copy(
+            update={
+                "cancellation_requested": True,
+                "cancellation_requested_at": datetime(
+                    2026,
+                    9,
+                    19,
+                    11,
+                    59,
+                    tzinfo=UTC,
+                ),
+            }
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results == []
+    assert runtime.calls == []
+
+    run = repository.get("stale-run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.RUNNING
+    assert run.cancellation_requested is True
+    assert run.lease_id == "expired-lease"
 
 
 @pytest.mark.asyncio
