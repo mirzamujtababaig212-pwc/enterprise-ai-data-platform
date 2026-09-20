@@ -854,3 +854,55 @@ async def test_execution_context_propagates_governance_policy_to_tools() -> None
             ),
         }
     ]
+
+
+def test_execution_context_defaults_to_execution_budget() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    context = make_context()
+
+    assert context.execution_budget == ExecutionBudget()
+
+
+def test_execution_context_preserves_request_execution_budget() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    budget = ExecutionBudget(
+        max_llm_calls=5,
+        max_tool_calls=8,
+        max_tool_rounds=2,
+        max_duration_seconds=45.0,
+    )
+
+    context = make_context(
+        AgentRequest(
+            input="Use a constrained budget.",
+            execution_budget=budget,
+        ),
+    )
+
+    assert context.execution_budget is budget
+
+
+def test_execution_context_creates_fresh_budget_state() -> None:
+    from ai_platform.agents.budget import ExecutionBudgetState
+
+    context = make_context()
+
+    assert isinstance(
+        context.execution_budget_state,
+        ExecutionBudgetState,
+    )
+    assert context.execution_budget_state.llm_calls == 0
+    assert context.execution_budget_state.tool_calls == 0
+    assert context.execution_budget_state.tool_rounds == 0
+
+
+def test_execution_context_budget_state_is_per_context() -> None:
+    context_one = make_context()
+    context_two = make_context()
+
+    context_one.execution_budget_state.llm_calls = 1
+
+    assert context_one.execution_budget_state.llm_calls == 1
+    assert context_two.execution_budget_state.llm_calls == 0

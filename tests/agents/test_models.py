@@ -378,3 +378,59 @@ def test_agent_definition_builds_llm_config():
     assert config.system_prompt == "You are a test agent."
     assert config.temperature == 0.25
     assert config.max_tokens == 768
+
+
+def test_execution_budget_defaults() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    budget = ExecutionBudget()
+
+    assert budget.max_llm_calls == 10
+    assert budget.max_tool_calls == 20
+    assert budget.max_tool_rounds == 3
+    assert budget.max_duration_seconds == 300.0
+
+
+def test_execution_budget_rejects_non_positive_limits() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    with pytest.raises(ValueError, match="max_llm_calls"):
+        ExecutionBudget(max_llm_calls=0)
+
+    with pytest.raises(ValueError, match="max_tool_calls"):
+        ExecutionBudget(max_tool_calls=0)
+
+    with pytest.raises(ValueError, match="max_tool_rounds"):
+        ExecutionBudget(max_tool_rounds=0)
+
+    with pytest.raises(ValueError, match="max_duration_seconds"):
+        ExecutionBudget(max_duration_seconds=0)
+
+
+def test_agent_request_accepts_execution_budget() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    budget = ExecutionBudget(
+        max_llm_calls=5,
+        max_tool_calls=8,
+        max_tool_rounds=2,
+        max_duration_seconds=45.0,
+    )
+
+    request = AgentRequest(
+        input="Hello.",
+        execution_budget=budget,
+    )
+
+    assert request.execution_budget is budget
+
+
+def test_execution_budget_state_tracks_elapsed_time() -> None:
+    from ai_platform.agents.budget import ExecutionBudgetState
+
+    state = ExecutionBudgetState()
+
+    assert state.llm_calls == 0
+    assert state.tool_calls == 0
+    assert state.tool_rounds == 0
+    assert state.elapsed_seconds >= 0

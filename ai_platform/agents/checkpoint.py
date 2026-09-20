@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from enum import StrEnum
 from typing import Any, Protocol
 
+from ai_platform.agents.budget import ExecutionBudgetState
 from ai_platform.agents.llm_messages import AgentMessage
 
 
@@ -49,11 +50,13 @@ class AgentExecutionCheckpoint:
     tool_round: int
     position: AgentCheckpointPosition
     metadata: dict[str, Any]
+    execution_budget_state: ExecutionBudgetState = field(default_factory=ExecutionBudgetState)
 
-    CURRENT_SCHEMA_VERSION = 1
+    CURRENT_SCHEMA_VERSION = 2
+    SUPPORTED_SCHEMA_VERSIONS = frozenset({1, CURRENT_SCHEMA_VERSION})
 
     def __post_init__(self) -> None:
-        if self.schema_version != self.CURRENT_SCHEMA_VERSION:
+        if self.schema_version not in self.SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(f"Unsupported checkpoint schema_version: {self.schema_version}.")
 
         if not isinstance(self.position, AgentCheckpointPosition):
@@ -80,6 +83,9 @@ class AgentExecutionCheckpoint:
             if not isinstance(message, AgentMessage):
                 raise TypeError("Checkpoint messages must contain AgentMessage instances.")
 
+        if not isinstance(self.execution_budget_state, ExecutionBudgetState):
+            raise TypeError("Checkpoint execution_budget_state must be an ExecutionBudgetState.")
+
         object.__setattr__(self, "messages", tuple(self.messages))
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -87,7 +93,7 @@ class AgentExecutionCheckpoint:
         """
         Return a JSON-compatible representation of the checkpoint.
         """
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "agent_name": self.agent_name,
@@ -104,6 +110,11 @@ class AgentExecutionCheckpoint:
             "position": self.position.value,
             "metadata": self.metadata,
         }
+
+        if self.schema_version >= 2:
+            payload["execution_budget_state"] = self.execution_budget_state.to_dict()
+
+        return payload
 
     def to_json(self) -> str:
         """
@@ -154,8 +165,19 @@ class AgentExecutionCheckpoint:
         if not isinstance(metadata, dict):
             raise TypeError("Checkpoint metadata must be a dictionary.")
 
+        schema_version = payload["schema_version"]
+        if schema_version == 1:
+            execution_budget_state = ExecutionBudgetState(
+                tool_rounds=payload.get("tool_round", 0),
+            )
+        else:
+            raw_budget_state = payload.get("execution_budget_state", {})
+            if not isinstance(raw_budget_state, dict):
+                raise TypeError("Checkpoint execution_budget_state must be a dictionary.")
+            execution_budget_state = ExecutionBudgetState.from_dict(raw_budget_state)
+
         return cls(
-            schema_version=payload["schema_version"],
+            schema_version=schema_version,
             run_id=payload["run_id"],
             agent_name=payload["agent_name"],
             session_id=payload.get("session_id"),
@@ -164,6 +186,7 @@ class AgentExecutionCheckpoint:
             tool_round=payload.get("tool_round", 0),
             position=AgentCheckpointPosition(payload["position"]),
             metadata=metadata,
+            execution_budget_state=execution_budget_state,
         )
 
     @classmethod

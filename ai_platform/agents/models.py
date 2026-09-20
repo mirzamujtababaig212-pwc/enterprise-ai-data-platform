@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.llm_config import AgentLLMConfig
 from rag.governance import GovernancePolicy
 
@@ -97,6 +98,7 @@ class AgentRequest:
     user_id: str | None = None
     memory_namespace: str | None = None
     governance_policy: GovernancePolicy | None = None
+    execution_budget: ExecutionBudget | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.llm_messages import (
     AgentMessage,
@@ -45,6 +46,9 @@ class AgentExecutionContext:
         self.history = history
         self.memory = memory
         self.run_id = run_id
+
+        self.execution_budget = request.execution_budget or ExecutionBudget()
+        self.execution_budget_state = ExecutionBudgetState()
 
         if self.run_id is not None:
             if not isinstance(self.run_id, str):

@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.models import AgentRequest
 from rag.governance.policy import GovernancePolicy
 
@@ -22,6 +23,7 @@ class AgentRunRequestSnapshot(BaseModel):
     memory_namespace: str | None = None
     governance_policy: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    execution_budget: dict[str, int | float] | None = None
 
     @classmethod
     def from_request(cls, request: AgentRequest) -> "AgentRunRequestSnapshot":
@@ -36,6 +38,16 @@ class AgentRunRequestSnapshot(BaseModel):
                 else None
             ),
             metadata=dict(request.metadata),
+            execution_budget=(
+                {
+                    "max_llm_calls": request.execution_budget.max_llm_calls,
+                    "max_tool_calls": request.execution_budget.max_tool_calls,
+                    "max_tool_rounds": request.execution_budget.max_tool_rounds,
+                    "max_duration_seconds": request.execution_budget.max_duration_seconds,
+                }
+                if request.execution_budget is not None
+                else None
+            ),
         )
 
     def to_request(
@@ -52,6 +64,10 @@ class AgentRunRequestSnapshot(BaseModel):
             else None
         )
 
+        execution_budget = (
+            ExecutionBudget(**self.execution_budget) if self.execution_budget is not None else None
+        )
+
         return AgentRequest(
             input=self.input,
             session_id=session_id,
@@ -59,4 +75,5 @@ class AgentRunRequestSnapshot(BaseModel):
             memory_namespace=self.memory_namespace,
             governance_policy=governance_policy,
             metadata=dict(self.metadata),
+            execution_budget=execution_budget,
         )

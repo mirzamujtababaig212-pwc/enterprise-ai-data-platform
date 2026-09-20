@@ -10,6 +10,7 @@ from app.control_plane.agent_runs.exceptions import (
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.models import AgentRequest
 from rag.governance.policy import GovernancePolicy
 from app.control_plane.agent_runs.postgres_repository import (
@@ -120,6 +121,12 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
             "request_id": "req-789",
             "source": "control_plane",
         },
+        execution_budget=ExecutionBudget(
+            max_llm_calls=7,
+            max_tool_calls=11,
+            max_tool_rounds=4,
+            max_duration_seconds=42.5,
+        ),
     )
 
     snapshot = AgentRunRequestSnapshot.from_request(request)
@@ -153,6 +160,11 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
         request.governance_policy.required_metadata
     )
     assert reconstructed.metadata == request.metadata
+    assert reconstructed.execution_budget is not None
+    assert reconstructed.execution_budget.max_llm_calls == 7
+    assert reconstructed.execution_budget.max_tool_calls == 11
+    assert reconstructed.execution_budget.max_tool_rounds == 4
+    assert reconstructed.execution_budget.max_duration_seconds == 42.5
 
 
 def test_get_missing_run_returns_none(repository) -> None:

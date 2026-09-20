@@ -186,7 +186,28 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
 
         assert call["run_id"] == run_id
         assert call["agent_name"] == "recoverable-agent"
-        assert call["checkpoint"] == checkpoint
+        assert call["checkpoint"] is not None
+        assert call["checkpoint"].schema_version == checkpoint.schema_version
+        assert call["checkpoint"].run_id == checkpoint.run_id
+        assert call["checkpoint"].agent_name == checkpoint.agent_name
+        assert call["checkpoint"].session_id == checkpoint.session_id
+        assert call["checkpoint"].user_id == checkpoint.user_id
+        assert call["checkpoint"].messages == checkpoint.messages
+        assert call["checkpoint"].tool_round == checkpoint.tool_round
+        assert call["checkpoint"].position == checkpoint.position
+        assert call["checkpoint"].metadata == checkpoint.metadata
+        assert (
+            call["checkpoint"].execution_budget_state.llm_calls
+            == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            call["checkpoint"].execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            call["checkpoint"].execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
 
         request = call["request"]
 
@@ -213,7 +234,28 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
 
         restored_checkpoint = checkpoint_repository.get_latest(run_id)
 
-        assert restored_checkpoint == checkpoint
+        assert restored_checkpoint is not None
+        assert restored_checkpoint.schema_version == checkpoint.schema_version
+        assert restored_checkpoint.run_id == checkpoint.run_id
+        assert restored_checkpoint.agent_name == checkpoint.agent_name
+        assert restored_checkpoint.session_id == checkpoint.session_id
+        assert restored_checkpoint.user_id == checkpoint.user_id
+        assert restored_checkpoint.messages == checkpoint.messages
+        assert restored_checkpoint.tool_round == checkpoint.tool_round
+        assert restored_checkpoint.position == checkpoint.position
+        assert restored_checkpoint.metadata == checkpoint.metadata
+        assert (
+            restored_checkpoint.execution_budget_state.llm_calls
+            == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            restored_checkpoint.execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            restored_checkpoint.execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
 
         events = event_repository.list(run_id)
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from ai_platform.agents.budget import ExecutionBudgetState
 from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.checkpoint import (
     AgentCheckpointHandler,
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
 )
-from ai_platform.agents.exceptions import AgentToolLoopLimitError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_messages import AgentMessage
 from ai_platform.agents.models import (
@@ -225,6 +225,9 @@ class LLMAgent:
                     tool_round=tool_round,
                     position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
                     metadata=context.metadata,
+                    execution_budget_state=ExecutionBudgetState.from_dict(
+                        context.execution_budget_state.to_dict()
+                    ),
                 )
             )
 
@@ -247,6 +250,15 @@ class LLMAgent:
             tools = await context.tools.list_tools()
 
             while True:
+                context.execution_budget_state.check_duration(
+                    context.execution_budget,
+                    self.definition.name,
+                )
+                context.execution_budget_state.consume_llm_call(
+                    context.execution_budget,
+                    self.definition.name,
+                )
+
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_REQUESTED,
@@ -314,11 +326,19 @@ class LLMAgent:
                         },
                     )
 
-                if tool_rounds >= self.MAX_TOOL_ROUNDS:
-                    raise AgentToolLoopLimitError(
-                        self.definition.name,
-                        self.MAX_TOOL_ROUNDS,
-                    )
+                context.execution_budget_state.check_duration(
+                    context.execution_budget,
+                    self.definition.name,
+                )
+                context.execution_budget_state.consume_tool_calls(
+                    len(result.tool_calls),
+                    context.execution_budget,
+                    self.definition.name,
+                )
+                context.execution_budget_state.consume_tool_round(
+                    context.execution_budget,
+                    self.definition.name,
+                )
 
                 tool_rounds += 1
 
@@ -419,6 +439,10 @@ class LLMAgent:
 
         if checkpoint.position is not AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
             raise ValueError("LLMAgent can only resume from an after-tool-execution checkpoint.")
+
+        context.execution_budget_state = ExecutionBudgetState.from_dict(
+            checkpoint.execution_budget_state.to_dict()
+        )
 
         messages = list(checkpoint.messages)
         tool_rounds = checkpoint.tool_round

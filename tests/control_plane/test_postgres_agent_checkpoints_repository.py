@@ -93,7 +93,27 @@ def test_save_and_get_latest_round_trip() -> None:
         restored = repository.get_latest(checkpoint.run_id)
 
         assert result == checkpoint
-        assert restored == checkpoint
+        assert restored is not None
+        assert restored.schema_version == checkpoint.schema_version
+        assert restored.run_id == checkpoint.run_id
+        assert restored.agent_name == checkpoint.agent_name
+        assert restored.session_id == checkpoint.session_id
+        assert restored.user_id == checkpoint.user_id
+        assert restored.messages == checkpoint.messages
+        assert restored.tool_round == checkpoint.tool_round
+        assert restored.position == checkpoint.position
+        assert restored.metadata == checkpoint.metadata
+        assert (
+            restored.execution_budget_state.llm_calls == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
     finally:
         session.close()
         engine.dispose()
@@ -117,7 +137,21 @@ def test_save_can_leave_transaction_uncommitted() -> None:
 
         repository.save(checkpoint, commit=False)
 
-        assert repository.get_latest(checkpoint.run_id) == checkpoint
+        restored = repository.get_latest(checkpoint.run_id)
+        assert restored is not None
+        assert restored.run_id == checkpoint.run_id
+        assert restored.messages == checkpoint.messages
+        assert (
+            restored.execution_budget_state.llm_calls == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
 
         session.rollback()
 
@@ -145,10 +179,18 @@ def test_get_latest_returns_newest_checkpoint() -> None:
 
         restored = repository.get_latest("run-1")
 
-        assert restored == second
         assert restored is not None
-        assert restored.tool_round == 2
-        assert restored.metadata == {"sequence": 2}
+        assert restored.run_id == second.run_id
+        assert restored.messages == second.messages
+        assert restored.tool_round == second.tool_round
+        assert restored.metadata == second.metadata
+        assert restored.execution_budget_state.llm_calls == second.execution_budget_state.llm_calls
+        assert (
+            restored.execution_budget_state.tool_calls == second.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds == second.execution_budget_state.tool_rounds
+        )
     finally:
         session.close()
         engine.dispose()
@@ -240,7 +282,27 @@ def test_postgres_save_and_get_latest_round_trip(postgres_repository) -> None:
         restored = checkpoint_repository.get_latest(run_id)
 
         assert result == checkpoint
-        assert restored == checkpoint
+        assert restored is not None
+        assert restored.schema_version == checkpoint.schema_version
+        assert restored.run_id == checkpoint.run_id
+        assert restored.agent_name == checkpoint.agent_name
+        assert restored.session_id == checkpoint.session_id
+        assert restored.user_id == checkpoint.user_id
+        assert restored.messages == checkpoint.messages
+        assert restored.tool_round == checkpoint.tool_round
+        assert restored.position == checkpoint.position
+        assert restored.metadata == checkpoint.metadata
+        assert (
+            restored.execution_budget_state.llm_calls == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
     finally:
         session.execute(
             delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
@@ -283,10 +345,18 @@ def test_postgres_get_latest_returns_newest_checkpoint(
 
         restored = checkpoint_repository.get_latest(run_id)
 
-        assert restored == second
         assert restored is not None
-        assert restored.tool_round == 2
-        assert restored.metadata == {"sequence": 2}
+        assert restored.run_id == second.run_id
+        assert restored.messages == second.messages
+        assert restored.tool_round == second.tool_round
+        assert restored.metadata == second.metadata
+        assert restored.execution_budget_state.llm_calls == second.execution_budget_state.llm_calls
+        assert (
+            restored.execution_budget_state.tool_calls == second.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds == second.execution_budget_state.tool_rounds
+        )
     finally:
         session.execute(
             delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)

@@ -10,7 +10,11 @@ from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
 )
-from ai_platform.agents.exceptions import AgentToolLoopLimitError
+from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
+from ai_platform.agents.exceptions import (
+    AgentLLMCallLimitError,
+    AgentToolLoopLimitError,
+)
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.llm_config import AgentLLMConfig
@@ -1819,6 +1823,82 @@ async def test_llm_agent_resume_uses_checkpoint_messages_without_replaying_tool(
             "tool_name": "search",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_restores_execution_budget_state() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+        tool_names=(),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Continue the execution.",
+            user_id="user-123",
+            session_id="session-456",
+            execution_budget=ExecutionBudget(
+                max_llm_calls=1,
+                max_tool_calls=5,
+                max_tool_rounds=3,
+                max_duration_seconds=300.0,
+            ),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-budget-resume-1",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-budget-resume-1",
+        agent_name=definition.name,
+        session_id="session-456",
+        user_id="user-123",
+        messages=(
+            system_message("You are a production LLM agent."),
+            user_message("Continue the execution."),
+        ),
+        tool_round=0,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+        execution_budget_state=ExecutionBudgetState(
+            llm_calls=1,
+            tool_calls=0,
+            tool_rounds=0,
+        ),
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentLLMCallLimitError,
+        match="Agent 'production-llm-agent' exceeded the maximum LLM calls \\(1\\)",
+    ):
+        await agent.resume(context, checkpoint)
+
+    assert len(gateway.requests) == 0
+    assert context.execution_budget_state.llm_calls == 1
+    assert context.execution_budget_state.tool_calls == 0
+    assert context.execution_budget_state.tool_rounds == 0
 
 
 @pytest.mark.asyncio

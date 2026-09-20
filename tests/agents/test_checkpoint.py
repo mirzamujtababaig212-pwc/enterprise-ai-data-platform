@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from ai_platform.agents.budget import ExecutionBudgetState
+
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
@@ -39,7 +41,7 @@ def test_checkpoint_preserves_execution_identity_and_messages() -> None:
     )
 
     checkpoint = AgentExecutionCheckpoint(
-        schema_version=1,
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
         run_id="run-1",
         agent_name="enterprise-agent",
         session_id="session-1",
@@ -60,6 +62,10 @@ def test_checkpoint_preserves_execution_identity_and_messages() -> None:
         "provider": "test",
         "model": "test-model",
     }
+    assert checkpoint.execution_budget_state.llm_calls == 0
+    assert checkpoint.execution_budget_state.tool_calls == 0
+    assert checkpoint.execution_budget_state.tool_rounds == 0
+    assert checkpoint.execution_budget_state.elapsed_seconds >= 0
 
 
 def test_checkpoint_round_trip_preserves_provider_neutral_messages() -> None:
@@ -75,7 +81,7 @@ def test_checkpoint_round_trip_preserves_provider_neutral_messages() -> None:
     )
 
     checkpoint = AgentExecutionCheckpoint(
-        schema_version=1,
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
         run_id="run-123",
         agent_name="assistant",
         session_id=None,
@@ -88,13 +94,27 @@ def test_checkpoint_round_trip_preserves_provider_neutral_messages() -> None:
 
     restored = AgentExecutionCheckpoint.from_json(checkpoint.to_json())
 
-    assert restored == checkpoint
-    assert restored.messages == messages
+    assert restored.run_id == checkpoint.run_id
+    assert restored.agent_name == checkpoint.agent_name
+    assert restored.messages == checkpoint.messages
+    assert restored.tool_round == checkpoint.tool_round
+    assert restored.position is checkpoint.position
+    assert restored.metadata == checkpoint.metadata
+    assert restored.execution_budget_state.llm_calls == (
+        checkpoint.execution_budget_state.llm_calls
+    )
+    assert restored.execution_budget_state.tool_calls == (
+        checkpoint.execution_budget_state.tool_calls
+    )
+    assert restored.execution_budget_state.tool_rounds == (
+        checkpoint.execution_budget_state.tool_rounds
+    )
+    assert restored.execution_budget_state.elapsed_seconds >= 0
 
 
 def test_checkpoint_json_is_deterministic_and_json_compatible() -> None:
     checkpoint = AgentExecutionCheckpoint(
-        schema_version=1,
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
         run_id="run-1",
         agent_name="assistant",
         session_id="session-1",
@@ -110,10 +130,21 @@ def test_checkpoint_json_is_deterministic_and_json_compatible() -> None:
         metadata={"b": 2, "a": 1},
     )
 
-    serialized = checkpoint.to_json()
+    payload = checkpoint.to_dict()
+    serialized = json.dumps(
+        payload,
+        default=str,
+        sort_keys=True,
+    )
 
-    assert json.loads(serialized) == checkpoint.to_dict()
-    assert serialized == checkpoint.to_json()
+    decoded = json.loads(serialized)
+
+    assert decoded == payload
+    assert decoded["schema_version"] == checkpoint.schema_version
+    assert decoded["execution_budget_state"]["llm_calls"] == 0
+    assert decoded["execution_budget_state"]["tool_calls"] == 0
+    assert decoded["execution_budget_state"]["tool_rounds"] == 0
+    assert decoded["execution_budget_state"]["elapsed_seconds"] >= 0
 
 
 @pytest.mark.parametrize(
@@ -146,7 +177,7 @@ def test_checkpoint_rejects_empty_required_identity(
 
 def test_checkpoint_uses_current_schema_version() -> None:
     checkpoint = AgentExecutionCheckpoint(
-        schema_version=1,
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
         run_id="run-1",
         agent_name="assistant",
         session_id=None,
@@ -157,13 +188,15 @@ def test_checkpoint_uses_current_schema_version() -> None:
         metadata={},
     )
 
-    assert checkpoint.schema_version == 1
-    assert checkpoint.to_dict()["schema_version"] == 1
+    assert checkpoint.schema_version == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
+    assert checkpoint.to_dict()["schema_version"] == (
+        AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
+    )
 
 
 def test_checkpoint_round_trip_preserves_position() -> None:
     checkpoint = AgentExecutionCheckpoint(
-        schema_version=1,
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
         run_id="run-1",
         agent_name="assistant",
         session_id=None,
@@ -181,7 +214,7 @@ def test_checkpoint_round_trip_preserves_position() -> None:
 
 @pytest.mark.parametrize(
     "schema_version",
-    [0, 2, 999],
+    [0, 3, 999],
 )
 def test_checkpoint_rejects_unsupported_schema_version(
     schema_version: int,
@@ -203,7 +236,7 @@ def test_checkpoint_rejects_unsupported_schema_version(
 def test_checkpoint_rejects_unsupported_position() -> None:
     with pytest.raises(ValueError, match="after tool execution"):
         AgentExecutionCheckpoint(
-            schema_version=1,
+            schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
             run_id="run-1",
             agent_name="assistant",
             session_id=None,
@@ -218,7 +251,7 @@ def test_checkpoint_rejects_unsupported_position() -> None:
 def test_checkpoint_rejects_negative_tool_round() -> None:
     with pytest.raises(ValueError, match="tool_round"):
         AgentExecutionCheckpoint(
-            schema_version=1,
+            schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
             run_id="run-1",
             agent_name="assistant",
             session_id=None,
@@ -233,7 +266,7 @@ def test_checkpoint_rejects_negative_tool_round() -> None:
 def test_checkpoint_rejects_invalid_message() -> None:
     with pytest.raises(TypeError, match="AgentMessage"):
         AgentExecutionCheckpoint(
-            schema_version=1,
+            schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
             run_id="run-1",
             agent_name="assistant",
             session_id=None,
@@ -243,3 +276,72 @@ def test_checkpoint_rejects_invalid_message() -> None:
             position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
             metadata={},
         )
+
+
+def test_checkpoint_v1_serialization_does_not_emit_v2_budget_state() -> None:
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=1,
+        run_id="legacy-run",
+        agent_name="assistant",
+        session_id=None,
+        user_id=None,
+        messages=(),
+        tool_round=2,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    payload = checkpoint.to_dict()
+
+    assert payload["schema_version"] == 1
+    assert "execution_budget_state" not in payload
+
+
+def test_checkpoint_round_trip_preserves_execution_budget_state() -> None:
+    budget_state = ExecutionBudgetState(
+        llm_calls=3,
+        tool_calls=5,
+        tool_rounds=2,
+        started_at=0.0,
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-budget",
+        agent_name="assistant",
+        session_id=None,
+        user_id=None,
+        messages=(),
+        tool_round=2,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+        execution_budget_state=budget_state,
+    )
+
+    restored = AgentExecutionCheckpoint.from_json(checkpoint.to_json())
+
+    assert restored.execution_budget_state.llm_calls == 3
+    assert restored.execution_budget_state.tool_calls == 5
+    assert restored.execution_budget_state.tool_rounds == 2
+
+
+def test_checkpoint_from_v1_payload_remains_compatible() -> None:
+    payload = {
+        "schema_version": 1,
+        "run_id": "legacy-run",
+        "agent_name": "assistant",
+        "session_id": None,
+        "user_id": None,
+        "messages": [],
+        "tool_round": 2,
+        "position": "after_tool_execution",
+        "metadata": {},
+    }
+
+    checkpoint = AgentExecutionCheckpoint.from_dict(payload)
+
+    assert checkpoint.schema_version == 1
+    assert checkpoint.tool_round == 2
+    assert checkpoint.execution_budget_state.llm_calls == 0
+    assert checkpoint.execution_budget_state.tool_calls == 0
+    assert checkpoint.execution_budget_state.tool_rounds == 2
