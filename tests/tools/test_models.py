@@ -76,3 +76,12 @@ def test_tool_definition_defaults_to_no_retry_policy():
     )
 
     assert definition.execution_policy == ToolExecutionPolicy()
+
+
+def test_execution_in_progress_is_not_retryable_by_default() -> None:
+    policy = ToolExecutionPolicy()
+
+    assert (
+        ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
+        not in policy.retryable_failure_categories
+    )

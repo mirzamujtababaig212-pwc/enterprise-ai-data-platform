@@ -8,6 +8,9 @@ from tools.authorization.in_memory import (
 from tools.authorization.service import (
     ToolAuthorizationService,
 )
+from tools.execution.idempotency import (
+    InMemoryToolExecutionIdempotencyStore,
+)
 from tools.execution.service import ToolExecutionService
 from tools.models import (
     ToolDefinition,
@@ -108,12 +111,14 @@ class SlowTool:
             name="slow_tool",
             description="A slow test tool.",
         )
+        self.execution_count = 0
 
     @property
     def definition(self) -> ToolDefinition:
         return self._definition
 
     async def execute(self, arguments):
+        self.execution_count += 1
         await asyncio.sleep(0.2)
         return {"status": "completed"}
 
@@ -1211,3 +1216,311 @@ async def test_schema_validation_happens_before_all_retry_attempts():
     assert result.success is False
     assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
     assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_idempotency_replays_completed_result_without_reexecuting_tool():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-1",
+        call_id="call-1",
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=context,
+    )
+    second = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert second == first
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_idempotency_different_runs_execute_independently():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=ToolExecutionContext(
+            run_id="run-1",
+            call_id="call-1",
+        ),
+    )
+    second = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=ToolExecutionContext(
+            run_id="run-2",
+            call_id="call-1",
+        ),
+    )
+
+    assert first.success is True
+    assert second.success is True
+    assert tool.execution_count == 2
+
+
+@pytest.mark.asyncio
+async def test_idempotency_is_disabled_without_complete_execution_identity():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=ToolExecutionContext(
+            run_id="run-1",
+        ),
+    )
+    second = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=ToolExecutionContext(
+            call_id="call-1",
+        ),
+    )
+
+    assert first.success is True
+    assert second.success is True
+    assert tool.execution_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_execution_has_single_owner():
+    registry = InMemoryToolRegistry()
+    tool = SlowTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-concurrent",
+        call_id="call-concurrent",
+    )
+
+    first, second = await asyncio.gather(
+        service.execute(
+            "slow_tool",
+            {},
+            execution_context=context,
+        ),
+        service.execute(
+            "slow_tool",
+            {},
+            execution_context=context,
+        ),
+    )
+
+    assert first.success is True or second.success is True
+    assert (
+        first.failure_category == ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
+        or second.failure_category == ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
+    )
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_idempotent_execution_releases_key_for_future_execution():
+    registry = InMemoryToolRegistry()
+    tool = FailingTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-failure",
+        call_id="call-failure",
+    )
+
+    first = await service.execute(
+        "failing_tool",
+        {},
+        execution_context=context,
+    )
+    second = await service.execute(
+        "failing_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert first.success is False
+    assert first.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+    assert second.success is False
+    assert second.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+
+
+@pytest.mark.asyncio
+async def test_idempotency_claim_spans_internal_retries():
+    registry = InMemoryToolRegistry()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    tool = RetryableTool(
+        failures_before_success=1,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=1,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+        ),
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-retry",
+        call_id="call-retry",
+    )
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+        execution_context=context,
+    )
+
+    replay = await service.execute(
+        "retryable_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is True
+    assert result.output == {"status": "success"}
+    assert replay == result
+    assert tool.execution_count == 2
+
+
+@pytest.mark.asyncio
+async def test_authorization_happens_before_idempotent_replay():
+    registry = InMemoryToolRegistry()
+    authorizer = CountingToolAuthorizer()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+    await authorizer.allow("agent:research", "test_tool")
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-authorized",
+        call_id="call-authorized",
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=context,
+    )
+    second = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert second == first
+    assert tool.execution_count == 1
+    assert len(authorizer.authorization_requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_denied_authorization_blocks_idempotent_replay():
+    registry = InMemoryToolRegistry()
+    authorizer = CountingToolAuthorizer()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+    await authorizer.allow("agent:research", "test_tool")
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-secure-replay",
+        call_id="call-secure-replay",
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=context,
+    )
+
+    await authorizer.deny("agent:research", "test_tool")
+
+    second = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert second.success is False
+    assert second.failure_category == ToolExecutionFailureCategory.AUTHORIZATION
+    assert second.output is None
+    assert tool.execution_count == 1
+    assert len(authorizer.authorization_requests) == 2

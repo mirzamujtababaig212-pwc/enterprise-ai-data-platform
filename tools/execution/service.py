@@ -12,11 +12,16 @@ from tools.authorization.audit import (
 )
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
+from tools.execution.context import ToolExecutionContext
+from tools.execution.idempotency import (
+    ToolExecutionIdempotencyKey,
+    ToolExecutionIdempotencyStore,
+    ToolIdempotencyClaimStatus,
+)
 from tools.models import (
     ToolExecutionFailureCategory,
     ToolExecutionResult,
 )
-from tools.execution.context import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,7 @@ class ToolExecutionService:
         *,
         authorization_service: ToolAuthorizationService | None = None,
         audit_sink: ToolAuthorizationAuditSink | None = None,
+        idempotency_store: ToolExecutionIdempotencyStore | None = None,
         default_timeout_seconds: float = 30.0,
     ):
         if default_timeout_seconds <= 0:
@@ -36,6 +42,7 @@ class ToolExecutionService:
         self.registry = registry
         self.authorization_service = authorization_service
         self.audit_sink = audit_sink
+        self.idempotency_store = idempotency_store
         self.default_timeout_seconds = default_timeout_seconds
 
     async def execute(
@@ -133,60 +140,112 @@ class ToolExecutionService:
                     failure_category=ToolExecutionFailureCategory.AUTHORIZATION,
                 )
 
-        policy = tool.definition.execution_policy
+        idempotency_key = None
 
-        for attempt in range(policy.max_retries + 1):
-            try:
-                contextual_execute = getattr(tool, "execute_with_context", None)
-
-                if contextual_execute is not None:
-                    execution = contextual_execute(
-                        arguments,
-                        execution_context,
-                    )
-                else:
-                    execution = tool.execute(arguments)
-
-                output = await asyncio.wait_for(
-                    execution,
-                    timeout=timeout,
-                )
-
-                return ToolExecutionResult(
-                    tool_name=tool_name,
-                    success=True,
-                    output=output,
-                )
-
-            except asyncio.TimeoutError:
-                result = ToolExecutionResult(
-                    tool_name=tool_name,
-                    success=False,
-                    error=(f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"),
-                    failure_category=ToolExecutionFailureCategory.TIMEOUT,
-                )
-
-            except Exception as exc:
-                result = ToolExecutionResult(
-                    tool_name=tool_name,
-                    success=False,
-                    error=f"{type(exc).__name__}: {exc}",
-                    failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
-                )
-
-            should_retry = (
-                result.failure_category is not None
-                and result.failure_category in policy.retryable_failure_categories
-                and attempt < policy.max_retries
+        if (
+            self.idempotency_store is not None
+            and execution_context is not None
+            and execution_context.run_id is not None
+            and execution_context.call_id is not None
+        ):
+            idempotency_key = ToolExecutionIdempotencyKey(
+                run_id=execution_context.run_id,
+                call_id=execution_context.call_id,
+                tool_name=tool_name,
             )
 
-            if not should_retry:
-                return result
+            claim = await self.idempotency_store.claim(idempotency_key)
 
-            if policy.backoff_seconds > 0:
-                await asyncio.sleep(policy.backoff_seconds)
+            if claim.status == ToolIdempotencyClaimStatus.COMPLETED:
+                if claim.result is None:
+                    raise RuntimeError(
+                        "Idempotency store returned a completed claim without a result."
+                    )
+                return claim.result
 
-        raise RuntimeError("Tool execution retry loop exited unexpectedly.")
+            if claim.status == ToolIdempotencyClaimStatus.IN_PROGRESS:
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=(
+                        "Tool execution is already in progress for "
+                        f"run_id={execution_context.run_id}, "
+                        f"call_id={execution_context.call_id}."
+                    ),
+                    failure_category=ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS,
+                )
+
+        policy = tool.definition.execution_policy
+
+        try:
+            for attempt in range(policy.max_retries + 1):
+                try:
+                    contextual_execute = getattr(tool, "execute_with_context", None)
+
+                    if contextual_execute is not None:
+                        execution = contextual_execute(
+                            arguments,
+                            execution_context,
+                        )
+                    else:
+                        execution = tool.execute(arguments)
+
+                    output = await asyncio.wait_for(
+                        execution,
+                        timeout=timeout,
+                    )
+
+                    result = ToolExecutionResult(
+                        tool_name=tool_name,
+                        success=True,
+                        output=output,
+                    )
+
+                    if idempotency_key is not None:
+                        await self.idempotency_store.complete(
+                            idempotency_key,
+                            result,
+                        )
+
+                    return result
+
+                except asyncio.TimeoutError:
+                    result = ToolExecutionResult(
+                        tool_name=tool_name,
+                        success=False,
+                        error=(
+                            f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"
+                        ),
+                        failure_category=ToolExecutionFailureCategory.TIMEOUT,
+                    )
+
+                except Exception as exc:
+                    result = ToolExecutionResult(
+                        tool_name=tool_name,
+                        success=False,
+                        error=f"{type(exc).__name__}: {exc}",
+                        failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
+                    )
+
+                should_retry = (
+                    result.failure_category is not None
+                    and result.failure_category in policy.retryable_failure_categories
+                    and attempt < policy.max_retries
+                )
+
+                if not should_retry:
+                    if idempotency_key is not None:
+                        await self.idempotency_store.release(idempotency_key)
+                    return result
+
+                if policy.backoff_seconds > 0:
+                    await asyncio.sleep(policy.backoff_seconds)
+
+            raise RuntimeError("Tool execution retry loop exited unexpectedly.")
+        except BaseException:
+            if idempotency_key is not None:
+                await self.idempotency_store.release(idempotency_key)
+            raise
 
     async def _audit_authorization(
         self,

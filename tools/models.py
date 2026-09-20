@@ -12,6 +12,7 @@ class ToolExecutionFailureCategory(StrEnum):
     INVALID_SCHEMA = "invalid_schema"
     MISSING_PRINCIPAL = "missing_principal"
     AUTHORIZATION = "authorization"
+    EXECUTION_IN_PROGRESS = "execution_in_progress"
     TIMEOUT = "timeout"
     EXECUTION_ERROR = "execution_error"
 
