@@ -123,35 +123,21 @@ class LLMAgent:
             }
         }
 
-    async def _accumulate_tool_call_messages(
+    async def _execute_tool_calls_and_append_results(
         self,
         messages: list[AgentMessage],
         context: AgentExecutionContext,
         tool_calls,
         *,
         tool_round: int,
-        assistant_content: str = "",
     ) -> None:
         """
-        Append the assistant tool-call message and corresponding tool
-        result messages to the current conversation.
+        Execute already-captured tool calls and append their results.
 
-        Tool execution remains owned by AgentExecutionContext.
-        This method only coordinates execution results into the
-        provider-neutral conversation representation and emits
-        provider-neutral tool-call lifecycle events.
+        This helper is shared by normal execution and checkpoint recovery.
+        It deliberately does not consume execution budget because budget
+        consumption happens when the LLM originally produced the tool calls.
         """
-        from ai_platform.agents.llm_messages import (
-            assistant_tool_call_message,
-        )
-
-        messages.append(
-            assistant_tool_call_message(
-                tool_calls=tool_calls,
-                content=assistant_content,
-            )
-        )
-
         for tool_call in tool_calls:
             await self._emit(
                 AgentExecutionEvent(
@@ -237,6 +223,54 @@ class LLMAgent:
                     ),
                 )
             )
+
+    async def _accumulate_tool_call_messages(
+        self,
+        messages: list[AgentMessage],
+        context: AgentExecutionContext,
+        tool_calls,
+        *,
+        tool_round: int,
+        assistant_content: str = "",
+    ) -> None:
+        """
+        Append the assistant tool-call message and execute its tool calls.
+        """
+        from ai_platform.agents.llm_messages import (
+            assistant_tool_call_message,
+        )
+
+        messages.append(
+            assistant_tool_call_message(
+                tool_calls=tool_calls,
+                content=assistant_content,
+            )
+        )
+
+        if self._checkpoint_handler is not None and context.run_id is not None:
+            await self._checkpoint_handler.save(
+                AgentExecutionCheckpoint(
+                    schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+                    run_id=context.run_id,
+                    agent_name=self.definition.name,
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                    messages=tuple(messages),
+                    tool_round=tool_round,
+                    position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+                    metadata=context.metadata,
+                    execution_budget_state=ExecutionBudgetState.from_dict(
+                        context.execution_budget_state.to_dict()
+                    ),
+                )
+            )
+
+        await self._execute_tool_calls_and_append_results(
+            messages,
+            context,
+            tool_calls,
+            tool_round=tool_round,
+        )
 
     async def _continue(
         self,
@@ -444,8 +478,13 @@ class LLMAgent:
         if context.run_id != checkpoint.run_id:
             raise ValueError("Checkpoint run_id does not match the AgentExecutionContext.")
 
-        if checkpoint.position is not AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
-            raise ValueError("LLMAgent can only resume from an after-tool-execution checkpoint.")
+        if checkpoint.position not in {
+            AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+            AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        }:
+            raise ValueError(
+                "LLMAgent can only resume from a before- or after-tool-execution checkpoint."
+            )
 
         context.execution_budget_state = ExecutionBudgetState.from_dict(
             checkpoint.execution_budget_state.to_dict()
@@ -453,6 +492,27 @@ class LLMAgent:
 
         messages = list(checkpoint.messages)
         tool_rounds = checkpoint.tool_round
+
+        if checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION:
+            from ai_platform.agents.llm_messages import (
+                assistant_tool_calls_from_message,
+            )
+
+            if not messages:
+                raise ValueError("Before-tool-execution checkpoint must contain messages.")
+
+            assistant_message = messages[-1]
+
+            tool_calls = assistant_tool_calls_from_message(
+                assistant_message,
+            )
+
+            await self._execute_tool_calls_and_append_results(
+                messages,
+                context,
+                tool_calls,
+                tool_round=tool_rounds,
+            )
 
         return await self._continue(
             context,

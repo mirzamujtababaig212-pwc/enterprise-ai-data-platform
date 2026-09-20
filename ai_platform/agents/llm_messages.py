@@ -116,6 +116,65 @@ def tool_result_message(
     )
 
 
+def assistant_tool_calls_from_message(
+    message: AgentMessage,
+) -> tuple[AgentToolCall, ...]:
+    """
+    Decode provider-neutral tool calls from a canonical assistant message.
+
+    Checkpoint recovery uses this representation so tool calls can be
+    reconstructed without depending on an LLM provider's native message
+    format.
+    """
+    if not isinstance(message, AgentMessage):
+        raise TypeError("Assistant tool-call message must be an AgentMessage.")
+
+    if message.role is not AgentMessageRole.ASSISTANT:
+        raise ValueError("Assistant tool-call message must have assistant role.")
+
+    try:
+        payload = json.loads(message.content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Assistant tool-call message content must contain valid JSON.") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("Assistant tool-call message payload must be a dictionary.")
+
+    raw_tool_calls = payload.get("tool_calls")
+
+    if not isinstance(raw_tool_calls, list) or not raw_tool_calls:
+        raise ValueError("Assistant tool-call message tool_calls must be a non-empty list.")
+
+    tool_calls: list[AgentToolCall] = []
+
+    for raw_tool_call in raw_tool_calls:
+        if not isinstance(raw_tool_call, dict):
+            raise ValueError("Assistant tool-call message tool_calls must contain dictionaries.")
+
+        call_id = raw_tool_call.get("call_id")
+        name = raw_tool_call.get("name")
+        arguments = raw_tool_call.get("arguments", {})
+
+        if not isinstance(call_id, str) or not call_id.strip():
+            raise ValueError("Assistant tool-call message call_id must be a non-empty string.")
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Assistant tool-call message name must be a non-empty string.")
+
+        if not isinstance(arguments, dict):
+            raise ValueError("Assistant tool-call message arguments must be a dictionary.")
+
+        tool_calls.append(
+            AgentToolCall(
+                call_id=call_id,
+                name=name,
+                arguments=dict(arguments),
+            )
+        )
+
+    return tuple(tool_calls)
+
+
 def assistant_tool_call_message(
     *,
     tool_calls: tuple[AgentToolCall, ...],

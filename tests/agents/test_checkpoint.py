@@ -345,3 +345,67 @@ def test_checkpoint_from_v1_payload_remains_compatible() -> None:
     assert checkpoint.execution_budget_state.llm_calls == 0
     assert checkpoint.execution_budget_state.tool_calls == 0
     assert checkpoint.execution_budget_state.tool_rounds == 2
+
+
+def test_checkpoint_before_tool_execution_round_trip() -> None:
+    tool_call = AgentToolCall(
+        call_id="call-1",
+        name="test.tool",
+        arguments={"value": "hello"},
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-before-tool",
+        agent_name="test-agent",
+        session_id="session-1",
+        user_id="user-1",
+        messages=(assistant_tool_call_message(tool_calls=(tool_call,)),),
+        tool_round=1,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={"source": "test"},
+        execution_budget_state=ExecutionBudgetState(tool_rounds=1),
+    )
+
+    restored = AgentExecutionCheckpoint.from_dict(checkpoint.to_dict())
+
+    assert restored.run_id == checkpoint.run_id
+    assert restored.agent_name == checkpoint.agent_name
+    assert restored.session_id == checkpoint.session_id
+    assert restored.user_id == checkpoint.user_id
+    assert restored.messages == checkpoint.messages
+    assert restored.tool_round == checkpoint.tool_round
+    assert restored.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert restored.metadata == checkpoint.metadata
+    assert restored.execution_budget_state.tool_rounds == 1
+
+
+def test_checkpoint_before_tool_execution_json_round_trip() -> None:
+    tool_call = AgentToolCall(
+        call_id="call-json-1",
+        name="test.tool",
+        arguments={"query": "DELDAI"},
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-before-tool-json",
+        agent_name="test-agent",
+        session_id=None,
+        user_id=None,
+        messages=(assistant_tool_call_message(tool_calls=(tool_call,)),),
+        tool_round=2,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={"test": True},
+        execution_budget_state=ExecutionBudgetState(tool_rounds=2),
+    )
+
+    restored = AgentExecutionCheckpoint.from_json(checkpoint.to_json())
+
+    assert restored.run_id == checkpoint.run_id
+    assert restored.agent_name == checkpoint.agent_name
+    assert restored.messages == checkpoint.messages
+    assert restored.tool_round == checkpoint.tool_round
+    assert restored.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert restored.metadata == checkpoint.metadata
+    assert restored.execution_budget_state.tool_rounds == 2

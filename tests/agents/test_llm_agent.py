@@ -936,7 +936,12 @@ class FakeAgentCheckpointHandler:
 
 
 class FailingAgentCheckpointHandler:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        fail_position: AgentCheckpointPosition = AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+    ) -> None:
+        self.fail_position = fail_position
         self.attempted_checkpoints: list[AgentExecutionCheckpoint] = []
 
     async def save(
@@ -944,7 +949,8 @@ class FailingAgentCheckpointHandler:
         checkpoint: AgentExecutionCheckpoint,
     ) -> None:
         self.attempted_checkpoints.append(checkpoint)
-        raise RuntimeError("checkpoint persistence failed")
+        if checkpoint.position is self.fail_position:
+            raise RuntimeError("checkpoint persistence failed")
 
 
 @pytest.mark.asyncio
@@ -992,21 +998,102 @@ async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
 
     await agent.run(context)
 
-    assert len(checkpoint_handler.checkpoints) == 1
+    assert len(checkpoint_handler.checkpoints) == 2
 
-    checkpoint = checkpoint_handler.checkpoints[0]
+    before_checkpoint = checkpoint_handler.checkpoints[0]
 
-    assert checkpoint.run_id == "run-123"
-    assert checkpoint.agent_name == "production-llm-agent"
-    assert checkpoint.session_id == "session-456"
-    assert checkpoint.user_id == "user-123"
-    assert checkpoint.tool_round == 1
-    assert checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
-    assert checkpoint.metadata == {"request_id": "request-789"}
+    assert before_checkpoint.run_id == "run-123"
+    assert before_checkpoint.agent_name == "production-llm-agent"
+    assert before_checkpoint.session_id == "session-456"
+    assert before_checkpoint.user_id == "user-123"
+    assert before_checkpoint.tool_round == 1
+    assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert before_checkpoint.metadata == {"request_id": "request-789"}
+    assert before_checkpoint.messages[-1].role is AgentMessageRole.ASSISTANT
+    assert "call-123" in before_checkpoint.messages[-1].content
+    assert len(before_checkpoint.messages) == 3
 
-    assert checkpoint.messages[-1].role is AgentMessageRole.TOOL
-    assert "call-123" in checkpoint.messages[-1].content
-    assert len(checkpoint.messages) == 4
+    after_checkpoint = checkpoint_handler.checkpoints[1]
+
+    assert after_checkpoint.run_id == "run-123"
+    assert after_checkpoint.agent_name == "production-llm-agent"
+    assert after_checkpoint.session_id == "session-456"
+    assert after_checkpoint.user_id == "user-123"
+    assert after_checkpoint.tool_round == 1
+    assert after_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert after_checkpoint.metadata == {"request_id": "request-789"}
+
+    assert after_checkpoint.messages[-1].role is AgentMessageRole.TOOL
+    assert "call-123" in after_checkpoint.messages[-1].content
+    assert len(after_checkpoint.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_checkpoint_failure_before_tool_prevents_side_effect() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FailingAgentCheckpointHandler(
+        fail_position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+    )
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+            metadata={"request_id": "request-789"},
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-checkpoint-before-tool-failure-1",
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="checkpoint persistence failed",
+    ):
+        await agent.run(context)
+
+    assert tool.execute_count == 0
+    assert len(gateway.requests) == 1
+    assert len(checkpoint_handler.attempted_checkpoints) == 1
+
+    attempted_checkpoint = checkpoint_handler.attempted_checkpoints[0]
+
+    assert attempted_checkpoint.run_id == "run-checkpoint-before-tool-failure-1"
+    assert attempted_checkpoint.tool_round == 1
+    assert attempted_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert attempted_checkpoint.messages[-1].role is AgentMessageRole.ASSISTANT
+    assert "call-123" in attempted_checkpoint.messages[-1].content
 
 
 @pytest.mark.asyncio
@@ -1065,15 +1152,23 @@ async def test_llm_agent_checkpoint_failure_occurs_after_tool_side_effect() -> N
     assert tool.execute_count == 1
     assert len(gateway.requests) == 1
 
-    assert len(checkpoint_handler.attempted_checkpoints) == 1
+    assert len(checkpoint_handler.attempted_checkpoints) == 2
 
-    attempted_checkpoint = checkpoint_handler.attempted_checkpoints[0]
+    before_checkpoint = checkpoint_handler.attempted_checkpoints[0]
 
-    assert attempted_checkpoint.run_id == "run-checkpoint-failure-1"
-    assert attempted_checkpoint.tool_round == 1
-    assert attempted_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
-    assert attempted_checkpoint.messages[-1].role is AgentMessageRole.TOOL
-    assert "call-123" in attempted_checkpoint.messages[-1].content
+    assert before_checkpoint.run_id == "run-checkpoint-failure-1"
+    assert before_checkpoint.tool_round == 1
+    assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert before_checkpoint.messages[-1].role is AgentMessageRole.ASSISTANT
+    assert "call-123" in before_checkpoint.messages[-1].content
+
+    after_checkpoint = checkpoint_handler.attempted_checkpoints[1]
+
+    assert after_checkpoint.run_id == "run-checkpoint-failure-1"
+    assert after_checkpoint.tool_round == 1
+    assert after_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert after_checkpoint.messages[-1].role is AgentMessageRole.TOOL
+    assert "call-123" in after_checkpoint.messages[-1].content
 
 
 @pytest.mark.asyncio
@@ -1138,7 +1233,23 @@ async def test_llm_agent_checkpoint_failure_preserves_idempotent_tool_result() -
 
     assert tool.execute_count == 1
     assert len(gateway.requests) == 1
-    assert len(checkpoint_handler.attempted_checkpoints) == 1
+    assert len(checkpoint_handler.attempted_checkpoints) == 2
+
+    before_checkpoint = checkpoint_handler.attempted_checkpoints[0]
+
+    assert before_checkpoint.run_id == "run-checkpoint-idempotency-1"
+    assert before_checkpoint.tool_round == 1
+    assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert before_checkpoint.messages[-1].role is AgentMessageRole.ASSISTANT
+    assert "call-123" in before_checkpoint.messages[-1].content
+
+    after_checkpoint = checkpoint_handler.attempted_checkpoints[1]
+
+    assert after_checkpoint.run_id == "run-checkpoint-idempotency-1"
+    assert after_checkpoint.tool_round == 1
+    assert after_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert after_checkpoint.messages[-1].role is AgentMessageRole.TOOL
+    assert "call-123" in after_checkpoint.messages[-1].content
 
     replay_service = ToolExecutionService(
         tool_registry,
@@ -2079,6 +2190,114 @@ async def test_llm_agent_resume_uses_checkpoint_messages_without_replaying_tool(
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_resume_from_before_tool_checkpoint_executes_saved_tool() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+        tool_names=("search",),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    checkpoint_handler = FakeAgentCheckpointHandler()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-456",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-before-tool-resume-1",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-before-tool-resume-1",
+        agent_name=definition.name,
+        session_id="session-456",
+        user_id="user-123",
+        messages=(
+            system_message("You are a production LLM agent."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-recover-1",
+                        name="search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={},
+        execution_budget_state=ExecutionBudgetState(
+            llm_calls=1,
+            tool_calls=1,
+            tool_rounds=1,
+        ),
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    response = await agent.resume(context, checkpoint)
+
+    assert response.output == "Generated answer."
+    assert response.metadata["tool_rounds"] == 1
+
+    assert tool.execute_count == 1
+
+    # Recovery must execute the saved tool before making the next LLM call.
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["messages"][-1]["role"] == "tool"
+    assert gateway.requests[0]["messages"][-1]["tool_call_id"] == "call-recover-1"
+    assert gateway.requests[0]["messages"][-1]["tool_name"] == "search"
+    assert '"query": "RAG"' in gateway.requests[0]["messages"][-1]["content"]
+
+    # The recovered execution must not consume the original tool budget again.
+    assert context.execution_budget_state.llm_calls == 2
+    assert context.execution_budget_state.tool_calls == 1
+    assert context.execution_budget_state.tool_rounds == 1
+
+    assert len(checkpoint_handler.checkpoints) == 1
+    recovered_checkpoint = checkpoint_handler.checkpoints[0]
+
+    assert recovered_checkpoint.run_id == checkpoint.run_id
+    assert recovered_checkpoint.agent_name == checkpoint.agent_name
+    assert recovered_checkpoint.tool_round == 1
+    assert recovered_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+    assert recovered_checkpoint.messages[:3] == checkpoint.messages
+    assert recovered_checkpoint.messages[3].role is AgentMessageRole.TOOL
+    assert '"call_id": "call-recover-1"' in recovered_checkpoint.messages[3].content
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_resume_restores_execution_budget_state() -> None:
     definition = AgentDefinition(
         name="production-llm-agent",
@@ -2262,9 +2481,29 @@ async def test_llm_agent_resume_continues_with_new_tool_call_and_checkpoint() ->
     assert '"query": "follow-up"' in resumed_tool_result["content"]
     assert '"success": true' in resumed_tool_result["content"]
 
-    assert len(checkpoint_handler.checkpoints) == 1
+    assert len(checkpoint_handler.checkpoints) == 2
 
-    new_checkpoint = checkpoint_handler.checkpoints[0]
+    before_checkpoint = checkpoint_handler.checkpoints[0]
+
+    assert before_checkpoint.run_id == original_checkpoint.run_id
+    assert before_checkpoint.agent_name == original_checkpoint.agent_name
+    assert before_checkpoint.tool_round == 2
+    assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+    assert before_checkpoint.metadata == original_checkpoint.metadata
+    assert len(before_checkpoint.messages) == 5
+    assert before_checkpoint.messages[:4] == original_checkpoint.messages
+    assert before_checkpoint.messages[4] == assistant_tool_call_message(
+        tool_calls=(
+            AgentToolCall(
+                call_id="call-2",
+                name="search",
+                arguments={"query": "follow-up"},
+            ),
+        ),
+        content="",
+    )
+
+    new_checkpoint = checkpoint_handler.checkpoints[1]
 
     assert new_checkpoint.run_id == original_checkpoint.run_id
     assert new_checkpoint.agent_name == original_checkpoint.agent_name

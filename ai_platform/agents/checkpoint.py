@@ -16,6 +16,7 @@ class AgentCheckpointPosition(StrEnum):
 
     BEFORE_LLM_REQUEST = "before_llm_request"
     AFTER_LLM_RESPONSE = "after_llm_response"
+    BEFORE_TOOL_EXECUTION = "before_tool_execution"
     AFTER_TOOL_EXECUTION = "after_tool_execution"
 
 
@@ -62,8 +63,13 @@ class AgentExecutionCheckpoint:
         if not isinstance(self.position, AgentCheckpointPosition):
             raise TypeError("Checkpoint position must be an AgentCheckpointPosition.")
 
-        if self.position is not AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
-            raise ValueError("Checkpoints are currently supported only after tool execution.")
+        if self.position not in {
+            AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+            AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        }:
+            raise ValueError(
+                "Checkpoints are currently supported only before or after tool execution."
+            )
         if not self.run_id.strip():
             raise ValueError("Checkpoint run_id must not be empty.")
 

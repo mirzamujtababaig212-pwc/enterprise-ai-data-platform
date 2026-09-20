@@ -547,19 +547,55 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert tool_completed.call_id == "call-rag-checkpoint-1"
         assert tool_completed.tool_round == 1
 
-        assert len(checkpoints) == 1
+        assert len(checkpoints) == 2
+        assert [checkpoint.position for checkpoint in checkpoints] == [
+            AgentCheckpointPosition.BEFORE_TOOL_EXECUTION.value,
+            AgentCheckpointPosition.AFTER_TOOL_EXECUTION.value,
+        ]
+        assert [checkpoint.tool_round for checkpoint in checkpoints] == [1, 1]
 
-        checkpoint_record = checkpoints[0]
+        before_checkpoint_record = checkpoints[0]
 
-        assert checkpoint_record.run_id == run_id
-        assert checkpoint_record.agent_name == "enterprise-rag-analyst"
-        assert checkpoint_record.session_id == session_id
-        assert checkpoint_record.user_id == "integration-test-user"
-        assert checkpoint_record.schema_version == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
-        assert checkpoint_record.position == AgentCheckpointPosition.AFTER_TOOL_EXECUTION.value
-        assert checkpoint_record.tool_round == 1
+        assert before_checkpoint_record.run_id == run_id
+        assert before_checkpoint_record.agent_name == "enterprise-rag-analyst"
+        assert before_checkpoint_record.session_id == session_id
+        assert before_checkpoint_record.user_id == "integration-test-user"
+        assert (
+            before_checkpoint_record.schema_version
+            == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
+        )
 
-        checkpoint = AgentExecutionCheckpoint.from_dict(dict(checkpoint_record.checkpoint_payload))
+        before_checkpoint = AgentExecutionCheckpoint.from_dict(
+            dict(before_checkpoint_record.checkpoint_payload)
+        )
+
+        assert before_checkpoint.run_id == run_id
+        assert before_checkpoint.agent_name == "enterprise-rag-analyst"
+        assert before_checkpoint.session_id == session_id
+        assert before_checkpoint.user_id == "integration-test-user"
+        assert before_checkpoint.schema_version == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
+        assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+        assert before_checkpoint.tool_round == 1
+        assert before_checkpoint.messages
+
+        after_checkpoint_record = checkpoints[1]
+
+        assert after_checkpoint_record.run_id == run_id
+        assert after_checkpoint_record.agent_name == "enterprise-rag-analyst"
+        assert after_checkpoint_record.session_id == session_id
+        assert after_checkpoint_record.user_id == "integration-test-user"
+        assert (
+            after_checkpoint_record.schema_version
+            == AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION
+        )
+        assert (
+            after_checkpoint_record.position == AgentCheckpointPosition.AFTER_TOOL_EXECUTION.value
+        )
+        assert after_checkpoint_record.tool_round == 1
+
+        checkpoint = AgentExecutionCheckpoint.from_dict(
+            dict(after_checkpoint_record.checkpoint_payload)
+        )
 
         assert checkpoint.run_id == run_id
         assert checkpoint.agent_name == "enterprise-rag-analyst"

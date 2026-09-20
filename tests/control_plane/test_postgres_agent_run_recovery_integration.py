@@ -11,9 +11,25 @@ from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
 )
+from ai_platform.agents.llm_agent import LLMAgent
+from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
+from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
+from ai_platform.agents.runtime import AgentRuntime
+from ai_platform.agents.tool_calls import AgentToolCall
+from app.control_plane.persistence.models import (
+    AgentRunCheckpointRecord,
+    AgentRunRecord,
+    ToolExecutionIdempotencyRecord,
+)
+from app.control_plane.tool_execution.postgres_idempotency import (
+    PostgreSQLToolExecutionIdempotencyStore,
+)
+from sqlalchemy import select, update
+from tools.execution.service import ToolExecutionService
+from tools.models import ToolDefinition
+from tools.registry.in_memory import InMemoryToolRegistry
 from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.llm_messages import user_message
-from ai_platform.agents.models import AgentRequest, AgentResponse
 from app.control_plane.agent_checkpoints.postgres_repository import (
     PostgreSQLAgentCheckpointsRepository,
 )
@@ -35,10 +51,6 @@ from app.control_plane.agent_runs.recovery_service import (
 )
 from app.control_plane.agent_runs.request_snapshot import (
     AgentRunRequestSnapshot,
-)
-from app.control_plane.persistence.models import (
-    AgentRunCheckpointRecord,
-    AgentRunRecord,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -118,6 +130,307 @@ def make_request_snapshot() -> AgentRunRequestSnapshot:
             },
         )
     )
+
+
+class CrashBoundaryTool:
+    def __init__(self) -> None:
+        self._definition = ToolDefinition(
+            name="crash.boundary.tool",
+            description="Deterministic side-effect tool for recovery testing.",
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+        return {
+            "status": "side_effect_completed",
+            "value": arguments["value"],
+            "execution_count": self.execution_count,
+        }
+
+
+class CrashBoundaryLLMGateway:
+    def __init__(self) -> None:
+        self.requests = []
+        self.call_count = 0
+
+    async def route_chat(self, request):
+        self.requests.append(request)
+        self.call_count += 1
+
+        if self.call_count == 1:
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="crash-boundary-call-001",
+                        name="crash.boundary.tool",
+                        arguments={"value": "fleet-42"},
+                    ),
+                ],
+            }
+
+        if self.call_count == 2:
+            raise RuntimeError("simulated process crash after tool execution")
+
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": "Recovered execution completed successfully.",
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 8,
+                "total_tokens": 28,
+            },
+        }
+
+
+class CrashBoundaryCheckpointHandler:
+    def __init__(self, session_factory) -> None:
+        self._session_factory = session_factory
+        self.suppress_after_tool_checkpoint = True
+
+    async def save(self, checkpoint: AgentExecutionCheckpoint) -> None:
+        if (
+            self.suppress_after_tool_checkpoint
+            and checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+        ):
+            return
+
+        session = self._session_factory()
+        try:
+            PostgreSQLAgentCheckpointsRepository(session).save(checkpoint)
+        finally:
+            session.close()
+
+
+def test_postgres_recovery_replays_completed_tool_from_before_checkpoint() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-crash-boundary-recovery-e2e"
+
+    session = session_factory()
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Execute the fleet-42 recovery operation.",
+            session_id="session-crash-boundary",
+            user_id="user-crash-boundary",
+            metadata={
+                "request_id": "crash-boundary-request",
+                "source": "integration-test",
+            },
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="crash-boundary-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                lease_id="initial-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        tool = CrashBoundaryTool()
+        tool_registry = InMemoryToolRegistry()
+
+        import asyncio
+
+        asyncio.run(tool_registry.register(tool))
+
+        idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
+            session_factory,
+        )
+        tool_execution_service = ToolExecutionService(
+            tool_registry,
+            idempotency_store=idempotency_store,
+        )
+
+        llm_gateway = CrashBoundaryLLMGateway()
+        registry = InMemoryAgentRegistry()
+
+        definition = AgentDefinition(
+            name="crash-boundary-agent",
+            description="Crash-boundary recovery integration agent.",
+            system_prompt="Execute the requested operation using the available tool.",
+            model="fake-model",
+            temperature=0.0,
+            max_tokens=256,
+            tool_names=("crash.boundary.tool",),
+        )
+
+        checkpoint_handler = CrashBoundaryCheckpointHandler(session_factory)
+        observer = PostgreSQLAgentRunEventObserver(session_factory)
+
+        agent = LLMAgent(
+            definition,
+            observer=observer,
+            checkpoint_handler=checkpoint_handler,
+        )
+
+        asyncio.run(registry.register(agent))
+
+        runtime = AgentRuntime(
+            registry,
+            tool_registry=tool_registry,
+            tool_execution_service=tool_execution_service,
+            llm_gateway=llm_gateway,
+        )
+
+        with pytest.raises(RuntimeError, match="simulated process crash"):
+            asyncio.run(
+                runtime.run(
+                    "crash-boundary-agent",
+                    request,
+                    run_id=run_id,
+                )
+            )
+
+        # The tool's side effect completed before the simulated crash.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 2
+
+        # The AFTER checkpoint was deliberately suppressed, so the durable
+        # recovery point is the BEFORE_TOOL_EXECUTION checkpoint.
+        checkpoint = checkpoint_repository.get_latest(run_id)
+        assert checkpoint is not None
+        assert checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+        assert checkpoint.tool_round == 1
+        assert checkpoint.execution_budget_state.llm_calls == 1
+        assert checkpoint.execution_budget_state.tool_calls == 1
+        assert checkpoint.execution_budget_state.tool_rounds == 1
+
+        # Verify the durable idempotency result exists before recovery.
+        idempotency_session = session_factory()
+        try:
+            idempotency_record = idempotency_session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "crash-boundary-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "crash.boundary.tool",
+                )
+            )
+            assert idempotency_record is not None
+            assert idempotency_record.status == "completed"
+            assert idempotency_record.success is True
+            assert idempotency_record.output == {
+                "status": "side_effect_completed",
+                "value": "fleet-42",
+                "execution_count": 1,
+            }
+        finally:
+            idempotency_session.close()
+
+        # Simulate the process having disappeared after the tool completed:
+        # the run is left RUNNING with an expired lease, while the BEFORE
+        # checkpoint and completed idempotency record remain durable.
+        expired_at = datetime.now(UTC) - timedelta(minutes=5)
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                status=AgentRunStatus.RUNNING.value,
+                lease_id="expired-after-crash",
+                lease_expires_at=expired_at,
+            )
+        )
+        session.commit()
+
+        # Recovery must now allow the AFTER checkpoint to be persisted.
+        checkpoint_handler.suppress_after_tool_checkpoint = False
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            observer=observer,
+            lease_seconds=60,
+        )
+
+        results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].run_id == run_id
+        assert results[0].response.output == ("Recovered execution completed successfully.")
+
+        # The recovery path reconstructed the original call_id and reached
+        # ToolExecutionService, but PostgreSQL idempotency returned the
+        # completed result instead of executing the side effect again.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 3
+
+        session.expire_all()
+
+        restored = run_repository.get(run_id)
+        assert restored is not None
+        assert restored.status is AgentRunStatus.COMPLETED
+        assert restored.output == "Recovered execution completed successfully."
+        assert restored.lease_id is None
+        assert restored.lease_expires_at is None
+
+        restored_checkpoint = checkpoint_repository.get_latest(run_id)
+        assert restored_checkpoint is not None
+        assert restored_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+        assert restored_checkpoint.tool_round == 1
+        assert restored_checkpoint.execution_budget_state.llm_calls == 1
+        assert restored_checkpoint.execution_budget_state.tool_calls == 1
+        assert restored_checkpoint.execution_budget_state.tool_rounds == 1
+
+        # The recovered AFTER checkpoint must contain the replayed tool result.
+        assert any(
+            message.role.value == "tool" and "crash-boundary-call-001" in message.content
+            for message in restored_checkpoint.messages
+        )
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
+        engine.dispose()
 
 
 def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
