@@ -13,6 +13,7 @@ class AgentExecutionEventType(StrEnum):
     AGENT_RECOVERY_STARTED = "agent.recovery.started"
     AGENT_RECOVERY_COMPLETED = "agent.recovery.completed"
     AGENT_RECOVERY_FAILED = "agent.recovery.failed"
+    AGENT_CANCELLED = "agent.cancelled"
 
     LLM_REQUESTED = "llm.requested"
     LLM_COMPLETED = "llm.completed"

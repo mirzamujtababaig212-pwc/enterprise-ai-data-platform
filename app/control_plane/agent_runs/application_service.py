@@ -5,7 +5,11 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.models import AgentRequest
-from ai_platform.agents.observability import AgentExecutionEvent
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.runtime import AgentRuntime
 
 from app.control_plane.agent_runs.cancellation import (
@@ -41,6 +45,7 @@ class AgentRunApplicationService:
         runtime: AgentRuntime,
         repository: AgentRunRepository,
         events_repository: AgentRunEventsRepository | None = None,
+        observer: AgentExecutionObserver | None = None,
         admission_policy: AgentRunAdmissionPolicy | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
@@ -48,11 +53,25 @@ class AgentRunApplicationService:
         self._runtime = runtime
         self._repository = repository
         self._events_repository = events_repository
+        self._observer = observer
         self._admission_policy = (
             admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
         )
         self._lease_seconds = lease_seconds
         self._cancellation_registry = cancellation_registry
+
+    async def _emit(
+        self,
+        event: AgentExecutionEvent,
+    ) -> None:
+        if self._observer is None:
+            return
+
+        try:
+            await self._observer.record(event)
+        except Exception:
+            # Cancellation observability must never change cancellation semantics.
+            pass
 
     async def execute(
         self,
@@ -142,7 +161,7 @@ class AgentRunApplicationService:
             cancelled_at = datetime.now(UTC)
 
             try:
-                self._repository.cancel_if_owner(
+                cancelled_run = self._repository.cancel_if_owner(
                     run.run_id,
                     lease_id=lease_id,
                     completed_at=cancelled_at,
@@ -151,6 +170,17 @@ class AgentRunApplicationService:
                 # Cancellation must continue to propagate even if terminal
                 # cancellation persistence fails.
                 pass
+            else:
+                if cancelled_run is not None:
+                    await self._emit(
+                        AgentExecutionEvent(
+                            event_type=AgentExecutionEventType.AGENT_CANCELLED,
+                            agent_name=run.agent_name,
+                            run_id=run.run_id,
+                            session_id=run.session_id,
+                            user_id=run.user_id,
+                        )
+                    )
 
             raise
         except Exception as exc:

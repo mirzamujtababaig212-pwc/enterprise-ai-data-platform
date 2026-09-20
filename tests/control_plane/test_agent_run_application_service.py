@@ -120,6 +120,23 @@ def _repository() -> Mock:
     return repository
 
 
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events: list[AgentExecutionEvent] = []
+
+    async def record(self, event: AgentExecutionEvent) -> None:
+        self.events.append(event)
+
+
+class FailingObserver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def record(self, event: AgentExecutionEvent) -> None:
+        self.calls += 1
+        raise RuntimeError("event persistence unavailable")
+
+
 @pytest.mark.asyncio
 async def test_execute_persists_pending_running_and_completed_lifecycle() -> None:
     repository = _repository()
@@ -870,7 +887,7 @@ async def test_execute_starts_and_cancels_heartbeat_task() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_persists_cancelled_run_and_reraises_cancelled_error() -> None:
+async def test_execute_persists_cancelled_run_and_emits_audit_event() -> None:
     repository = _repository()
 
     runtime = Mock()
@@ -888,10 +905,12 @@ async def test_execute_persists_cancelled_run_and_reraises_cancelled_error() -> 
     )
 
     registry = AgentRunCancellationRegistry()
+    observer = RecordingObserver()
 
     service = AgentRunApplicationService(
         runtime=runtime,
         repository=repository,
+        observer=observer,
         cancellation_registry=registry,
     )
 
@@ -936,6 +955,130 @@ async def test_execute_persists_cancelled_run_and_reraises_cancelled_error() -> 
 
     repository.fail_if_owner.assert_not_called()
     repository.complete_if_owner.assert_not_called()
+
+    assert len(observer.events) == 1
+
+    event = observer.events[0]
+
+    assert event.event_type is AgentExecutionEventType.AGENT_CANCELLED
+    assert event.agent_name == running.agent_name
+    assert event.run_id == running.run_id
+    assert event.session_id == running.session_id
+    assert event.user_id == running.user_id
+    assert event.metadata == {}
+    assert event.tool_round is None
+    assert event.tool_name is None
+    assert event.call_id is None
+    assert event.provider is None
+    assert event.model is None
+
+
+@pytest.mark.asyncio
+async def test_execute_cancellation_does_not_emit_event_after_ownership_loss() -> None:
+    repository = _repository()
+    repository.cancel_if_owner.side_effect = lambda *args, **kwargs: None
+
+    runtime = Mock()
+
+    started = asyncio.Event()
+
+    async def run_agent(*args, **kwargs):
+        started.set()
+        await asyncio.Future()
+
+    runtime.run = AsyncMock(side_effect=run_agent)
+
+    from app.control_plane.agent_runs.cancellation import (
+        AgentRunCancellationRegistry,
+    )
+
+    registry = AgentRunCancellationRegistry()
+    observer = RecordingObserver()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        observer=observer,
+        cancellation_registry=registry,
+    )
+
+    execution_task = asyncio.create_task(
+        service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Long running task",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+    )
+
+    await started.wait()
+
+    running = repository.update.call_args_list[0].args[0]
+
+    assert registry.cancel(running.run_id) is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+
+    repository.cancel_if_owner.assert_called_once()
+    assert observer.events == []
+
+
+@pytest.mark.asyncio
+async def test_execute_cancellation_continues_when_observer_fails() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+
+    started = asyncio.Event()
+
+    async def run_agent(*args, **kwargs):
+        started.set()
+        await asyncio.Future()
+
+    runtime.run = AsyncMock(side_effect=run_agent)
+
+    from app.control_plane.agent_runs.cancellation import (
+        AgentRunCancellationRegistry,
+    )
+
+    registry = AgentRunCancellationRegistry()
+    observer = FailingObserver()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        observer=observer,
+        cancellation_registry=registry,
+    )
+
+    execution_task = asyncio.create_task(
+        service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Long running task",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+    )
+
+    await started.wait()
+
+    running = repository.update.call_args_list[0].args[0]
+
+    assert registry.cancel(running.run_id) is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+
+    repository.cancel_if_owner.assert_called_once()
+
+    cancelled = repository.cancelled_run
+    assert cancelled.status == AgentRunStatus.CANCELLED
+    assert observer.calls == 1
 
 
 def test_cancel_raises_lookup_error_for_missing_run() -> None:
