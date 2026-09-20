@@ -4,6 +4,8 @@ import asyncio
 import logging
 from typing import Any
 
+from jsonschema import SchemaError, ValidationError, validate
+
 from tools.authorization.audit import (
     ToolAuthorizationAuditRecord,
     ToolAuthorizationAuditSink,
@@ -69,6 +71,28 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"Tool is disabled: {tool_name}",
+            )
+
+        try:
+            validate(
+                instance=arguments,
+                schema=tool.definition.input_schema,
+            )
+        except ValidationError as exc:
+            return ToolExecutionResult(
+                tool_name=tool_name,
+                success=False,
+                error=f"Tool arguments failed schema validation: {exc.message}",
+            )
+        except SchemaError as exc:
+            logger.exception(
+                "Tool has an invalid input schema: tool_name=%s",
+                tool_name,
+            )
+            return ToolExecutionResult(
+                tool_name=tool_name,
+                success=False,
+                error=f"Tool input schema is invalid: {exc.message}",
             )
 
         if self.authorization_service is not None:

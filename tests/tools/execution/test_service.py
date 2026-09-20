@@ -691,3 +691,192 @@ async def test_authorization_audit_failure_does_not_break_tool_execution() -> No
         "arguments": {"value": 42},
     }
     assert tool.execution_count == 1
+
+
+class SchemaValidatedTool:
+    def __init__(self, schema):
+        self._definition = ToolDefinition(
+            name="schema_tool",
+            description="A schema-validated test tool.",
+            input_schema=schema,
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+        return arguments
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_tool_arguments_against_input_schema():
+    registry = InMemoryToolRegistry()
+
+    tool = SchemaValidatedTool(
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer", "minimum": 1},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "schema_tool",
+        {
+            "query": "enterprise AI",
+            "top_k": 5,
+        },
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "query": "enterprise AI",
+        "top_k": 5,
+    }
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_invalid_tool_arguments_before_execution():
+    registry = InMemoryToolRegistry()
+
+    tool = SchemaValidatedTool(
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        }
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "schema_tool",
+        {},
+    )
+
+    assert result.success is False
+    assert result.tool_name == "schema_tool"
+    assert "schema validation" in result.error
+    assert "query" in result.error
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_invalid_argument_type_before_execution():
+    registry = InMemoryToolRegistry()
+
+    tool = SchemaValidatedTool(
+        {
+            "type": "object",
+            "properties": {
+                "top_k": {"type": "integer"},
+            },
+        }
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "schema_tool",
+        {"top_k": "5"},
+    )
+
+    assert result.success is False
+    assert result.tool_name == "schema_tool"
+    assert "schema validation" in result.error
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_allows_empty_schema():
+    registry = InMemoryToolRegistry()
+
+    tool = SchemaValidatedTool({})
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "schema_tool",
+        {"anything": "goes"},
+    )
+
+    assert result.success is True
+    assert result.output == {"anything": "goes"}
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_invalid_tool_schema():
+    registry = InMemoryToolRegistry()
+
+    tool = SchemaValidatedTool(
+        {
+            "type": "not-a-real-json-schema-type",
+        }
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "schema_tool",
+        {},
+    )
+
+    assert result.success is False
+    assert result.tool_name == "schema_tool"
+    assert "Tool input schema is invalid" in result.error
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_argument_validation_happens_before_authorization():
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+
+    tool = SchemaValidatedTool(
+        {
+            "type": "object",
+            "required": ["query"],
+        }
+    )
+
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    result = await service.execute(
+        "schema_tool",
+        {},
+        principal="agent:research",
+    )
+
+    assert result.success is False
+    assert "schema validation" in result.error
+    assert tool.execution_count == 0
