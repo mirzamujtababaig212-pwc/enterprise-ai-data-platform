@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from tests.tools.execution.test_service import FakeTool
+from tests.tools.execution.test_service import FakeTool, FailingTool
 from ai_platform.agents.contracts import Agent
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
@@ -1404,7 +1404,65 @@ async def test_llm_agent_tool_events_do_not_capture_tool_payloads() -> None:
     ]
 
     for event in tool_events:
-        assert event.metadata == {}
+        if event.event_type is AgentExecutionEventType.TOOL_CALL_FAILED:
+            assert event.metadata == {
+                "failure_category": "tool_not_found",
+            }
+        else:
+            assert event.metadata == {}
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_failed_tool_event_includes_failure_category() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("failing_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="failing_tool")
+    tool_registry = InMemoryToolRegistry()
+    await tool_registry.register(FailingTool())
+
+    observer = FakeAgentExecutionObserver()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Run the failing tool.",
+            session_id="session-123",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    await agent.run(context)
+
+    failed_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.TOOL_CALL_FAILED
+    ]
+
+    assert len(failed_events) == 1
+    failed_event = failed_events[0]
+
+    assert failed_event.metadata == {
+        "failure_category": "execution_error",
+    }
+    assert "simulated tool failure" not in str(failed_event.metadata)
 
 
 @pytest.mark.asyncio

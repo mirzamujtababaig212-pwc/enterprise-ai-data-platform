@@ -720,7 +720,9 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
         assert failed.tool_round == 1
         assert failed.tool_name == "search_documents"
         assert failed.call_id == "call-observe-1"
-        assert failed.metadata == {}
+        assert failed.metadata == {
+            "failure_category": "authorization",
+        }
 
         assert all(
             event.event_type != AgentExecutionEventType.TOOL_CALL_COMPLETED for event in tool_events

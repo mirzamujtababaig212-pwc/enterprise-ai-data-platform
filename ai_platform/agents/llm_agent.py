@@ -202,6 +202,13 @@ class LLMAgent:
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
+                        metadata=(
+                            {
+                                "failure_category": tool_result.failure_category.value,
+                            }
+                            if tool_result.failure_category is not None
+                            else {}
+                        ),
                     )
                 )
 

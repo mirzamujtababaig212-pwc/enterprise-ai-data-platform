@@ -12,7 +12,7 @@ from tools.authorization.audit import (
 )
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
-from tools.models import ToolExecutionResult
+from tools.models import ToolExecutionFailureCategory, ToolExecutionResult
 from tools.execution.context import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"Tool not found: {tool_name}",
+                failure_category=ToolExecutionFailureCategory.TOOL_NOT_FOUND,
             )
 
         if not tool.definition.enabled:
@@ -71,6 +72,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"Tool is disabled: {tool_name}",
+                failure_category=ToolExecutionFailureCategory.TOOL_DISABLED,
             )
 
         try:
@@ -83,6 +85,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"Tool arguments failed schema validation: {exc.message}",
+                failure_category=ToolExecutionFailureCategory.SCHEMA_VALIDATION,
             )
         except SchemaError as exc:
             logger.exception(
@@ -93,6 +96,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"Tool input schema is invalid: {exc.message}",
+                failure_category=ToolExecutionFailureCategory.INVALID_SCHEMA,
             )
 
         if self.authorization_service is not None:
@@ -101,6 +105,7 @@ class ToolExecutionService:
                     tool_name=tool_name,
                     success=False,
                     error=("Principal is required when " "tool authorization is enabled."),
+                    failure_category=ToolExecutionFailureCategory.MISSING_PRINCIPAL,
                 )
 
             authorization = await self.authorization_service.authorize(
@@ -122,6 +127,7 @@ class ToolExecutionService:
                     tool_name=tool_name,
                     success=False,
                     error=(authorization.reason or "Tool execution is not authorized."),
+                    failure_category=ToolExecutionFailureCategory.AUTHORIZATION,
                 )
 
         try:
@@ -151,6 +157,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=(f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"),
+                failure_category=ToolExecutionFailureCategory.TIMEOUT,
             )
 
         except Exception as exc:
@@ -158,6 +165,7 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 success=False,
                 error=f"{type(exc).__name__}: {exc}",
+                failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
             )
 
     async def _audit_authorization(

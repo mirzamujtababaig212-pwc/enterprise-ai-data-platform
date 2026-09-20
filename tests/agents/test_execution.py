@@ -12,6 +12,7 @@ from ai_platform.agents.tool_calls import (
 )
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.execution.context import ToolExecutionContext
+from tools.models import ToolExecutionFailureCategory
 from ai_platform.agents.llm_messages import (
     assistant_message,
     system_message,
@@ -544,6 +545,7 @@ async def test_execution_context_executes_tool_calls() -> None:
             call_id="call-123",
             tool_name="search",
             error="Tool not found: search",
+            failure_category=ToolExecutionFailureCategory.TOOL_NOT_FOUND,
         ),
     )
 

@@ -9,7 +9,10 @@ from tools.authorization.service import (
     ToolAuthorizationService,
 )
 from tools.execution.service import ToolExecutionService
-from tools.models import ToolDefinition
+from tools.models import (
+    ToolDefinition,
+    ToolExecutionFailureCategory,
+)
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.authorization.models import ToolAuthorizationResult
 from tools.execution.context import ToolExecutionContext
@@ -135,6 +138,7 @@ async def test_execute_calls_registered_tool():
         "arguments": {"value": 42},
     }
     assert result.error is None
+    assert result.failure_category is None
     assert tool.execution_count == 1
 
 
@@ -152,6 +156,7 @@ async def test_execute_unknown_tool_returns_failure():
     assert result.tool_name == "missing_tool"
     assert result.output is None
     assert result.error == "Tool not found: missing_tool"
+    assert result.failure_category == ToolExecutionFailureCategory.TOOL_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -175,6 +180,7 @@ async def test_execute_disabled_tool_returns_failure():
     assert result.success is False
     assert result.tool_name == "disabled_tool"
     assert result.error == "Tool is disabled: disabled_tool"
+    assert result.failure_category == ToolExecutionFailureCategory.TOOL_DISABLED
 
 
 @pytest.mark.asyncio
@@ -209,6 +215,7 @@ async def test_execute_tool_failure_is_isolated():
     assert result.tool_name == "failing_tool"
     assert result.output is None
     assert result.error == "RuntimeError: simulated tool failure"
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
 
 
 @pytest.mark.asyncio
@@ -231,6 +238,7 @@ async def test_execute_timeout_is_handled():
     assert result.tool_name == "slow_tool"
     assert result.output is None
     assert "timed out" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.TIMEOUT
 
 
 @pytest.mark.asyncio
@@ -252,6 +260,7 @@ async def test_execute_custom_timeout_is_used():
 
     assert result.success is False
     assert "timed out" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.TIMEOUT
 
 
 def test_invalid_default_timeout_is_rejected():
@@ -344,6 +353,7 @@ async def test_unauthorized_principal_cannot_execute_tool():
     assert result.success is False
     assert result.tool_name == "test_tool"
     assert result.error == "Tool is not authorized for this principal."
+    assert result.failure_category == ToolExecutionFailureCategory.AUTHORIZATION
     assert tool.execution_count == 0
 
 
@@ -368,6 +378,7 @@ async def test_authorization_requires_principal():
 
     assert result.success is False
     assert result.error == ("Principal is required when " "tool authorization is enabled.")
+    assert result.failure_category == ToolExecutionFailureCategory.MISSING_PRINCIPAL
 
 
 @pytest.mark.asyncio
@@ -527,6 +538,7 @@ async def test_authorization_happens_before_contextual_tool_execution():
 
     assert result.success is False
     assert result.error == "Tool is not authorized for this principal."
+    assert result.failure_category == ToolExecutionFailureCategory.AUTHORIZATION
     assert tool.received_arguments is None
     assert tool.received_context is None
 
@@ -648,6 +660,7 @@ async def test_authorization_decision_is_audited_for_denied_tool() -> None:
 
     assert result.success is False
     assert result.error == "Tool is not authorized for this principal."
+    assert result.failure_category == ToolExecutionFailureCategory.AUTHORIZATION
     assert tool.execution_count == 0
     assert len(audit_sink.records) == 1
 
@@ -773,6 +786,7 @@ async def test_execute_rejects_invalid_tool_arguments_before_execution():
     assert result.success is False
     assert result.tool_name == "schema_tool"
     assert "schema validation" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
     assert "query" in result.error
     assert tool.execution_count == 0
 
@@ -802,6 +816,7 @@ async def test_execute_rejects_invalid_argument_type_before_execution():
     assert result.success is False
     assert result.tool_name == "schema_tool"
     assert "schema validation" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
     assert tool.execution_count == 0
 
 
@@ -847,6 +862,7 @@ async def test_execute_rejects_invalid_tool_schema():
     assert result.success is False
     assert result.tool_name == "schema_tool"
     assert "Tool input schema is invalid" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.INVALID_SCHEMA
     assert tool.execution_count == 0
 
 
@@ -879,4 +895,5 @@ async def test_argument_validation_happens_before_authorization():
 
     assert result.success is False
     assert "schema validation" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
     assert tool.execution_count == 0

@@ -209,6 +209,7 @@ class AgentExecutionContext:
                         tool_name=tool_call.name,
                         output=result.output if result.success else None,
                         error=result.error if not result.success else None,
+                        failure_category=(result.failure_category if not result.success else None),
                     )
                 )
                 continue
