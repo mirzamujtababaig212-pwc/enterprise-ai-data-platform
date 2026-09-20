@@ -737,6 +737,35 @@ def test_expired_running_run_can_be_reclaimed(repository) -> None:
     assert restored.lease_expires_at == expires_at
 
 
+def test_fail_if_owner_rejects_expired_lease(repository) -> None:
+    run = make_run(
+        run_id="run-fail-expired",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.fail_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        error_type="RuntimeError",
+        error_message="late failure",
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+
 @pytest.mark.skipif(
     __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
     reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
@@ -937,13 +966,120 @@ def test_claim_expired_running_run_is_atomic_across_postgres_sessions() -> None:
             engine.dispose()
 
 
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
+def test_stale_worker_cannot_complete_after_postgres_reclaim() -> None:
+    import os
+
+    from sqlalchemy import create_engine, delete
+    from sqlalchemy.orm import sessionmaker
+
+    from app.control_plane.persistence.models import AgentRunRecord
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-zombie-worker-after-reclaim"
+    stale_before = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+    expired_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    reclaimed_started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    reclaimed_expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+    stale_worker_completed_at = datetime(2026, 9, 19, 12, 3, tzinfo=UTC)
+
+    setup_session = session_factory()
+    try:
+        setup_repository = PostgreSQLAgentRunRepository(setup_session)
+        setup_repository.create(
+            make_run(
+                run_id=run_id,
+                status=AgentRunStatus.RUNNING,
+                lease_id="lease-a",
+                lease_expires_at=expired_at,
+            )
+        )
+    finally:
+        setup_session.close()
+
+    stale_worker_session = session_factory()
+    recovery_worker_session = session_factory()
+
+    try:
+        stale_worker_repository = PostgreSQLAgentRunRepository(stale_worker_session)
+        recovery_worker_repository = PostgreSQLAgentRunRepository(recovery_worker_session)
+
+        reclaimed = recovery_worker_repository.claim_expired_running_run(
+            run_id,
+            stale_before=stale_before,
+            started_at=reclaimed_started_at,
+            lease_id="lease-b",
+            lease_expires_at=reclaimed_expires_at,
+        )
+
+        assert reclaimed is not None
+        assert reclaimed.status is AgentRunStatus.RUNNING
+        assert reclaimed.lease_id == "lease-b"
+        assert reclaimed.lease_expires_at == reclaimed_expires_at
+
+        stale_completion = stale_worker_repository.complete_if_owner(
+            run_id,
+            lease_id="lease-a",
+            completed_at=stale_worker_completed_at,
+            output={"answer": "zombie-worker-must-not-win"},
+        )
+
+        assert stale_completion is None
+
+        with session_factory() as verification_session:
+            verification_repository = PostgreSQLAgentRunRepository(verification_session)
+            restored = verification_repository.get(run_id)
+
+        assert restored is not None
+        assert restored.status is AgentRunStatus.RUNNING
+        assert restored.lease_id == "lease-b"
+        assert restored.lease_expires_at == reclaimed_expires_at
+        assert restored.completed_at is None
+        assert restored.output is None
+    finally:
+        stale_worker_session.close()
+        recovery_worker_session.close()
+
+        cleanup_session = session_factory()
+        try:
+            cleanup_session.execute(
+                delete(AgentRunRecord).where(
+                    AgentRunRecord.run_id == run_id,
+                )
+            )
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            engine.dispose()
+
+
 def test_complete_if_owner_persists_completed_run_and_clears_lease(repository) -> None:
     run = make_run(
         run_id="run-complete",
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -978,7 +1114,7 @@ def test_complete_if_owner_rejects_wrong_lease(repository) -> None:
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -995,7 +1131,63 @@ def test_complete_if_owner_rejects_wrong_lease(repository) -> None:
     assert restored is not None
     assert restored.status is AgentRunStatus.RUNNING
     assert restored.lease_id == "lease-a"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+
+
+def test_complete_if_owner_rejects_expired_lease(repository) -> None:
+    run = make_run(
+        run_id="run-complete-expired",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        output={"answer": "late"},
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
     assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+
+def test_complete_if_owner_rejects_exact_expiry(repository) -> None:
+    run = make_run(
+        run_id="run-complete-exact-expiry",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        output={"answer": "late"},
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
 
 
 def test_fail_if_owner_persists_failed_run_and_clears_lease(repository) -> None:
@@ -1004,7 +1196,7 @@ def test_fail_if_owner_persists_failed_run_and_clears_lease(repository) -> None:
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -1042,7 +1234,7 @@ def test_fail_if_owner_rejects_wrong_lease(repository) -> None:
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -1060,7 +1252,7 @@ def test_fail_if_owner_rejects_wrong_lease(repository) -> None:
     assert restored is not None
     assert restored.status is AgentRunStatus.RUNNING
     assert restored.lease_id == "lease-a"
-    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
 
 
 @pytest.mark.skipif(
@@ -1095,7 +1287,7 @@ def test_complete_if_owner_is_atomic_across_postgres_sessions() -> None:
 
     run_id = "postgres-terminal-ownership-race"
     completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
-    lease_expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
 
     setup_session = session_factory()
     try:
@@ -1170,7 +1362,7 @@ def test_cancel_if_owner_persists_cancelled_run_and_clears_lease(repository) -> 
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -1227,7 +1419,7 @@ def test_cancel_if_owner_is_atomic_across_postgres_sessions() -> None:
 
     run_id = "postgres-cancel-ownership-race"
     cancelled_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
-    lease_expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
 
     setup_session = session_factory()
     try:
@@ -1302,7 +1494,7 @@ def test_cancel_if_owner_rejects_wrong_lease(repository) -> None:
         status=AgentRunStatus.RUNNING,
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-a",
-        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
     )
     repository.create(run)
 
@@ -1310,6 +1502,33 @@ def test_cancel_if_owner_rejects_wrong_lease(repository) -> None:
         run.run_id,
         lease_id="lease-b",
         completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-a"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+
+
+def test_cancel_if_owner_rejects_expired_lease(repository) -> None:
+    run = make_run(
+        run_id="run-cancel-expired",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-a",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
     )
 
     assert result is None

@@ -91,7 +91,12 @@ class InMemoryAgentRunRepository:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_id != lease_id
+                or run.lease_expires_at is None
+            ):
                 return None
 
             updated = run.model_copy(
@@ -176,7 +181,13 @@ class InMemoryAgentRunRepository:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_id != lease_id
+                or run.lease_expires_at is None
+                or run.lease_expires_at <= completed_at
+            ):
                 return None
 
             completed = run.transition_to(AgentRunStatus.COMPLETED).model_copy(
@@ -203,7 +214,13 @@ class InMemoryAgentRunRepository:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_id != lease_id
+                or run.lease_expires_at is None
+                or run.lease_expires_at <= completed_at
+            ):
                 return None
 
             failed = run.transition_to(AgentRunStatus.FAILED).model_copy(
@@ -229,7 +246,13 @@ class InMemoryAgentRunRepository:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status is not AgentRunStatus.RUNNING or run.lease_id != lease_id:
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_id != lease_id
+                or run.lease_expires_at is None
+                or run.lease_expires_at <= completed_at
+            ):
                 return None
 
             cancelled = run.transition_to(AgentRunStatus.CANCELLED).model_copy(

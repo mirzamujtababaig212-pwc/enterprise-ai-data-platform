@@ -416,7 +416,7 @@ def test_complete_if_owner_clears_lease():
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -444,7 +444,7 @@ def test_complete_if_owner_rejects_wrong_lease():
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -470,7 +470,7 @@ def test_fail_if_owner_clears_lease():
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -500,7 +500,7 @@ def test_fail_if_owner_rejects_wrong_lease():
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -528,7 +528,7 @@ def test_cancel_if_owner_clears_lease() -> None:
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -561,7 +561,7 @@ def test_cancel_if_owner_rejects_wrong_lease() -> None:
         update={
             "status": AgentRunStatus.RUNNING,
             "lease_id": "lease-a",
-            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
         }
     )
     repository.create(run)
@@ -570,6 +570,102 @@ def test_cancel_if_owner_rejects_wrong_lease() -> None:
         run.run_id,
         lease_id="lease-b",
         completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_complete_if_owner_rejects_expired_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-complete-expired").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        output={"answer": "late"},
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_complete_if_owner_rejects_exact_expiry():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-complete-exact-expiry").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        output={"answer": "late"},
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_fail_if_owner_rejects_expired_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-fail-expired").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.fail_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
+        error_type="RuntimeError",
+        error_message="late failure",
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_cancel_if_owner_rejects_expired_lease():
+    repository = InMemoryAgentRunRepository()
+    run = make_run("run-cancel-expired").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.cancel_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        completed_at=completed_at,
     )
 
     assert result is None

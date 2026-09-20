@@ -285,6 +285,7 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_id == lease_id,
+                AgentRunRecord.lease_expires_at > completed_at,
             )
             .values(
                 status=AgentRunStatus.COMPLETED.value,
@@ -324,6 +325,7 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_id == lease_id,
+                AgentRunRecord.lease_expires_at > completed_at,
             )
             .values(
                 status=AgentRunStatus.FAILED.value,
@@ -362,6 +364,7 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_id == lease_id,
+                AgentRunRecord.lease_expires_at > completed_at,
             )
             .values(
                 status=AgentRunStatus.CANCELLED.value,
