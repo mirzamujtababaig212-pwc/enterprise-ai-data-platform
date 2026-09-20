@@ -12,6 +12,7 @@ from tools.execution.service import ToolExecutionService
 from tools.models import (
     ToolDefinition,
     ToolExecutionFailureCategory,
+    ToolExecutionPolicy,
 )
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.authorization.models import ToolAuthorizationResult
@@ -895,5 +896,318 @@ async def test_argument_validation_happens_before_authorization():
 
     assert result.success is False
     assert "schema validation" in result.error
+    assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
+    assert tool.execution_count == 0
+
+
+class CountingToolAuthorizer(InMemoryToolAuthorizer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.authorization_requests = []
+
+    async def authorize(self, request):
+        self.authorization_requests.append(request)
+        return await super().authorize(request)
+
+
+class RetryableTool:
+    def __init__(
+        self,
+        failures_before_success: int,
+        *,
+        execution_policy=None,
+    ):
+        self._definition = ToolDefinition(
+            name="retryable_tool",
+            description="A retryable test tool.",
+            execution_policy=(
+                execution_policy if execution_policy is not None else ToolExecutionPolicy()
+            ),
+        )
+        self.failures_before_success = failures_before_success
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+
+        if self.execution_count <= self.failures_before_success:
+            raise RuntimeError("transient failure")
+
+        return {"status": "success"}
+
+
+class AlwaysFailingRetryTool:
+    def __init__(self, execution_policy):
+        self._definition = ToolDefinition(
+            name="always_failing_retry_tool",
+            description="An always-failing retry test tool.",
+            execution_policy=execution_policy,
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+        raise RuntimeError("persistent failure")
+
+
+class RetryTimeoutTool:
+    def __init__(self, execution_policy):
+        self._definition = ToolDefinition(
+            name="retry_timeout_tool",
+            description="A retryable timeout test tool.",
+            execution_policy=execution_policy,
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+
+        if self.execution_count == 1:
+            await asyncio.sleep(0.2)
+
+        return {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_retry_by_default():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryableTool(failures_before_success=1)
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+    assert result.error == "RuntimeError: transient failure"
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_retries_explicitly_retryable_execution_error():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryableTool(
+        failures_before_success=2,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=2,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+        ),
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+    )
+
+    assert result.success is True
+    assert result.output == {"status": "success"}
+    assert tool.execution_count == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_final_failure_after_max_retries():
+    registry = InMemoryToolRegistry()
+
+    tool = AlwaysFailingRetryTool(
+        ToolExecutionPolicy(
+            max_retries=2,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+        )
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "always_failing_retry_tool",
+        {},
+    )
+
+    assert result.success is False
+    assert result.error == "RuntimeError: persistent failure"
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+    assert tool.execution_count == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_retry_non_retryable_failure_category():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryableTool(
+        failures_before_success=1,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=3,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
+        ),
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_retries_timeout_with_bounded_attempt_timeout():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryTimeoutTool(
+        ToolExecutionPolicy(
+            max_retries=1,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
+        )
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "retry_timeout_tool",
+        {},
+        timeout_seconds=0.05,
+    )
+
+    assert result.success is True
+    assert result.output == {"status": "success"}
+    assert tool.execution_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_retries_without_repeating_authorization():
+    registry = InMemoryToolRegistry()
+    authorizer = CountingToolAuthorizer()
+
+    tool = RetryableTool(
+        failures_before_success=1,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=2,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+        ),
+    )
+
+    await registry.register(tool)
+
+    await authorizer.allow(
+        "agent:research",
+        "retryable_tool",
+    )
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+        principal="agent:research",
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 2
+    assert len(authorizer.authorization_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_backoff_is_applied():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryableTool(
+        failures_before_success=1,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=1,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+            backoff_seconds=0.05,
+        ),
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    started = asyncio.get_running_loop().time()
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+    )
+
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert result.success is True
+    assert tool.execution_count == 2
+    assert elapsed >= 0.05
+
+
+@pytest.mark.asyncio
+async def test_schema_validation_happens_before_all_retry_attempts():
+    registry = InMemoryToolRegistry()
+
+    tool = RetryableTool(
+        failures_before_success=0,
+        execution_policy=ToolExecutionPolicy(
+            max_retries=3,
+            retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+        ),
+    )
+
+    tool._definition = ToolDefinition(
+        name="retryable_tool",
+        description="A retryable test tool.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "value": {"type": "integer"},
+            },
+            "required": ["value"],
+        },
+        execution_policy=tool.definition.execution_policy,
+    )
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+
+    result = await service.execute(
+        "retryable_tool",
+        {},
+    )
+
+    assert result.success is False
     assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
     assert tool.execution_count == 0

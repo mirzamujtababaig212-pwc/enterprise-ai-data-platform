@@ -12,7 +12,10 @@ from tools.authorization.audit import (
 )
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
-from tools.models import ToolExecutionFailureCategory, ToolExecutionResult
+from tools.models import (
+    ToolExecutionFailureCategory,
+    ToolExecutionResult,
+)
 from tools.execution.context import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
@@ -130,43 +133,60 @@ class ToolExecutionService:
                     failure_category=ToolExecutionFailureCategory.AUTHORIZATION,
                 )
 
-        try:
-            contextual_execute = getattr(tool, "execute_with_context", None)
+        policy = tool.definition.execution_policy
 
-            if contextual_execute is not None:
-                execution = contextual_execute(
-                    arguments,
-                    execution_context,
+        for attempt in range(policy.max_retries + 1):
+            try:
+                contextual_execute = getattr(tool, "execute_with_context", None)
+
+                if contextual_execute is not None:
+                    execution = contextual_execute(
+                        arguments,
+                        execution_context,
+                    )
+                else:
+                    execution = tool.execute(arguments)
+
+                output = await asyncio.wait_for(
+                    execution,
+                    timeout=timeout,
                 )
-            else:
-                execution = tool.execute(arguments)
 
-            output = await asyncio.wait_for(
-                execution,
-                timeout=timeout,
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=True,
+                    output=output,
+                )
+
+            except asyncio.TimeoutError:
+                result = ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=(f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"),
+                    failure_category=ToolExecutionFailureCategory.TIMEOUT,
+                )
+
+            except Exception as exc:
+                result = ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                    failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
+                )
+
+            should_retry = (
+                result.failure_category is not None
+                and result.failure_category in policy.retryable_failure_categories
+                and attempt < policy.max_retries
             )
 
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                success=True,
-                output=output,
-            )
+            if not should_retry:
+                return result
 
-        except asyncio.TimeoutError:
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                success=False,
-                error=(f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"),
-                failure_category=ToolExecutionFailureCategory.TIMEOUT,
-            )
+            if policy.backoff_seconds > 0:
+                await asyncio.sleep(policy.backoff_seconds)
 
-        except Exception as exc:
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                success=False,
-                error=f"{type(exc).__name__}: {exc}",
-                failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
-            )
+        raise RuntimeError("Tool execution retry loop exited unexpectedly.")
 
     async def _audit_authorization(
         self,
