@@ -12,6 +12,8 @@ from tools.execution.service import ToolExecutionService
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
 from tools.registry.in_memory import InMemoryToolRegistry
+from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
+from tools.execution.context import ToolExecutionContext
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
 
@@ -143,6 +145,69 @@ async def test_real_mcp_tool_is_denied_when_authorization_metadata_policy_does_n
 
         assert denied_result.success is False
         assert "mcp_server='finance-server'" in denied_result.error
+
+    finally:
+        await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_real_mcp_tool_replays_completed_idempotent_result() -> None:
+    registry = InMemoryToolRegistry()
+    idempotency_store = InMemoryToolExecutionIdempotencyStore()
+
+    execution_service = ToolExecutionService(
+        registry,
+        idempotency_store=idempotency_store,
+    )
+
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+    )
+
+    await manager.register_server(config)
+
+    try:
+        definitions = await manager.connect_and_discover("document-server")
+
+        assert [definition.name for definition in definitions] == [
+            "search_documents",
+        ]
+
+        context = ToolExecutionContext(
+            run_id="run-mcp-idempotency",
+            call_id="call-search-documents",
+        )
+
+        first = await execution_service.execute(
+            "search_documents",
+            {"query": "enterprise AI"},
+            execution_context=context,
+        )
+
+        second = await execution_service.execute(
+            "search_documents",
+            {"query": "enterprise AI"},
+            execution_context=context,
+        )
+
+        assert first.success is True
+        assert second.success is True
+        assert second == first
+
+        assert first.output == {
+            "query": "enterprise AI",
+            "results": [
+                {
+                    "id": "document-1",
+                    "content": "Enterprise AI platform architecture.",
+                }
+            ],
+        }
 
     finally:
         await manager.disconnect_all()
