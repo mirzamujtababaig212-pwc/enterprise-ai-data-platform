@@ -285,7 +285,10 @@ class CrashBoundaryCheckpointHandler:
 
         session = self._session_factory()
         try:
-            PostgreSQLAgentCheckpointsRepository(session).save(checkpoint)
+            PostgreSQLAgentCheckpointsRepository(session).save(
+                checkpoint,
+                lease_id=lease_id,
+            )
         finally:
             session.close()
 
