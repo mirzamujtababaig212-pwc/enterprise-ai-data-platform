@@ -105,6 +105,8 @@ class MCPPythonSDKClient(MCPClient):
         self,
         name: str,
         arguments: dict[str, Any],
+        *,
+        meta: dict[str, Any] | None = None,
     ) -> MCPToolCallResult:
         """
         Invoke a tool exposed by the MCP server.
@@ -119,10 +121,17 @@ class MCPPythonSDKClient(MCPClient):
         session = self._require_session()
 
         try:
-            result = await session.call_tool(
-                name,
-                arguments=arguments,
-            )
+            if meta is None:
+                result = await session.call_tool(
+                    name,
+                    arguments=arguments,
+                )
+            else:
+                result = await session.call_tool(
+                    name,
+                    arguments=arguments,
+                    meta=meta,
+                )
 
             if result.isError:
                 return MCPToolCallResult(error=self._extract_error(result))

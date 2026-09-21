@@ -149,6 +149,8 @@ class MCPStreamableHTTPClient(MCPClient):
         self,
         name: str,
         arguments: dict[str, Any],
+        *,
+        meta: dict[str, Any] | None = None,
     ) -> MCPToolCallResult:
         """
         Execute an MCP tool over Streamable HTTP.
@@ -162,10 +164,17 @@ class MCPStreamableHTTPClient(MCPClient):
         session = self._require_session()
 
         try:
-            result = await session.call_tool(
-                name,
-                arguments=arguments,
-            )
+            if meta is None:
+                result = await session.call_tool(
+                    name,
+                    arguments=arguments,
+                )
+            else:
+                result = await session.call_tool(
+                    name,
+                    arguments=arguments,
+                    meta=meta,
+                )
 
             if result.isError:
                 return MCPToolCallResult(error=self._extract_error(result))

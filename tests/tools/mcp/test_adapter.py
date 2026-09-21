@@ -32,11 +32,14 @@ class FakeMCPClient:
         self,
         name,
         arguments,
+        *,
+        meta=None,
     ):
         self.calls.append(
             {
                 "name": name,
                 "arguments": arguments,
+                "meta": meta,
             }
         )
 
@@ -132,6 +135,7 @@ async def test_mcp_adapter_executes_remote_tool():
             "arguments": {
                 "query": "enterprise AI",
             },
+            "meta": None,
         }
     ]
 
@@ -212,3 +216,85 @@ def test_mcp_adapter_rejects_empty_description():
             client,
             definition,
         )
+
+
+@pytest.mark.asyncio
+async def test_mcp_adapter_forwards_external_idempotency_key_in_meta():
+    from tools.execution.context import ToolExecutionContext
+
+    client = FakeMCPClient()
+
+    definition = MCPToolDefinition(
+        name="send_payment",
+        description="Send a payment.",
+    )
+
+    tool = MCPToolAdapter(
+        client,
+        definition,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-123",
+        call_id="call-456",
+    )
+
+    result = await tool.execute_with_context(
+        {
+            "amount": 100,
+        },
+        context,
+    )
+
+    assert result == {
+        "results": [
+            "document-1",
+            "document-2",
+        ]
+    }
+
+    assert client.calls == [
+        {
+            "name": "send_payment",
+            "arguments": {
+                "amount": 100,
+            },
+            "meta": {
+                "deldai": {
+                    "idempotency_key": "deldai:run-123:call-456:send_payment",
+                },
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mcp_adapter_does_not_add_meta_without_execution_identity():
+    client = FakeMCPClient()
+
+    definition = MCPToolDefinition(
+        name="search_documents",
+        description="Search enterprise documents.",
+    )
+
+    tool = MCPToolAdapter(
+        client,
+        definition,
+    )
+
+    await tool.execute_with_context(
+        {
+            "query": "enterprise AI",
+        },
+        None,
+    )
+
+    assert client.calls == [
+        {
+            "name": "search_documents",
+            "arguments": {
+                "query": "enterprise AI",
+            },
+            "meta": None,
+        }
+    ]

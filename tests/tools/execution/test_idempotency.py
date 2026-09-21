@@ -189,3 +189,41 @@ async def test_mark_ambiguous_requires_an_active_claim() -> None:
 
     with pytest.raises(RuntimeError, match="active claim"):
         await store.mark_ambiguous(key)
+
+
+def test_external_idempotency_key_is_deterministic() -> None:
+    from tools.execution.idempotency import build_external_idempotency_key
+
+    assert (
+        build_external_idempotency_key(
+            "run-123",
+            "call-456",
+            "send_payment",
+        )
+        == "deldai:run-123:call-456:send_payment"
+    )
+
+
+def test_external_idempotency_key_changes_with_logical_tool_identity() -> None:
+    from tools.execution.idempotency import build_external_idempotency_key
+
+    first = build_external_idempotency_key(
+        "run-123",
+        "call-456",
+        "send_payment",
+    )
+
+    second = build_external_idempotency_key(
+        "run-123",
+        "call-789",
+        "send_payment",
+    )
+
+    third = build_external_idempotency_key(
+        "run-123",
+        "call-456",
+        "refund_payment",
+    )
+
+    assert first != second
+    assert first != third

@@ -99,3 +99,46 @@ async def test_http_client_connects_and_disconnects():
     assert client._http_client is None
 
     mock_exit_stack.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_http_client_forwards_mcp_meta():
+    client = MCPStreamableHTTPClient("http://localhost:8000/mcp")
+
+    session = MagicMock()
+    session.call_tool = AsyncMock(
+        return_value=MagicMock(
+            isError=False,
+            structuredContent={"result": "ok"},
+            content=[],
+        )
+    )
+
+    client._session = session
+    client._connected = True
+
+    result = await client.call_tool(
+        "send_payment",
+        {
+            "amount": 100,
+        },
+        meta={
+            "deldai": {
+                "idempotency_key": "deldai:run-123:call-456:send_payment",
+            }
+        },
+    )
+
+    assert result.success is True
+
+    session.call_tool.assert_awaited_once_with(
+        "send_payment",
+        arguments={
+            "amount": 100,
+        },
+        meta={
+            "deldai": {
+                "idempotency_key": "deldai:run-123:call-456:send_payment",
+            }
+        },
+    )

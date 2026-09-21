@@ -7,6 +7,20 @@ from enum import StrEnum
 from tools.models import ToolExecutionResult
 
 
+def build_external_idempotency_key(
+    run_id: str,
+    call_id: str,
+    tool_name: str,
+) -> str:
+    key = ToolExecutionIdempotencyKey(
+        run_id=run_id,
+        call_id=call_id,
+        tool_name=tool_name,
+    )
+
+    return f"deldai:{key.run_id}:{key.call_id}:{key.tool_name}"
+
+
 @dataclass(frozen=True)
 class ToolExecutionIdempotencyKey:
     run_id: str

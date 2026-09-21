@@ -17,4 +17,6 @@ class MCPClient(Protocol):
         self,
         name: str,
         arguments: dict[str, Any],
+        *,
+        meta: dict[str, Any] | None = None,
     ) -> MCPToolCallResult: ...

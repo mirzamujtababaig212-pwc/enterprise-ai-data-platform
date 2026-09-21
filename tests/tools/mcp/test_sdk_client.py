@@ -221,3 +221,36 @@ async def test_rejects_empty_tool_name():
             "",
             {},
         )
+
+
+@pytest.mark.asyncio
+async def test_calls_mcp_tool_with_meta():
+    session = FakeSession()
+
+    client = create_connected_client(session)
+
+    result = await client.call_tool(
+        "send_payment",
+        {
+            "amount": 100,
+        },
+        meta={
+            "deldai": {
+                "idempotency_key": "deldai:run-123:call-456:send_payment",
+            }
+        },
+    )
+
+    assert result.success is True
+
+    session.call_tool.assert_awaited_once_with(
+        "send_payment",
+        arguments={
+            "amount": 100,
+        },
+        meta={
+            "deldai": {
+                "idempotency_key": "deldai:run-123:call-456:send_payment",
+            }
+        },
+    )
