@@ -376,23 +376,9 @@ class AgentRunRecoveryService:
         )
 
         if completed_run is None:
-            exc = RuntimeError(
+            raise AgentExecutionOwnershipLostError(
                 f"Agent run '{run.run_id}' lost lease ownership before completion.",
             )
-            await self._emit(
-                AgentExecutionEvent(
-                    event_type=AgentExecutionEventType.AGENT_RECOVERY_FAILED,
-                    agent_name=run.agent_name,
-                    run_id=run.run_id,
-                    session_id=run.session_id,
-                    user_id=run.user_id,
-                    metadata={
-                        "recovery_type": recovery_type,
-                        "error_type": type(exc).__name__,
-                    },
-                )
-            )
-            raise exc
 
         await self._emit(
             AgentExecutionEvent(

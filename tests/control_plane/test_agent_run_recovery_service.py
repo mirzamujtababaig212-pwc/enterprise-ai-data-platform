@@ -617,7 +617,7 @@ async def test_recovery_observer_failure_does_not_break_recovery():
 
 
 @pytest.mark.asyncio
-async def test_recovery_emits_failed_event_when_lease_ownership_is_lost():
+async def test_recovery_propagates_lease_ownership_loss_before_completion():
     observer = RecordingObserver()
 
     class OwnershipLostRepository(RecordingRepository):
@@ -652,23 +652,14 @@ async def test_recovery_emits_failed_event_when_lease_ownership_is_lost():
     )
 
     with pytest.raises(
-        RuntimeError,
+        AgentExecutionOwnershipLostError,
         match="lost lease ownership before completion",
     ):
         await service.recover("run-123")
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_RECOVERY_STARTED,
-        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
     ]
-
-    assert observer.events[0].metadata == {
-        "recovery_type": "failed_run",
-    }
-    assert observer.events[1].metadata == {
-        "recovery_type": "failed_run",
-        "error_type": "RuntimeError",
-    }
 
     assert ownership_lost_repository.complete_call is not None
     assert ownership_lost_repository.fail_call is None
@@ -678,7 +669,6 @@ async def test_recovery_emits_failed_event_when_lease_ownership_is_lost():
     assert run is not None
     assert run.status is AgentRunStatus.RUNNING
     assert run.lease_id is not None
-    assert "lease_id" not in observer.events[1].metadata
 
 
 @pytest.mark.asyncio
