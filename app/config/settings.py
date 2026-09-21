@@ -15,6 +15,7 @@ class Settings:
     provider_credentials: dict[str, Any]
     external_evaluation_release_required: bool
     agent_run_lease_duration_seconds: int
+    agent_run_max_recovery_attempts: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -46,4 +47,5 @@ class Settings:
             agent_run_lease_duration_seconds=int(
                 os.getenv("AGENT_RUN_LEASE_DURATION_SECONDS", "60")
             ),
+            agent_run_max_recovery_attempts=int(os.getenv("AGENT_RUN_MAX_RECOVERY_ATTEMPTS", "3")),
         )

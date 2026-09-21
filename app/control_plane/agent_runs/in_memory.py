@@ -59,22 +59,28 @@ class InMemoryAgentRunRepository:
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
     ) -> AgentRun | None:
         with self._lock:
             run = self._runs.get(run_id)
 
-            if run is None or run.status != AgentRunStatus.FAILED or run.cancellation_requested:
+            if (
+                run is None
+                or run.status != AgentRunStatus.FAILED
+                or run.cancellation_requested
+                or run.recovery_attempts >= max_recovery_attempts
+            ):
                 return None
 
             claimed = run.transition_to(AgentRunStatus.RUNNING).model_copy(
                 update={
-                    "started_at": started_at,
                     "completed_at": None,
                     "error_type": None,
                     "error_message": None,
                     "output": None,
                     "lease_id": lease_id,
                     "lease_expires_at": lease_expires_at,
+                    "recovery_attempts": run.recovery_attempts + 1,
                 }
             )
 
@@ -116,6 +122,7 @@ class InMemoryAgentRunRepository:
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
     ) -> AgentRun | None:
         with self._lock:
             run = self._runs.get(run_id)
@@ -126,23 +133,60 @@ class InMemoryAgentRunRepository:
                 or run.cancellation_requested
                 or run.lease_expires_at is None
                 or run.lease_expires_at >= stale_before
+                or run.recovery_attempts >= max_recovery_attempts
             ):
                 return None
 
             claimed = run.model_copy(
                 update={
-                    "started_at": started_at,
                     "completed_at": None,
                     "error_type": None,
                     "error_message": None,
                     "output": None,
                     "lease_id": lease_id,
                     "lease_expires_at": lease_expires_at,
+                    "recovery_attempts": run.recovery_attempts + 1,
                 }
             )
 
             self._runs[run_id] = claimed
             return claimed
+
+    def fail_recovery_exhausted(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        max_recovery_attempts: int,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.cancellation_requested
+                or run.lease_expires_at is None
+                or run.recovery_attempts < max_recovery_attempts
+                or run.lease_expires_at >= completed_at
+            ):
+                return None
+
+            failed = run.model_copy(
+                update={
+                    "status": AgentRunStatus.FAILED,
+                    "completed_at": completed_at,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = failed
+            return failed
 
     def list_expired_running_runs(
         self,

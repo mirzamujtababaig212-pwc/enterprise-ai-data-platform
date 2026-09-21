@@ -41,6 +41,7 @@ class PostgreSQLAgentRunRepository:
             error_message=run.error_message,
             output=run.output,
             run_metadata=dict(run.metadata),
+            recovery_attempts=run.recovery_attempts,
             request_snapshot=(
                 run.request_snapshot.model_dump(mode="json")
                 if run.request_snapshot is not None
@@ -111,6 +112,7 @@ class PostgreSQLAgentRunRepository:
         record.error_message = run.error_message
         record.output = run.output
         record.run_metadata = dict(run.metadata)
+        record.recovery_attempts = run.recovery_attempts
         record.request_snapshot = (
             run.request_snapshot.model_dump(mode="json")
             if run.request_snapshot is not None
@@ -136,6 +138,7 @@ class PostgreSQLAgentRunRepository:
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
     ) -> AgentRun | None:
         statement = (
             update(AgentRunRecord)
@@ -143,16 +146,17 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.run_id == run_id,
                 AgentRunRecord.status == AgentRunStatus.FAILED.value,
                 AgentRunRecord.cancellation_requested.is_(False),
+                AgentRunRecord.recovery_attempts < max_recovery_attempts,
             )
             .values(
                 status=AgentRunStatus.RUNNING.value,
-                started_at=started_at,
                 completed_at=None,
                 error_type=None,
                 error_message=None,
                 output=None,
                 lease_id=lease_id,
                 lease_expires_at=lease_expires_at,
+                recovery_attempts=AgentRunRecord.recovery_attempts + 1,
             )
         )
 
@@ -210,6 +214,7 @@ class PostgreSQLAgentRunRepository:
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
     ) -> AgentRun | None:
         statement = (
             update(AgentRunRecord)
@@ -218,15 +223,16 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_expires_at < stale_before,
                 AgentRunRecord.cancellation_requested.is_(False),
+                AgentRunRecord.recovery_attempts < max_recovery_attempts,
             )
             .values(
-                started_at=started_at,
                 completed_at=None,
                 error_type=None,
                 error_message=None,
                 output=None,
                 lease_id=lease_id,
                 lease_expires_at=lease_expires_at,
+                recovery_attempts=AgentRunRecord.recovery_attempts + 1,
             )
         )
 
@@ -242,6 +248,48 @@ class PostgreSQLAgentRunRepository:
             raise
 
         return self.get(run_id)
+
+    def fail_recovery_exhausted(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        max_recovery_attempts: int,
+        error_type: str,
+        error_message: str,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.RUNNING.value,
+                AgentRunRecord.cancellation_requested.is_(False),
+                AgentRunRecord.lease_expires_at.is_not(None),
+                AgentRunRecord.recovery_attempts >= max_recovery_attempts,
+                AgentRunRecord.lease_expires_at < completed_at,
+            )
+            .values(
+                status=AgentRunStatus.FAILED.value,
+                completed_at=completed_at,
+                error_type=error_type,
+                error_message=error_message,
+                lease_id=None,
+                lease_expires_at=None,
+            )
+            .returning(AgentRunRecord)
+        )
+
+        try:
+            record = self._session.execute(statement).scalar_one_or_none()
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+        if record is None:
+            return None
+
+        return self._to_domain(record)
 
     def list_expired_running_runs(
         self,
@@ -476,6 +524,7 @@ class PostgreSQLAgentRunRepository:
                 if record.lease_expires_at is not None
                 else None
             ),
+            recovery_attempts=record.recovery_attempts,
             cancellation_requested=record.cancellation_requested,
             cancellation_requested_at=(
                 _ensure_aware(record.cancellation_requested_at)

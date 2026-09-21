@@ -12,3 +12,7 @@ class InvalidAgentRunTransitionError(ValueError):
 
 class AgentRunAdmissionRejectedError(RuntimeError):
     """Raised when an agent run is not admitted for execution."""
+
+
+class RecoveryExhaustedError(RuntimeError):
+    """Raised when an agent run has exhausted its durable recovery attempts."""

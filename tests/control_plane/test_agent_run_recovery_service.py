@@ -30,6 +30,7 @@ from app.control_plane.agent_runs.cancellation import (
 from app.control_plane.agent_runs.in_memory import (
     InMemoryAgentRunRepository,
 )
+from app.control_plane.agent_runs.exceptions import RecoveryExhaustedError
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
 )
@@ -43,6 +44,7 @@ def failed_run(
     run_id: str = "run-123",
     agent_name: str = "recoverable-agent",
     request_snapshot: AgentRunRequestSnapshot | None = None,
+    recovery_attempts: int = 0,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -55,6 +57,7 @@ def failed_run(
         error_message="original failure",
         metadata={"request_id": "req-123"},
         request_snapshot=request_snapshot,
+        recovery_attempts=recovery_attempts,
     )
 
 
@@ -118,18 +121,21 @@ class RecordingRepository(InMemoryAgentRunRepository):
         started_at,
         lease_id,
         lease_expires_at,
+        max_recovery_attempts,
     ):
         self.recovery_claim = {
             "run_id": run_id,
             "started_at": started_at,
             "lease_id": lease_id,
             "lease_expires_at": lease_expires_at,
+            "max_recovery_attempts": max_recovery_attempts,
         }
         return super().claim_for_recovery(
             run_id,
             started_at=started_at,
             lease_id=lease_id,
             lease_expires_at=lease_expires_at,
+            max_recovery_attempts=max_recovery_attempts,
         )
 
     def claim_expired_running_run(
@@ -140,6 +146,7 @@ class RecordingRepository(InMemoryAgentRunRepository):
         started_at,
         lease_id,
         lease_expires_at,
+        max_recovery_attempts,
     ):
         self.stale_recovery_claim = {
             "run_id": run_id,
@@ -147,6 +154,7 @@ class RecordingRepository(InMemoryAgentRunRepository):
             "started_at": started_at,
             "lease_id": lease_id,
             "lease_expires_at": lease_expires_at,
+            "max_recovery_attempts": max_recovery_attempts,
         }
         return super().claim_expired_running_run(
             run_id,
@@ -154,6 +162,7 @@ class RecordingRepository(InMemoryAgentRunRepository):
             started_at=started_at,
             lease_id=lease_id,
             lease_expires_at=lease_expires_at,
+            max_recovery_attempts=max_recovery_attempts,
         )
 
     def complete_if_owner(
@@ -789,6 +798,80 @@ async def test_recovery_marks_run_failed_when_runtime_resume_fails():
 
 
 @pytest.mark.asyncio
+async def test_final_recovery_attempt_failure_exhausts_recovery_budget():
+    repository = RecordingRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+            recovery_attempts=2,
+        )
+    )
+
+    observer = RecordingObserver()
+
+    class FailingRuntime:
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+            lease_id=None,
+            execution_ownership_lost=None,
+        ):
+            raise ValueError("LLM provider unavailable")
+
+    service = AgentRunRecoveryService(
+        runtime=FailingRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+        max_recovery_attempts=3,
+    )
+
+    with pytest.raises(
+        RecoveryExhaustedError,
+        match="exhausted the maximum of 3 recovery attempts",
+    ):
+        await service.recover("run-123")
+
+    assert repository.recovery_claim is not None
+    assert repository.recovery_claim["max_recovery_attempts"] == 3
+
+    run = repository.get("run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.recovery_attempts == 3
+    assert run.error_type == "RecoveryExhaustedError"
+    assert run.error_message == (
+        "Agent run 'run-123' exhausted the maximum of "
+        "3 recovery attempts: LLM provider unavailable"
+    )
+    assert run.lease_id is None
+    assert run.lease_expires_at is None
+
+    assert repository.fail_call is not None
+    assert repository.fail_call["error_type"] == "RecoveryExhaustedError"
+    assert repository.fail_call["lease_id"] == repository.recovery_claim["lease_id"]
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "failed_run",
+    }
+    assert observer.events[1].metadata == {
+        "recovery_type": "failed_run",
+        "error_type": "RecoveryExhaustedError",
+        "reason": "max_recovery_attempts_exceeded",
+    }
+
+
+@pytest.mark.asyncio
 async def test_recovery_rejects_non_failed_run():
     repository = InMemoryAgentRunRepository()
 
@@ -912,6 +995,7 @@ def stale_running_run(
     *,
     run_id: str = "stale-run-123",
     request_snapshot: AgentRunRequestSnapshot | None = None,
+    recovery_attempts: int = 0,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -924,6 +1008,7 @@ def stale_running_run(
         lease_expires_at=datetime(2026, 9, 19, 11, 1, tzinfo=UTC),
         metadata={"request_id": "req-123"},
         request_snapshot=request_snapshot,
+        recovery_attempts=recovery_attempts,
     )
 
 
@@ -970,6 +1055,101 @@ async def test_recover_stale_runs_limit_applies_to_stale_candidates():
 
     assert len(results) == 1
     assert results[0].run_id == "stale-run"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_marks_exhausted_run_failed_without_resuming():
+    repository = RecordingRepository()
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+            recovery_attempts=3,
+        )
+    )
+
+    runtime = FakeRuntime()
+    observer = RecordingObserver()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+        max_recovery_attempts=3,
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results == []
+    assert runtime.calls == []
+    assert repository.stale_recovery_claim is None
+
+    run = repository.get("stale-run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.recovery_attempts == 3
+    assert run.error_type == "RecoveryExhaustedError"
+    assert run.error_message == (
+        "Agent run 'stale-run-123' exhausted the maximum of " "3 recovery attempts."
+    )
+    assert run.lease_id is None
+    assert run.lease_expires_at is None
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+    ]
+
+    assert observer.events[0].metadata == {
+        "recovery_type": "stale_run",
+        "error_type": "RecoveryExhaustedError",
+        "reason": "max_recovery_attempts_exceeded",
+    }
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_does_not_emit_duplicate_exhaustion_event():
+    repository = RecordingRepository()
+    repository.create(
+        stale_running_run(
+            request_snapshot=request_snapshot(),
+            recovery_attempts=3,
+        )
+    )
+
+    observer = RecordingObserver()
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+        max_recovery_attempts=3,
+    )
+
+    stale_before = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    first_results = await service.recover_stale_runs(
+        stale_before=stale_before,
+    )
+    second_results = await service.recover_stale_runs(
+        stale_before=stale_before,
+    )
+
+    assert first_results == []
+    assert second_results == []
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+    ]
+
+    run = repository.get("stale-run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.recovery_attempts == 3
 
 
 @pytest.mark.asyncio
@@ -1326,3 +1506,56 @@ async def test_recover_stale_runs_resumes_with_new_lease_ownership():
     assert recovered.status is AgentRunStatus.COMPLETED
     assert recovered.lease_id is None
     assert recovered.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_recover_rejects_already_exhausted_run():
+    repository = RecordingRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+            recovery_attempts=3,
+        )
+    )
+
+    runtime = FakeRuntime()
+    observer = RecordingObserver()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+        max_recovery_attempts=3,
+    )
+
+    with pytest.raises(
+        RecoveryExhaustedError,
+        match="exhausted the maximum of 3 recovery attempts",
+    ):
+        await service.recover("run-123")
+
+    run = repository.get("run-123")
+
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.recovery_attempts == 3
+    assert run.error_type == "RuntimeError"
+    assert run.error_message == "original failure"
+    assert run.lease_id is None
+    assert runtime.calls == []
+    assert repository.recovery_claim is None
+    assert observer.events == []
+
+
+def test_recovery_service_rejects_non_positive_max_recovery_attempts():
+    with pytest.raises(
+        ValueError,
+        match="max_recovery_attempts must be greater than zero",
+    ):
+        AgentRunRecoveryService(
+            runtime=FakeRuntime(),
+            repository=RecordingRepository(),
+            checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+            max_recovery_attempts=0,
+        )

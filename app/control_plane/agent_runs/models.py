@@ -64,6 +64,7 @@ class AgentRun(BaseModel):
     completed_at: datetime | None = None
 
     lease_id: str | None = None
+    recovery_attempts: int = 0
     lease_expires_at: datetime | None = None
 
     cancellation_requested: bool = False

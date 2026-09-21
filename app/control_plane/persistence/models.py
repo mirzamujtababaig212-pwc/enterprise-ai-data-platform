@@ -131,6 +131,12 @@ class AgentRunRecord(Base):
         nullable=True,
         index=True,
     )
+    recovery_attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
 
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

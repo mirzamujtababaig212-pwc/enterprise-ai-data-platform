@@ -18,8 +18,10 @@ def make_run(
     session_id: str | None = None,
     user_id: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
+    started_at: datetime | None = None,
     lease_id: str | None = None,
     lease_expires_at: datetime | None = None,
+    recovery_attempts: int = 0,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -27,8 +29,10 @@ def make_run(
         session_id=session_id,
         user_id=user_id,
         status=status,
+        started_at=started_at,
         lease_id=lease_id,
         lease_expires_at=lease_expires_at,
+        recovery_attempts=recovery_attempts,
     )
 
 
@@ -254,7 +258,11 @@ def test_clear_removes_all_runs() -> None:
 
 def test_claim_for_recovery_assigns_lease() -> None:
     repository = InMemoryAgentRunRepository()
-    failed = make_run("run-recovery", status=AgentRunStatus.FAILED)
+    failed = make_run(
+        "run-recovery",
+        status=AgentRunStatus.FAILED,
+        started_at=datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
+    )
     repository.create(failed)
 
     started_at = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -265,16 +273,133 @@ def test_claim_for_recovery_assigns_lease() -> None:
         started_at=started_at,
         lease_id="lease-1",
         lease_expires_at=lease_expires_at,
+        max_recovery_attempts=3,
     )
 
     assert claimed is not None
     assert claimed.status is AgentRunStatus.RUNNING
-    assert claimed.started_at is not None
+    assert claimed.started_at == failed.started_at
+    assert claimed.recovery_attempts == failed.recovery_attempts + 1
     assert claimed.lease_id is not None
     assert claimed.lease_expires_at is not None
     assert claimed.lease_expires_at > claimed.started_at
     assert claimed.lease_id == "lease-1"
     assert claimed.lease_expires_at == lease_expires_at
+
+
+def test_claim_for_recovery_rejects_exhausted_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    failed = make_run(
+        "run-recovery-exhausted",
+        status=AgentRunStatus.FAILED,
+        recovery_attempts=3,
+    )
+    repository.create(failed)
+
+    claimed = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
+    )
+
+    assert claimed is None
+    assert repository.get(failed.run_id) == failed
+
+
+def test_claim_expired_running_run_rejects_exhausted_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    run = make_run(
+        "run-stale-exhausted",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="old-lease",
+        lease_expires_at=expires_at,
+    )
+    repository.create(run)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        started_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        max_recovery_attempts=3,
+    )
+
+    assert claimed is None
+    assert repository.get(run.run_id) == run
+
+
+def test_fail_recovery_exhausted_transitions_stale_run_to_failed() -> None:
+    repository = InMemoryAgentRunRepository()
+    expired_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    run = make_run(
+        "run-fail-recovery-exhausted",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="expired-lease",
+        lease_expires_at=expired_at,
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    failed = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=completed_at,
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="maximum recovery attempts exceeded",
+    )
+
+    assert failed is not None
+    assert failed.status is AgentRunStatus.FAILED
+    assert failed.completed_at == completed_at
+    assert failed.error_type == "RecoveryExhaustedError"
+    assert failed.error_message == "maximum recovery attempts exceeded"
+    assert failed.recovery_attempts == 3
+    assert failed.lease_id is None
+    assert failed.lease_expires_at is None
+
+    restored = repository.get(run.run_id)
+    assert restored == failed
+
+    second_attempt = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="duplicate exhaustion transition",
+    )
+
+    assert second_attempt is None
+    assert repository.get(run.run_id) == failed
+
+
+def test_fail_recovery_exhausted_rejects_active_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+    run = make_run(
+        "run-active-recovery",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="active-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    result = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="should not transition while lease is active",
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
 
 
 def test_heartbeat_extends_matching_lease() -> None:
@@ -366,6 +491,7 @@ def test_unexpired_running_run_cannot_be_reclaimed() -> None:
         started_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
         lease_id="new-lease",
         lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -397,11 +523,13 @@ def test_expired_running_run_can_be_reclaimed() -> None:
         started_at=new_started_at,
         lease_id="new-lease",
         lease_expires_at=new_expiry,
+        max_recovery_attempts=3,
     )
 
     assert claimed is not None
     assert claimed.status is AgentRunStatus.RUNNING
-    assert claimed.started_at == new_started_at
+    assert claimed.started_at == run.started_at
+    assert claimed.recovery_attempts == run.recovery_attempts + 1
     assert claimed.lease_id == "new-lease"
     assert claimed.lease_expires_at == new_expiry
     assert claimed.completed_at is None

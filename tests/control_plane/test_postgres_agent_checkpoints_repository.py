@@ -506,6 +506,7 @@ def test_postgres_save_rejects_stale_lease_after_takeover(
             started_at=takeover_started_at,
             lease_id=new_lease_id,
             lease_expires_at=takeover_expires_at,
+            max_recovery_attempts=3,
         )
 
         assert claimed is not None

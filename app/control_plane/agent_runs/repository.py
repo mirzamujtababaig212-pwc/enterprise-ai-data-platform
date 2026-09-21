@@ -31,6 +31,7 @@ class AgentRunRepository(Protocol):
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
     ) -> AgentRun | None: ...
 
     def heartbeat(
@@ -49,6 +50,17 @@ class AgentRunRepository(Protocol):
         started_at: datetime,
         lease_id: str,
         lease_expires_at: datetime,
+        max_recovery_attempts: int,
+    ) -> AgentRun | None: ...
+
+    def fail_recovery_exhausted(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        max_recovery_attempts: int,
+        error_type: str,
+        error_message: str,
     ) -> AgentRun | None: ...
 
     def list_expired_running_runs(

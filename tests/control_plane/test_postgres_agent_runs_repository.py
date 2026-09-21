@@ -59,6 +59,7 @@ def make_run(
     output=None,
     metadata: dict | None = None,
     request_snapshot: AgentRunRequestSnapshot | None = None,
+    recovery_attempts: int = 0,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -75,6 +76,7 @@ def make_run(
         output=output,
         metadata={} if metadata is None else metadata,
         request_snapshot=request_snapshot,
+        recovery_attempts=recovery_attempts,
     )
 
 
@@ -234,12 +236,14 @@ def test_claim_for_recovery_claims_failed_run(repository) -> None:
         started_at=recovery_started_at,
         lease_id="lease-1",
         lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is not None
     assert claimed.run_id == failed.run_id
     assert claimed.status is AgentRunStatus.RUNNING
-    assert claimed.started_at == recovery_started_at
+    assert claimed.started_at == failed.started_at
+    assert claimed.recovery_attempts == failed.recovery_attempts + 1
     assert claimed.completed_at is None
     assert claimed.error_type is None
     assert claimed.error_message is None
@@ -249,7 +253,131 @@ def test_claim_for_recovery_claims_failed_run(repository) -> None:
     restored = repository.get(failed.run_id)
     assert restored is not None
     assert restored.status is AgentRunStatus.RUNNING
-    assert restored.started_at == recovery_started_at
+    assert restored.started_at == failed.started_at
+
+
+def test_claim_for_recovery_rejects_exhausted_run(repository) -> None:
+    failed = make_run(
+        run_id="pg-recovery-exhausted",
+        status=AgentRunStatus.FAILED,
+        recovery_attempts=3,
+    )
+    repository.create(failed)
+
+    claimed = repository.claim_for_recovery(
+        failed.run_id,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-1",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
+    )
+
+    assert claimed is None
+
+    restored = repository.get(failed.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.FAILED
+    assert restored.recovery_attempts == 3
+    assert restored.lease_id is None
+
+
+def test_claim_expired_running_run_rejects_exhausted_run(repository) -> None:
+    run = make_run(
+        run_id="pg-stale-recovery-exhausted",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="old-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    claimed = repository.claim_expired_running_run(
+        run.run_id,
+        stale_before=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        started_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        lease_id="new-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
+        max_recovery_attempts=3,
+    )
+
+    assert claimed is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.recovery_attempts == 3
+    assert restored.lease_id == "old-lease"
+
+
+def test_fail_recovery_exhausted_transitions_stale_run_to_failed(repository) -> None:
+    run = make_run(
+        run_id="pg-fail-recovery-exhausted",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="expired-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    failed = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=completed_at,
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="maximum recovery attempts exceeded",
+    )
+
+    assert failed is not None
+    assert failed.status is AgentRunStatus.FAILED
+    assert failed.completed_at == completed_at
+    assert failed.error_type == "RecoveryExhaustedError"
+    assert failed.error_message == "maximum recovery attempts exceeded"
+    assert failed.recovery_attempts == 3
+    assert failed.lease_id is None
+    assert failed.lease_expires_at is None
+
+    restored = repository.get(run.run_id)
+    assert restored == failed
+
+    second_attempt = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="duplicate exhaustion transition",
+    )
+
+    assert second_attempt is None
+    assert repository.get(run.run_id) == failed
+
+
+def test_fail_recovery_exhausted_rejects_active_lease(repository) -> None:
+    run = make_run(
+        run_id="pg-active-recovery",
+        status=AgentRunStatus.RUNNING,
+        recovery_attempts=3,
+        lease_id="active-lease",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    result = repository.fail_recovery_exhausted(
+        run.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        max_recovery_attempts=3,
+        error_type="RecoveryExhaustedError",
+        error_message="should not transition while lease is active",
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.recovery_attempts == 3
+    assert restored.lease_id == "active-lease"
 
 
 def test_claim_for_recovery_returns_none_for_non_failed_run(repository) -> None:
@@ -261,6 +389,7 @@ def test_claim_for_recovery_returns_none_for_non_failed_run(repository) -> None:
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-1",
         lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -295,6 +424,7 @@ def test_claim_for_recovery_returns_none_for_cancellation_requested_run(
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="new-lease",
         lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -319,6 +449,7 @@ def test_claim_for_recovery_returns_none_for_missing_run(repository) -> None:
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         lease_id="lease-1",
         lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -340,24 +471,27 @@ def test_claim_for_recovery_can_only_claim_once(repository) -> None:
         started_at=first_started_at,
         lease_id="lease-1",
         lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
     second_claim = repository.claim_for_recovery(
         failed.run_id,
         started_at=second_started_at,
         lease_id="lease-2",
         lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert first_claim is not None
     assert first_claim.status is AgentRunStatus.RUNNING
-    assert first_claim.started_at == first_started_at
+    assert first_claim.started_at == failed.started_at
+    assert first_claim.recovery_attempts == failed.recovery_attempts + 1
 
     assert second_claim is None
 
     restored = repository.get(failed.run_id)
     assert restored is not None
     assert restored.status is AgentRunStatus.RUNNING
-    assert restored.started_at == first_started_at
+    assert restored.started_at == failed.started_at
 
 
 def test_update_round_trip(repository) -> None:
@@ -563,6 +697,7 @@ def test_claim_for_recovery_persists_lease(repository) -> None:
         started_at=started_at,
         lease_id="lease-recovery",
         lease_expires_at=expires_at,
+        max_recovery_attempts=3,
     )
 
     assert claimed is not None
@@ -651,6 +786,7 @@ def test_unexpired_running_run_cannot_be_reclaimed(repository) -> None:
         started_at=datetime(2026, 9, 19, 12, 4, tzinfo=UTC),
         lease_id="new-lease",
         lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -695,6 +831,7 @@ def test_expired_running_run_returns_none_for_cancellation_requested_run(
         started_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
         lease_id="new-lease",
         lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        max_recovery_attempts=3,
     )
 
     assert claimed is None
@@ -707,8 +844,11 @@ def test_expired_running_run_returns_none_for_cancellation_requested_run(
 
 
 def test_expired_running_run_can_be_reclaimed(repository) -> None:
+    original_started_at = datetime(2026, 9, 19, 11, 0, tzinfo=UTC)
+
     run = make_run(
         status=AgentRunStatus.RUNNING,
+        started_at=original_started_at,
         lease_id="old-lease",
         lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
         output={"partial": True},
@@ -724,11 +864,13 @@ def test_expired_running_run_can_be_reclaimed(repository) -> None:
         started_at=started_at,
         lease_id="new-lease",
         lease_expires_at=expires_at,
+        max_recovery_attempts=3,
     )
 
     assert claimed is not None
     assert claimed.status is AgentRunStatus.RUNNING
-    assert claimed.started_at == started_at
+    assert claimed.started_at == original_started_at
+    assert claimed.recovery_attempts == run.recovery_attempts + 1
     assert claimed.lease_id == "new-lease"
     assert claimed.lease_expires_at == expires_at
     assert claimed.output is None
@@ -929,6 +1071,7 @@ def test_claim_expired_running_run_is_atomic_across_postgres_sessions() -> None:
             started_at=started_at,
             lease_id="recovery-lease-a",
             lease_expires_at=lease_expires_at,
+            max_recovery_attempts=3,
         )
         claimed_b = repository_b.claim_expired_running_run(
             run_id,
@@ -936,6 +1079,7 @@ def test_claim_expired_running_run_is_atomic_across_postgres_sessions() -> None:
             started_at=started_at,
             lease_id="recovery-lease-b",
             lease_expires_at=lease_expires_at,
+            max_recovery_attempts=3,
         )
 
         winners = [claimed for claimed in (claimed_a, claimed_b) if claimed is not None]
@@ -1032,6 +1176,7 @@ def test_stale_worker_cannot_complete_after_postgres_reclaim() -> None:
             started_at=reclaimed_started_at,
             lease_id="lease-b",
             lease_expires_at=reclaimed_expires_at,
+            max_recovery_attempts=3,
         )
 
         assert reclaimed is not None
@@ -1642,6 +1787,110 @@ def test_request_cancellation_rejects_missing_run(repository) -> None:
     __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
     reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
 )
+def test_concurrent_claim_expired_running_run_respects_max_recovery_attempts() -> None:
+    import os
+
+    from sqlalchemy import create_engine, delete
+    from sqlalchemy.orm import sessionmaker
+
+    from app.control_plane.persistence.models import AgentRunRecord
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-recovery-attempt-limit-race"
+    max_recovery_attempts = 3
+    stale_before = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+    expired_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    setup_session = session_factory()
+    try:
+        setup_repository = PostgreSQLAgentRunRepository(setup_session)
+        setup_repository.create(
+            make_run(
+                run_id=run_id,
+                status=AgentRunStatus.RUNNING,
+                recovery_attempts=2,
+                lease_id="expired-lease",
+                lease_expires_at=expired_at,
+            )
+        )
+    finally:
+        setup_session.close()
+
+    barrier = Barrier(5)
+
+    def attempt_claim(worker_number: int):
+        session = session_factory()
+
+        try:
+            repository = PostgreSQLAgentRunRepository(session)
+
+            barrier.wait(timeout=10)
+
+            return repository.claim_expired_running_run(
+                run_id,
+                stale_before=stale_before,
+                started_at=started_at,
+                lease_id=f"limit-race-lease-{worker_number}",
+                lease_expires_at=lease_expires_at,
+                max_recovery_attempts=max_recovery_attempts,
+            )
+        finally:
+            session.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(attempt_claim, range(5)))
+
+        winners = [result for result in results if result is not None]
+
+        assert len(winners) == 1
+        assert winners[0].recovery_attempts == max_recovery_attempts
+
+        with session_factory() as verification_session:
+            verification_repository = PostgreSQLAgentRunRepository(
+                verification_session,
+            )
+            restored = verification_repository.get(run_id)
+
+        assert restored is not None
+        assert restored.status is AgentRunStatus.RUNNING
+        assert restored.recovery_attempts == max_recovery_attempts
+        assert restored.recovery_attempts <= max_recovery_attempts
+        assert restored.lease_id == winners[0].lease_id
+        assert restored.lease_expires_at == lease_expires_at
+    finally:
+        cleanup_session = session_factory()
+        try:
+            cleanup_session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            engine.dispose()
+
+
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
 def test_concurrent_claim_expired_running_run_is_atomic() -> None:
     import os
 
@@ -1704,6 +1953,7 @@ def test_concurrent_claim_expired_running_run_is_atomic() -> None:
                 started_at=started_at,
                 lease_id=f"concurrent-recovery-lease-{worker_number}",
                 lease_expires_at=lease_expires_at,
+                max_recovery_attempts=3,
             )
         finally:
             session.close()
@@ -1802,6 +2052,7 @@ def test_concurrent_claim_for_recovery_is_atomic() -> None:
                 started_at=started_at,
                 lease_id=f"concurrent-recovery-lease-{worker_number}",
                 lease_expires_at=lease_expires_at,
+                max_recovery_attempts=3,
             )
         finally:
             session.close()

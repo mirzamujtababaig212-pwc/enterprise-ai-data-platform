@@ -14,6 +14,7 @@ from ai_platform.agents.runtime import AgentRuntime
 from app.control_plane.agent_checkpoints.repository import (
     AgentCheckpointsRepository,
 )
+from app.control_plane.agent_runs.exceptions import RecoveryExhaustedError
 from app.control_plane.agent_runs.models import (
     AgentRun,
     AgentRunExecutionResult,
@@ -54,13 +55,17 @@ class AgentRunRecoveryService:
         observer: AgentExecutionObserver | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
+        max_recovery_attempts: int = 3,
     ) -> None:
+        if max_recovery_attempts <= 0:
+            raise ValueError("max_recovery_attempts must be greater than zero.")
         self._runtime = runtime
         self._cancellation_registry = cancellation_registry
         self._repository = repository
         self._checkpoints_repository = checkpoints_repository
         self._observer = observer
         self._lease_seconds = lease_seconds
+        self._max_recovery_attempts = max_recovery_attempts
 
     async def _emit(
         self,
@@ -95,6 +100,12 @@ class AgentRunRecoveryService:
                 f"from status '{existing_run.status.value}'.",
             )
 
+        if existing_run.recovery_attempts >= self._max_recovery_attempts:
+            raise RecoveryExhaustedError(
+                f"Agent run '{run_id}' exhausted the maximum of "
+                f"{self._max_recovery_attempts} recovery attempts."
+            )
+
         if existing_run.request_snapshot is None:
             raise RuntimeError(
                 f"Agent run '{run_id}' has no request snapshot and " "cannot be recovered.",
@@ -108,6 +119,7 @@ class AgentRunRecoveryService:
             started_at=claimed_at,
             lease_id=lease_id,
             lease_expires_at=lease_expires_at,
+            max_recovery_attempts=self._max_recovery_attempts,
         )
 
         if run is None:
@@ -155,12 +167,44 @@ class AgentRunRecoveryService:
             claimed_at = datetime.now(UTC)
             lease_id, lease_expires_at = create_lease(self._lease_seconds)
 
+            if candidate.recovery_attempts >= self._max_recovery_attempts:
+                exhausted_at = datetime.now(UTC)
+                exhausted_run = self._repository.fail_recovery_exhausted(
+                    candidate.run_id,
+                    completed_at=exhausted_at,
+                    max_recovery_attempts=self._max_recovery_attempts,
+                    error_type=RecoveryExhaustedError.__name__,
+                    error_message=(
+                        f"Agent run '{candidate.run_id}' exhausted "
+                        f"the maximum of {self._max_recovery_attempts} recovery attempts."
+                    ),
+                )
+
+                if exhausted_run is not None:
+                    await self._emit(
+                        AgentExecutionEvent(
+                            event_type=AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+                            agent_name=exhausted_run.agent_name,
+                            run_id=exhausted_run.run_id,
+                            session_id=exhausted_run.session_id,
+                            user_id=exhausted_run.user_id,
+                            metadata={
+                                "recovery_type": "stale_run",
+                                "error_type": RecoveryExhaustedError.__name__,
+                                "reason": "max_recovery_attempts_exceeded",
+                            },
+                        )
+                    )
+
+                continue
+
             run = self._repository.claim_expired_running_run(
                 candidate.run_id,
                 stale_before=recovery_cutoff,
                 started_at=claimed_at,
                 lease_id=lease_id,
                 lease_expires_at=lease_expires_at,
+                max_recovery_attempts=self._max_recovery_attempts,
             )
 
             if run is None:
@@ -279,7 +323,17 @@ class AgentRunRecoveryService:
         except AgentExecutionOwnershipLostError:
             raise
         except Exception as exc:
-            await self._mark_failed(run, exc)
+            exhausted = run.recovery_attempts >= self._max_recovery_attempts
+            failure = (
+                RecoveryExhaustedError(
+                    f"Agent run '{run.run_id}' exhausted the maximum of "
+                    f"{self._max_recovery_attempts} recovery attempts: {exc}"
+                )
+                if exhausted
+                else exc
+            )
+
+            await self._mark_failed(run, failure)
             await self._emit(
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.AGENT_RECOVERY_FAILED,
@@ -289,10 +343,15 @@ class AgentRunRecoveryService:
                     user_id=run.user_id,
                     metadata={
                         "recovery_type": recovery_type,
-                        "error_type": type(exc).__name__,
+                        "error_type": type(failure).__name__,
+                        **({"reason": "max_recovery_attempts_exceeded"} if exhausted else {}),
                     },
                 )
             )
+
+            if exhausted:
+                raise failure from exc
+
             raise
         finally:
             heartbeat_task.cancel()
