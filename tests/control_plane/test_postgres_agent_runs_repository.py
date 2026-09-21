@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine, inspect
@@ -1634,3 +1636,202 @@ def test_request_cancellation_rejects_missing_run(repository) -> None:
     )
 
     assert result is None
+
+
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
+def test_concurrent_claim_expired_running_run_is_atomic() -> None:
+    import os
+
+    from sqlalchemy import create_engine, delete
+    from sqlalchemy.orm import sessionmaker
+
+    from app.control_plane.persistence.models import AgentRunRecord
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-concurrent-stale-claim-race"
+    stale_before = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+    expired_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+    started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    setup_session = session_factory()
+    try:
+        setup_repository = PostgreSQLAgentRunRepository(setup_session)
+        setup_repository.create(
+            make_run(
+                run_id=run_id,
+                status=AgentRunStatus.RUNNING,
+                lease_id="expired-lease",
+                lease_expires_at=expired_at,
+            )
+        )
+    finally:
+        setup_session.close()
+
+    barrier = Barrier(5)
+
+    def attempt_claim(worker_number: int):
+        session = session_factory()
+
+        try:
+            repository = PostgreSQLAgentRunRepository(session)
+
+            barrier.wait(timeout=10)
+
+            return repository.claim_expired_running_run(
+                run_id,
+                stale_before=stale_before,
+                started_at=started_at,
+                lease_id=f"concurrent-recovery-lease-{worker_number}",
+                lease_expires_at=lease_expires_at,
+            )
+        finally:
+            session.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(attempt_claim, range(5)))
+
+        winners = [result for result in results if result is not None]
+
+        assert len(winners) == 1
+        assert winners[0].lease_id.startswith("concurrent-recovery-lease-")
+
+        with session_factory() as verification_session:
+            verification_repository = PostgreSQLAgentRunRepository(verification_session)
+            restored = verification_repository.get(run_id)
+
+        assert restored is not None
+        assert restored.status is AgentRunStatus.RUNNING
+        assert restored.lease_id == winners[0].lease_id
+        assert restored.lease_expires_at == lease_expires_at
+    finally:
+        cleanup_session = session_factory()
+        try:
+            cleanup_session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            engine.dispose()
+
+
+@pytest.mark.skipif(
+    __import__("os").getenv("RUN_POSTGRES_INTEGRATION") != "1",
+    reason="Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test",
+)
+def test_concurrent_claim_for_recovery_is_atomic() -> None:
+    import os
+
+    from sqlalchemy import create_engine, delete
+    from sqlalchemy.orm import sessionmaker
+
+    from app.control_plane.persistence.models import AgentRunRecord
+
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "pg-concurrent-recovery-race"
+    started_at = datetime(2026, 9, 19, 12, 5, tzinfo=UTC)
+    lease_expires_at = datetime(2026, 9, 19, 12, 6, tzinfo=UTC)
+
+    setup_session = session_factory()
+    try:
+        setup_repository = PostgreSQLAgentRunRepository(setup_session)
+        setup_repository.create(
+            make_run(
+                run_id=run_id,
+                status=AgentRunStatus.FAILED,
+                started_at=datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
+                completed_at=datetime(2026, 9, 17, 10, 5, tzinfo=UTC),
+                error_type="RuntimeError",
+                error_message="previous attempt failed",
+                output={"partial": "output"},
+                metadata={"attempt": 1},
+            )
+        )
+    finally:
+        setup_session.close()
+
+    barrier = Barrier(5)
+
+    def attempt_recovery(worker_number: int):
+        session = session_factory()
+
+        try:
+            repository = PostgreSQLAgentRunRepository(session)
+
+            barrier.wait(timeout=10)
+
+            return repository.claim_for_recovery(
+                run_id,
+                started_at=started_at,
+                lease_id=f"concurrent-recovery-lease-{worker_number}",
+                lease_expires_at=lease_expires_at,
+            )
+        finally:
+            session.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(attempt_recovery, range(5)))
+
+        winners = [result for result in results if result is not None]
+
+        assert len(winners) == 1
+        assert winners[0].status is AgentRunStatus.RUNNING
+        assert winners[0].lease_id.startswith("concurrent-recovery-lease-")
+
+        with session_factory() as verification_session:
+            verification_repository = PostgreSQLAgentRunRepository(verification_session)
+            restored = verification_repository.get(run_id)
+
+        assert restored is not None
+        assert restored.status is AgentRunStatus.RUNNING
+        assert restored.lease_id == winners[0].lease_id
+        assert restored.lease_expires_at == lease_expires_at
+        assert restored.error_type is None
+        assert restored.error_message is None
+        assert restored.output is None
+    finally:
+        cleanup_session = session_factory()
+        try:
+            cleanup_session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            engine.dispose()
