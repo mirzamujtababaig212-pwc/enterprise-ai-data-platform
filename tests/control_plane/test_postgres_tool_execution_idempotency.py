@@ -101,6 +101,58 @@ async def test_duplicate_claim_while_in_progress_returns_in_progress(
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_claim_is_durable(repository) -> None:
+    _, session_factory, store = repository
+    key = make_key(
+        run_id="ambiguous-run",
+        call_id="ambiguous-call",
+        tool_name="ambiguous_tool",
+    )
+
+    claim = await store.claim(key)
+
+    assert claim.status is ToolIdempotencyClaimStatus.CLAIMED
+
+    await store.mark_ambiguous(key)
+
+    session = session_factory()
+    try:
+        record = session.scalar(
+            select(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == key.run_id,
+                ToolExecutionIdempotencyRecord.call_id == key.call_id,
+                ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
+            )
+        )
+    finally:
+        session.close()
+
+    assert record is not None
+    assert record.status == ToolIdempotencyClaimStatus.AMBIGUOUS.value
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_claim_is_not_reclaimable(repository) -> None:
+    _, _, store = repository
+    key = make_key(
+        run_id="ambiguous-run",
+        call_id="ambiguous-call",
+        tool_name="ambiguous_tool",
+    )
+
+    first = await store.claim(key)
+
+    assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+
+    await store.mark_ambiguous(key)
+
+    second = await store.claim(key)
+
+    assert second.status is ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert second.result is None
+
+
+@pytest.mark.asyncio
 async def test_completed_result_is_replayed(repository) -> None:
     _, session_factory, store = repository
     key = make_key()
@@ -307,3 +359,35 @@ async def test_postgres_cross_session_claim_has_single_owner(
 
     await stores[0].release(key)
     await stores[1].release(key)
+
+
+@pytest.mark.asyncio
+async def test_postgres_ambiguous_claim_survives_restarted_store(
+    postgres_sessions,
+) -> None:
+    _, session_factory = postgres_sessions
+
+    key = make_key(
+        run_id="postgres-ambiguous-run",
+        call_id="postgres-ambiguous-call",
+        tool_name="postgres_ambiguous_tool",
+    )
+
+    first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    # Ensure the test can be rerun against the same integration database.
+    await first_store.release(key)
+
+    first = await first_store.claim(key)
+
+    assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+
+    await first_store.mark_ambiguous(key)
+
+    # Simulate a process restart: the second store has no in-memory state.
+    second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    second = await second_store.claim(key)
+
+    assert second.status is ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert second.result is None

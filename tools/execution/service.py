@@ -13,6 +13,7 @@ from tools.authorization.audit import (
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
 from tools.execution.context import ToolExecutionContext
+from tools.execution.exceptions import ToolExecutionOwnershipLostError
 from tools.execution.idempotency import (
     ToolExecutionIdempotencyKey,
     ToolExecutionIdempotencyStore,
@@ -141,6 +142,7 @@ class ToolExecutionService:
                 )
 
         idempotency_key = None
+        ownership_outcome_ambiguous = False
 
         if (
             self.idempotency_store is not None
@@ -155,6 +157,17 @@ class ToolExecutionService:
             )
 
             claim = await self.idempotency_store.claim(idempotency_key)
+
+            if claim.status == ToolIdempotencyClaimStatus.AMBIGUOUS:
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=(
+                        "Tool execution has an ambiguous external outcome and "
+                        "must not be retried automatically."
+                    ),
+                    failure_category=ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS,
+                )
 
             if claim.status == ToolIdempotencyClaimStatus.COMPLETED:
                 if claim.result is None:
@@ -182,6 +195,8 @@ class ToolExecutionService:
                 try:
                     contextual_execute = getattr(tool, "execute_with_context", None)
 
+                    self._raise_if_execution_ownership_lost(execution_context)
+
                     if contextual_execute is not None:
                         execution = contextual_execute(
                             arguments,
@@ -194,6 +209,20 @@ class ToolExecutionService:
                         execution,
                         timeout=timeout,
                     )
+
+                    if (
+                        execution_context is not None
+                        and execution_context.execution_ownership_lost is not None
+                        and execution_context.execution_ownership_lost.is_set()
+                    ):
+                        ownership_outcome_ambiguous = True
+
+                        if idempotency_key is not None:
+                            await self.idempotency_store.mark_ambiguous(idempotency_key)
+
+                        raise ToolExecutionOwnershipLostError(
+                            "Tool execution completed after durable run ownership was lost."
+                        )
 
                     result = ToolExecutionResult(
                         tool_name=tool_name,
@@ -209,7 +238,24 @@ class ToolExecutionService:
 
                     return result
 
+                except ToolExecutionOwnershipLostError:
+                    raise
+
                 except asyncio.TimeoutError:
+                    if (
+                        execution_context is not None
+                        and execution_context.execution_ownership_lost is not None
+                        and execution_context.execution_ownership_lost.is_set()
+                    ):
+                        ownership_outcome_ambiguous = True
+
+                        if idempotency_key is not None:
+                            await self.idempotency_store.mark_ambiguous(idempotency_key)
+
+                        raise ToolExecutionOwnershipLostError(
+                            "Tool execution lost durable run ownership during tool execution."
+                        )
+
                     result = ToolExecutionResult(
                         tool_name=tool_name,
                         success=False,
@@ -243,7 +289,7 @@ class ToolExecutionService:
 
             raise RuntimeError("Tool execution retry loop exited unexpectedly.")
         except BaseException:
-            if idempotency_key is not None:
+            if idempotency_key is not None and not ownership_outcome_ambiguous:
                 await self.idempotency_store.release(idempotency_key)
             raise
 
@@ -282,6 +328,17 @@ class ToolExecutionService:
             )
 
     @staticmethod
+    def _raise_if_execution_ownership_lost(
+        execution_context: ToolExecutionContext | None,
+    ) -> None:
+        if (
+            execution_context is not None
+            and execution_context.execution_ownership_lost is not None
+            and execution_context.execution_ownership_lost.is_set()
+        ):
+            raise ToolExecutionOwnershipLostError("Tool execution lost durable run ownership.")
+
+    @staticmethod
     def _normalize_execution_context(
         execution_context: ToolExecutionContext | dict[str, Any] | None = None,
     ) -> ToolExecutionContext | None:
@@ -300,6 +357,7 @@ class ToolExecutionService:
                 user_id=execution_context.get("user_id"),
                 governance_policy=execution_context.get("governance_policy"),
                 request_metadata=execution_context.get("request_metadata", {}),
+                execution_ownership_lost=execution_context.get("execution_ownership_lost"),
             )
 
         raise TypeError("execution_context must be a ToolExecutionContext, dict, or None.")

@@ -197,6 +197,74 @@ class CrashBoundaryLLMGateway:
         }
 
 
+class LeaseLossLLMGateway:
+    def __init__(self) -> None:
+        self.requests = []
+        self.call_count = 0
+
+    async def route_chat(self, request):
+        self.requests.append(request)
+        self.call_count += 1
+
+        if self.call_count == 1:
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="lease-loss-call-001",
+                        name="lease.loss.tool",
+                        arguments={"value": "fleet-42"},
+                    ),
+                ],
+            }
+
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": "Recovered without duplicating the external side effect.",
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 8,
+                "total_tokens": 28,
+            },
+        }
+
+
+class LeaseLossTool:
+    def __init__(self, ownership_lost) -> None:
+        self._definition = ToolDefinition(
+            name="lease.loss.tool",
+            description="Tool whose external side effect completes before lease loss.",
+        )
+        self.ownership_lost = ownership_lost
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+
+        # The external side effect has completed. The durable execution
+        # owner is then lost before ToolExecutionService can persist
+        # COMPLETED, forcing the outcome into AMBIGUOUS.
+        self.ownership_lost.set()
+
+        return {
+            "status": "side_effect_completed",
+            "value": arguments["value"],
+            "execution_count": self.execution_count,
+        }
+
+
 class CrashBoundaryCheckpointHandler:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
@@ -409,6 +477,219 @@ def test_postgres_recovery_replays_completed_tool_from_before_checkpoint() -> No
         # The recovered AFTER checkpoint must contain the replayed tool result.
         assert any(
             message.role.value == "tool" and "crash-boundary-call-001" in message.content
+            for message in restored_checkpoint.messages
+        )
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
+        engine.dispose()
+
+
+def test_postgres_recovery_does_not_repeat_side_effect_after_lease_loss() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "pg-lease-loss-ambiguous-e2e"
+
+    session = session_factory()
+
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Execute the fleet-42 recovery operation.",
+            session_id="session-lease-loss",
+            user_id="user-lease-loss",
+            metadata={
+                "request_id": "lease-loss-request",
+                "source": "integration-test",
+            },
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="lease-loss-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                lease_id="initial-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        import asyncio
+
+        ownership_lost = asyncio.Event()
+        tool = LeaseLossTool(ownership_lost)
+        tool_registry = InMemoryToolRegistry()
+        asyncio.run(tool_registry.register(tool))
+
+        idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
+            session_factory,
+        )
+        tool_execution_service = ToolExecutionService(
+            tool_registry,
+            idempotency_store=idempotency_store,
+        )
+
+        llm_gateway = LeaseLossLLMGateway()
+        registry = InMemoryAgentRegistry()
+
+        definition = AgentDefinition(
+            name="lease-loss-agent",
+            description="Lease-loss ambiguity recovery integration agent.",
+            system_prompt="Execute the requested operation using the available tool.",
+            model="fake-model",
+            temperature=0.0,
+            max_tokens=256,
+            tool_names=("lease.loss.tool",),
+        )
+
+        checkpoint_handler = CrashBoundaryCheckpointHandler(session_factory)
+        observer = PostgreSQLAgentRunEventObserver(session_factory)
+
+        agent = LLMAgent(
+            definition,
+            observer=observer,
+            checkpoint_handler=checkpoint_handler,
+        )
+
+        asyncio.run(registry.register(agent))
+
+        runtime = AgentRuntime(
+            registry,
+            tool_registry=tool_registry,
+            tool_execution_service=tool_execution_service,
+            llm_gateway=llm_gateway,
+        )
+
+        ownership_error = None
+
+        try:
+            asyncio.run(
+                runtime.run(
+                    "lease-loss-agent",
+                    request,
+                    run_id=run_id,
+                    execution_ownership_lost=ownership_lost,
+                )
+            )
+        except Exception as exc:
+            ownership_error = exc
+
+        assert ownership_error is not None
+        assert ownership_error.__class__.__name__ == ("AgentExecutionOwnershipLostError")
+
+        # The external side effect happened exactly once.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 1
+
+        # The AFTER_TOOL checkpoint must not have been persisted because
+        # ownership was lost after the external side effect.
+        checkpoint = checkpoint_repository.get_latest(run_id)
+        assert checkpoint is not None
+        assert checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+
+        # The tool outcome must be durably ambiguous rather than completed
+        # or released for another worker to execute.
+        idempotency_session = session_factory()
+        try:
+            idempotency_record = idempotency_session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "lease-loss-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "lease.loss.tool",
+                )
+            )
+            assert idempotency_record is not None
+            assert idempotency_record.status == "ambiguous"
+        finally:
+            idempotency_session.close()
+
+        # Simulate worker A disappearing after losing the lease.
+        expired_at = datetime.now(UTC) - timedelta(minutes=5)
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                status=AgentRunStatus.RUNNING.value,
+                lease_id="expired-after-lease-loss",
+                lease_expires_at=expired_at,
+            )
+        )
+        session.commit()
+
+        checkpoint_handler.suppress_after_tool_checkpoint = False
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            observer=observer,
+            lease_seconds=60,
+        )
+
+        results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].run_id == run_id
+        assert results[0].response.output == (
+            "Recovered without duplicating the external side effect."
+        )
+
+        # Recovery encountered the same logical tool call, but the durable
+        # AMBIGUOUS state prevented another external side effect.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 2
+
+        session.expire_all()
+
+        restored = run_repository.get(run_id)
+        assert restored is not None
+        assert restored.status is AgentRunStatus.COMPLETED
+        assert restored.output == ("Recovered without duplicating the external side effect.")
+        assert restored.lease_id is None
+        assert restored.lease_expires_at is None
+
+        restored_checkpoint = checkpoint_repository.get_latest(run_id)
+        assert restored_checkpoint is not None
+        assert restored_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+
+        # The ambiguous tool result was carried through recovery; the
+        # external tool itself was never executed a second time.
+        assert any(
+            message.role.value == "tool" and "lease-loss-call-001" in message.content
             for message in restored_checkpoint.messages
         )
 

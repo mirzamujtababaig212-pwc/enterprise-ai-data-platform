@@ -20,6 +20,7 @@ from ai_platform.agents.tool_context import AgentToolContext
 from tools.models import ToolExecutionResult
 from rag.governance import GovernancePolicy
 from tools.execution.context import ToolExecutionContext
+from tools.execution.exceptions import ToolExecutionOwnershipLostError
 
 
 class AgentExecutionContext:
@@ -203,20 +204,26 @@ class AgentExecutionContext:
         results: list[AgentToolResult] = []
 
         for tool_call in tool_calls:
-            result = await self.tools.execute(
-                tool_call.name,
-                tool_call.arguments,
-                principal=self.user_id,
-                execution_context=ToolExecutionContext(
-                    run_id=self.run_id,
-                    call_id=tool_call.call_id,
-                    governance_policy=self.governance_policy,
-                    agent_name=self.agent_name,
-                    session_id=self.session_id,
-                    user_id=self.user_id,
-                    request_metadata=self.metadata,
-                ),
-            )
+            try:
+                result = await self.tools.execute(
+                    tool_call.name,
+                    tool_call.arguments,
+                    principal=self.user_id,
+                    execution_context=ToolExecutionContext(
+                        run_id=self.run_id,
+                        call_id=tool_call.call_id,
+                        governance_policy=self.governance_policy,
+                        agent_name=self.agent_name,
+                        session_id=self.session_id,
+                        user_id=self.user_id,
+                        request_metadata=self.metadata,
+                        execution_ownership_lost=self.execution_ownership_lost,
+                    ),
+                )
+            except ToolExecutionOwnershipLostError as exc:
+                raise AgentExecutionOwnershipLostError(
+                    "Agent execution lost durable run ownership during tool execution."
+                ) from exc
 
             if isinstance(result, ToolExecutionResult):
                 results.append(

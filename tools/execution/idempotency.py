@@ -27,6 +27,7 @@ class ToolIdempotencyClaimStatus(StrEnum):
     CLAIMED = "claimed"
     COMPLETED = "completed"
     IN_PROGRESS = "in_progress"
+    AMBIGUOUS = "ambiguous"
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,12 @@ class ToolExecutionIdempotencyStore:
     ) -> None:
         raise NotImplementedError
 
+    async def mark_ambiguous(
+        self,
+        key: ToolExecutionIdempotencyKey,
+    ) -> None:
+        raise NotImplementedError
+
 
 class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
     def __init__(self) -> None:
@@ -63,6 +70,7 @@ class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
             ToolExecutionResult,
         ] = {}
         self._in_progress: set[ToolExecutionIdempotencyKey] = set()
+        self._ambiguous: set[ToolExecutionIdempotencyKey] = set()
         self._lock = asyncio.Lock()
 
     async def claim(
@@ -70,6 +78,11 @@ class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
         key: ToolExecutionIdempotencyKey,
     ) -> ToolIdempotencyClaim:
         async with self._lock:
+            if key in self._ambiguous:
+                return ToolIdempotencyClaim(
+                    status=ToolIdempotencyClaimStatus.AMBIGUOUS,
+                )
+
             completed = self._completed.get(key)
 
             if completed is not None:
@@ -104,3 +117,14 @@ class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
     ) -> None:
         async with self._lock:
             self._in_progress.discard(key)
+
+    async def mark_ambiguous(
+        self,
+        key: ToolExecutionIdempotencyKey,
+    ) -> None:
+        async with self._lock:
+            if key not in self._in_progress:
+                raise RuntimeError("Cannot mark tool execution ambiguous without an active claim.")
+
+            self._in_progress.discard(key)
+            self._ambiguous.add(key)

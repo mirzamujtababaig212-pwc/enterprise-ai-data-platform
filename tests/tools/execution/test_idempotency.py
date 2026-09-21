@@ -154,3 +154,38 @@ async def test_concurrent_duplicate_claims_have_single_owner() -> None:
 
     assert statuses.count(ToolIdempotencyClaimStatus.CLAIMED) == 1
     assert statuses.count(ToolIdempotencyClaimStatus.IN_PROGRESS) == 2
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_claim_is_not_reclaimable() -> None:
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="test_tool",
+    )
+
+    first = await store.claim(key)
+    assert first.status == ToolIdempotencyClaimStatus.CLAIMED
+
+    await store.mark_ambiguous(key)
+
+    second = await store.claim(key)
+
+    assert second.status == ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert second.result is None
+
+
+@pytest.mark.asyncio
+async def test_mark_ambiguous_requires_an_active_claim() -> None:
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="test_tool",
+    )
+
+    with pytest.raises(RuntimeError, match="active claim"):
+        await store.mark_ambiguous(key)

@@ -13,6 +13,7 @@ class ToolExecutionFailureCategory(StrEnum):
     MISSING_PRINCIPAL = "missing_principal"
     AUTHORIZATION = "authorization"
     EXECUTION_IN_PROGRESS = "execution_in_progress"
+    EXECUTION_AMBIGUOUS = "execution_ambiguous"
     TIMEOUT = "timeout"
     EXECUTION_ERROR = "execution_error"
 

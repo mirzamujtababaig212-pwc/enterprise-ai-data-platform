@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +26,7 @@ class ToolExecutionContext:
     user_id: str | None = None
     governance_policy: GovernancePolicy | None = None
     request_metadata: dict[str, Any] = field(default_factory=dict)
+    execution_ownership_lost: asyncio.Event | None = None
 
     def __post_init__(self) -> None:
         if self.run_id is not None:

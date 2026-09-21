@@ -8,8 +8,11 @@ from tools.authorization.in_memory import (
 from tools.authorization.service import (
     ToolAuthorizationService,
 )
+from tools.execution.exceptions import ToolExecutionOwnershipLostError
 from tools.execution.idempotency import (
     InMemoryToolExecutionIdempotencyStore,
+    ToolExecutionIdempotencyKey,
+    ToolIdempotencyClaimStatus,
 )
 from tools.execution.service import ToolExecutionService
 from tools.models import (
@@ -121,6 +124,189 @@ class SlowTool:
         self.execution_count += 1
         await asyncio.sleep(0.2)
         return {"status": "completed"}
+
+
+class OwnershipLosingTool:
+    def __init__(self, ownership_lost: asyncio.Event):
+        self._definition = ToolDefinition(
+            name="ownership_losing_tool",
+            description="A tool that loses ownership after its side effect.",
+        )
+        self.ownership_lost = ownership_lost
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+
+        # Simulate the external side effect completing before the
+        # durable ownership signal becomes visible to the caller.
+        self.ownership_lost.set()
+
+        return {
+            "status": "side_effect_completed",
+            "arguments": arguments,
+        }
+
+
+@pytest.mark.asyncio
+async def test_execute_stops_before_tool_when_ownership_is_already_lost():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    ownership_lost = asyncio.Event()
+    ownership_lost.set()
+
+    store = InMemoryToolExecutionIdempotencyStore()
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-1",
+        call_id="call-1",
+        execution_ownership_lost=ownership_lost,
+    )
+
+    with pytest.raises(ToolExecutionOwnershipLostError):
+        await service.execute(
+            "test_tool",
+            {},
+            execution_context=context,
+        )
+
+    assert tool.execution_count == 0
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="test_tool",
+    )
+
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.CLAIMED
+
+
+@pytest.mark.asyncio
+async def test_execute_marks_external_outcome_ambiguous_after_ownership_loss():
+    registry = InMemoryToolRegistry()
+    ownership_lost = asyncio.Event()
+    tool = OwnershipLosingTool(ownership_lost)
+
+    await registry.register(tool)
+
+    store = InMemoryToolExecutionIdempotencyStore()
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-1",
+        call_id="call-1",
+        execution_ownership_lost=ownership_lost,
+    )
+
+    with pytest.raises(ToolExecutionOwnershipLostError):
+        await service.execute(
+            "ownership_losing_tool",
+            {},
+            execution_context=context,
+        )
+
+    assert tool.execution_count == 1
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="ownership_losing_tool",
+    )
+
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.AMBIGUOUS
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_reclaim_ambiguous_external_outcome():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="test_tool",
+    )
+
+    await store.claim(key)
+    await store.mark_ambiguous(key)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=ToolExecutionContext(
+            run_id="run-1",
+            call_id="call-1",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_releases_idempotency_after_ordinary_tool_failure():
+    registry = InMemoryToolRegistry()
+    tool = FailingTool()
+
+    await registry.register(tool)
+
+    store = InMemoryToolExecutionIdempotencyStore()
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-1",
+        call_id="call-1",
+    )
+
+    first = await service.execute(
+        "failing_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert first.success is False
+    assert first.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-1",
+        call_id="call-1",
+        tool_name="failing_tool",
+    )
+
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.CLAIMED
 
 
 @pytest.mark.asyncio

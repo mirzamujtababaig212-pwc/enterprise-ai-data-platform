@@ -74,6 +74,11 @@ class PostgreSQLToolExecutionIdempotencyStore(
                     result=self._result_from_record(existing),
                 )
 
+            if existing.status == ToolIdempotencyClaimStatus.AMBIGUOUS.value:
+                return ToolIdempotencyClaim(
+                    status=ToolIdempotencyClaimStatus.AMBIGUOUS,
+                )
+
             return ToolIdempotencyClaim(
                 status=ToolIdempotencyClaimStatus.IN_PROGRESS,
             )
@@ -152,6 +157,44 @@ class PostgreSQLToolExecutionIdempotencyStore(
 
             try:
                 session.execute(statement)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+        finally:
+            session.close()
+
+    async def mark_ambiguous(
+        self,
+        key: ToolExecutionIdempotencyKey,
+    ) -> None:
+        session = self._session_factory()
+
+        try:
+            statement = (
+                update(ToolExecutionIdempotencyRecord)
+                .where(
+                    ToolExecutionIdempotencyRecord.run_id == key.run_id,
+                    ToolExecutionIdempotencyRecord.call_id == key.call_id,
+                    ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
+                    ToolExecutionIdempotencyRecord.status
+                    == ToolIdempotencyClaimStatus.CLAIMED.value,
+                )
+                .values(
+                    status=ToolIdempotencyClaimStatus.AMBIGUOUS.value,
+                )
+            )
+
+            try:
+                updated = session.execute(statement)
+
+                if updated.rowcount != 1:
+                    session.rollback()
+                    raise RuntimeError(
+                        "Unable to mark idempotency record ambiguous because "
+                        "the claim is no longer owned by the caller."
+                    )
+
                 session.commit()
             except Exception:
                 session.rollback()
