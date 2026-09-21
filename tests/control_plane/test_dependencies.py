@@ -150,6 +150,10 @@ async def test_get_agent_run_application_service_uses_configured_lease_duration(
     assert isinstance(service, AgentRunApplicationService)
     assert service._lease_seconds == 123
 
+    from app.control_plane import dependencies
+
+    assert service._cancellation_registry is dependencies._agent_run_cancellation_registry
+
 
 @pytest.mark.asyncio
 async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
@@ -182,3 +186,7 @@ async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
 
     assert isinstance(service, AgentRunRecoveryService)
     assert service._lease_seconds == 123
+
+    from app.control_plane import dependencies
+
+    assert service._cancellation_registry is dependencies._agent_run_cancellation_registry

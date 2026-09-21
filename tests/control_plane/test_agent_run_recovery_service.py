@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -23,14 +24,17 @@ from app.control_plane.agent_runs.models import (
     AgentRunExecutionResult,
     AgentRunStatus,
 )
+from app.control_plane.agent_runs.cancellation import (
+    AgentRunCancellationRegistry,
+)
+from app.control_plane.agent_runs.in_memory import (
+    InMemoryAgentRunRepository,
+)
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
 )
 from app.control_plane.agent_runs.request_snapshot import (
     AgentRunRequestSnapshot,
-)
-from app.control_plane.agent_runs.in_memory import (
-    InMemoryAgentRunRepository,
 )
 
 
@@ -239,6 +243,79 @@ class FakeRuntime:
             output="Recovered successfully.",
             session_id=request.session_id,
         )
+
+
+class CancellationBlockingRuntime:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def resume(
+        self,
+        agent_name,
+        request,
+        checkpoint,
+        *,
+        run_id=None,
+        execution_ownership_lost=None,
+    ):
+        self.started.set()
+
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
+@pytest.mark.asyncio
+async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owned_run():
+    repository = RecordingRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    checkpoint_repository = FakeCheckpointRepository(checkpoint())
+    runtime = CancellationBlockingRuntime()
+    cancellation_registry = AgentRunCancellationRegistry()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=checkpoint_repository,
+        cancellation_registry=cancellation_registry,
+    )
+
+    recovery_task = asyncio.create_task(
+        service.recover("run-123"),
+    )
+
+    await runtime.started.wait()
+
+    registered_task = cancellation_registry._tasks.get("run-123")
+    assert registered_task is recovery_task
+
+    cancelled = cancellation_registry.cancel("run-123")
+
+    assert cancelled is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_task
+
+    assert runtime.cancelled is True
+
+    recovered = repository.get("run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.CANCELLED
+    assert recovered.cancellation_requested is False
+
+    assert repository.complete_call is None
+    assert repository.fail_call is None
+
+    assert "run-123" not in cancellation_registry._tasks
 
 
 @pytest.mark.asyncio

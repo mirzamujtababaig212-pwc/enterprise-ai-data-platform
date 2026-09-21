@@ -19,6 +19,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunExecutionResult,
     AgentRunStatus,
 )
+from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.lease import (
     create_lease,
@@ -51,9 +52,11 @@ class AgentRunRecoveryService:
         repository: AgentRunRepository,
         checkpoints_repository: AgentCheckpointsRepository,
         observer: AgentExecutionObserver | None = None,
+        cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
+        self._cancellation_registry = cancellation_registry
         self._repository = repository
         self._checkpoints_repository = checkpoints_repository
         self._observer = observer
@@ -207,6 +210,10 @@ class AgentRunRecoveryService:
             raise exc
 
         ownership_lost = asyncio.Event()
+        execution_task = asyncio.current_task()
+
+        if execution_task is not None and self._cancellation_registry is not None:
+            self._cancellation_registry.register(run.run_id, execution_task)
 
         heartbeat_task = asyncio.create_task(
             heartbeat_loop(
@@ -239,6 +246,30 @@ class AgentRunRecoveryService:
                 run_id=run.run_id,
                 execution_ownership_lost=ownership_lost,
             )
+        except asyncio.CancelledError:
+            cancelled_at = datetime.now(UTC)
+
+            cancelled_run = self._repository.cancel_if_owner(
+                run.run_id,
+                lease_id=run.lease_id,
+                completed_at=cancelled_at,
+            )
+
+            if cancelled_run is not None:
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.AGENT_CANCELLED,
+                        agent_name=run.agent_name,
+                        run_id=run.run_id,
+                        session_id=run.session_id,
+                        user_id=run.user_id,
+                        metadata={
+                            "recovery_type": recovery_type,
+                        },
+                    )
+                )
+
+            raise
         except AgentExecutionOwnershipLostError:
             raise
         except Exception as exc:
@@ -263,6 +294,12 @@ class AgentRunRecoveryService:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+
+            if execution_task is not None and self._cancellation_registry is not None:
+                self._cancellation_registry.unregister(
+                    run.run_id,
+                    execution_task,
+                )
 
         completed_at = datetime.now(UTC)
 
