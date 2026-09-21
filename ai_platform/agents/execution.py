@@ -5,6 +5,7 @@ import asyncio
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.llm_context import AgentLLMContext
+from ai_platform.agents.orchestration import OrchestrationPlan, OrchestrationState
 from ai_platform.agents.llm_messages import (
     AgentMessage,
     system_message,
@@ -45,6 +46,7 @@ class AgentExecutionContext:
         run_id: str | None = None,
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
+        orchestration_plan: OrchestrationPlan | None = None,
     ) -> None:
         self.request = request
         self.tools = tools
@@ -57,6 +59,12 @@ class AgentExecutionContext:
 
         self.execution_budget = request.execution_budget or ExecutionBudget()
         self.execution_budget_state = ExecutionBudgetState()
+        self.orchestration_plan = orchestration_plan
+        self.orchestration_state = (
+            orchestration_plan.materialize_state()
+            if orchestration_plan is not None
+            else OrchestrationState()
+        )
 
         if self.run_id is not None:
             if not isinstance(self.run_id, str):

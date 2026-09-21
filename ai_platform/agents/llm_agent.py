@@ -291,6 +291,37 @@ class LLMAgent:
             tool_round=tool_round,
         )
 
+    def _start_orchestration_step(
+        self,
+        context: AgentExecutionContext,
+    ) -> int | None:
+        state = context.orchestration_state
+
+        if context.orchestration_plan is None:
+            return None
+
+        step = state.current_step
+        if step is None:
+            step = state.start_step(0)
+
+        return step.step_index
+
+    def _complete_orchestration_step(
+        self,
+        context: AgentExecutionContext,
+        step_index: int | None,
+        *,
+        tool_round: int | None = None,
+    ) -> None:
+        if step_index is None:
+            return
+
+        state = context.orchestration_state
+        state.complete_step(
+            step_index,
+            tool_round=tool_round,
+        )
+
     async def _continue(
         self,
         context: AgentExecutionContext,
@@ -460,6 +491,8 @@ class LLMAgent:
             )
         )
 
+        orchestration_step_index = self._start_orchestration_step(context)
+
         try:
             messages = list(context.build_llm_messages())
         except Exception as exc:
@@ -478,11 +511,19 @@ class LLMAgent:
             )
             raise
 
-        return await self._continue(
+        response = await self._continue(
             context,
             messages,
             tool_rounds=0,
         )
+
+        self._complete_orchestration_step(
+            context,
+            orchestration_step_index,
+            tool_round=response.metadata.get("tool_rounds"),
+        )
+
+        return response
 
     async def resume(
         self,
@@ -525,6 +566,8 @@ class LLMAgent:
             checkpoint.execution_budget_state.to_dict()
         )
 
+        orchestration_step_index = self._start_orchestration_step(context)
+
         messages = list(checkpoint.messages)
         tool_rounds = checkpoint.tool_round
 
@@ -553,8 +596,16 @@ class LLMAgent:
 
         context.raise_if_execution_ownership_lost()
 
-        return await self._continue(
+        response = await self._continue(
             context,
             messages,
             tool_rounds=tool_rounds,
         )
+
+        self._complete_orchestration_step(
+            context,
+            orchestration_step_index,
+            tool_round=response.metadata.get("tool_rounds"),
+        )
+
+        return response

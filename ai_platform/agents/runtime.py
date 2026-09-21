@@ -5,6 +5,7 @@ import asyncio
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.contracts import AgentRegistry
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.plans import build_agent_orchestration_plan
 from ai_platform.agents.llm_context import (
     AgentLLMContext,
     LLMGateway,
@@ -95,6 +96,11 @@ class AgentRuntime:
         if not agent.definition.enabled:
             raise RuntimeError(f"Agent '{agent_name}' is disabled.")
 
+        try:
+            orchestration_plan = build_agent_orchestration_plan(agent_name)
+        except LookupError:
+            orchestration_plan = None
+
         resume_agent = getattr(agent, "resume", None)
 
         if resume_agent is None or not callable(resume_agent):
@@ -155,6 +161,7 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
+            orchestration_plan=orchestration_plan,
         )
 
         return await resume_agent(context, checkpoint)
@@ -179,6 +186,11 @@ class AgentRuntime:
 
         if not agent.definition.enabled:
             raise RuntimeError(f"Agent '{agent_name}' is disabled.")
+
+        try:
+            orchestration_plan = build_agent_orchestration_plan(agent_name)
+        except LookupError:
+            orchestration_plan = None
 
         if agent.definition.tool_names:
             if self._tool_registry is None:
@@ -245,6 +257,7 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
+            orchestration_plan=orchestration_plan,
         )
 
         response = await agent.run(context)
