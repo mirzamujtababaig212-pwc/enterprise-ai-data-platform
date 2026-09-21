@@ -70,6 +70,7 @@ class FakeRuntime:
         checkpoint,
         *,
         run_id=None,
+        execution_ownership_lost=None,
     ):
         self.calls.append(
             {
