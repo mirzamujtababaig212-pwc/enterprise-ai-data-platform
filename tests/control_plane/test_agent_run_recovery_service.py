@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
@@ -221,6 +222,7 @@ class FakeRuntime:
         checkpoint,
         *,
         run_id=None,
+        execution_ownership_lost=None,
     ):
         self.calls.append(
             {
@@ -228,6 +230,7 @@ class FakeRuntime:
                 "request": request,
                 "checkpoint": checkpoint,
                 "run_id": run_id,
+                "execution_ownership_lost": execution_ownership_lost,
             }
         )
 
@@ -339,6 +342,54 @@ async def test_recovery_emits_started_and_completed_events_for_failed_run():
 
 
 @pytest.mark.asyncio
+async def test_recovery_propagates_execution_ownership_loss_without_marking_failed():
+    repository = RecordingRepository()
+    repository.create(
+        failed_run(
+            request_snapshot=request_snapshot(),
+        )
+    )
+
+    observer = RecordingObserver()
+
+    class OwnershipLossRuntime:
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+            execution_ownership_lost=None,
+        ):
+            raise AgentExecutionOwnershipLostError("Agent execution lost durable run ownership.")
+
+    service = AgentRunRecoveryService(
+        runtime=OwnershipLossRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        observer=observer,
+    )
+
+    with pytest.raises(
+        AgentExecutionOwnershipLostError,
+        match="lost durable run ownership",
+    ):
+        await service.recover("run-123")
+
+    recovered = repository.get("run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.RUNNING
+    assert repository.fail_call is None
+    assert repository.complete_call is None
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_recovery_emits_started_and_failed_events_on_resume_failure():
     repository = InMemoryAgentRunRepository()
     repository.create(
@@ -357,6 +408,7 @@ async def test_recovery_emits_started_and_failed_events_on_resume_failure():
             checkpoint,
             *,
             run_id=None,
+            execution_ownership_lost=None,
         ):
             raise ValueError("LLM provider unavailable")
 
@@ -562,6 +614,7 @@ async def test_recovery_marks_run_failed_when_runtime_resume_fails():
             checkpoint,
             *,
             run_id=None,
+            execution_ownership_lost=None,
         ):
             raise ValueError("LLM provider unavailable")
 
@@ -1031,6 +1084,7 @@ async def test_recover_stale_runs_continues_after_one_run_fails():
             checkpoint,
             *,
             run_id=None,
+            execution_ownership_lost=None,
         ):
             self.calls.append(
                 {
@@ -1038,6 +1092,7 @@ async def test_recover_stale_runs_continues_after_one_run_fails():
                     "request": request,
                     "checkpoint": checkpoint,
                     "run_id": run_id,
+                    "execution_ownership_lost": execution_ownership_lost,
                 }
             )
 

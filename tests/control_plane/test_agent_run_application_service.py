@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -206,6 +207,7 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
             user_id="user-1",
         ),
         run_id=pending.run_id,
+        execution_ownership_lost=runtime.run.await_args.kwargs["execution_ownership_lost"],
     )
 
 
@@ -232,6 +234,36 @@ async def test_execute_uses_one_run_id_across_lifecycle() -> None:
 
     assert created_run.run_id == running_run.run_id
     assert completed_run_id == running_run.run_id
+
+
+@pytest.mark.asyncio
+async def test_execute_propagates_execution_ownership_loss_without_terminal_persistence():
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(
+        side_effect=AgentExecutionOwnershipLostError("Agent execution lost durable run ownership."),
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentExecutionOwnershipLostError,
+        match="lost durable run ownership",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(input="Ownership loss"),
+        )
+
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 1
+    repository.fail_if_owner.assert_not_called()
+    repository.cancel_if_owner.assert_not_called()
+    repository.complete_if_owner.assert_not_called()
 
 
 @pytest.mark.asyncio

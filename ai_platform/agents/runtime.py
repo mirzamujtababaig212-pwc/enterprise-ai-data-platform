@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.contracts import AgentRegistry
 from ai_platform.agents.execution import AgentExecutionContext
@@ -69,6 +71,7 @@ class AgentRuntime:
         checkpoint: AgentExecutionCheckpoint,
         *,
         run_id: str | None = None,
+        execution_ownership_lost: asyncio.Event | None = None,
     ) -> AgentResponse:
         """
         Resume a recoverable agent from a durable execution checkpoint.
@@ -160,6 +163,7 @@ class AgentRuntime:
         *,
         history: tuple[AgentMessage, ...] = (),
         run_id: str | None = None,
+        execution_ownership_lost: asyncio.Event | None = None,
     ) -> AgentResponse:
         if not agent_name.strip():
             raise ValueError("Agent name must not be empty.")
@@ -235,6 +239,7 @@ class AgentRuntime:
             history=history,
             memory=memory_context,
             run_id=run_id,
+            execution_ownership_lost=execution_ownership_lost,
         )
 
         response = await agent.run(context)

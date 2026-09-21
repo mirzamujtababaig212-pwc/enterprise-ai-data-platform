@@ -138,7 +138,10 @@ class LLMAgent:
         It deliberately does not consume execution budget because budget
         consumption happens when the LLM originally produced the tool calls.
         """
+        context.raise_if_execution_ownership_lost()
+
         for tool_call in tool_calls:
+            context.raise_if_execution_ownership_lost()
             await self._emit(
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.TOOL_CALL_REQUESTED,
@@ -152,9 +155,13 @@ class LLMAgent:
                 )
             )
 
+        context.raise_if_execution_ownership_lost()
+
         tool_results = await context.execute_tool_calls(
             tool_calls,
         )
+
+        context.raise_if_execution_ownership_lost()
 
         for tool_call, tool_result in zip(
             tool_calls,
@@ -206,7 +213,10 @@ class LLMAgent:
             tool_result_messages,
         )
 
+        context.raise_if_execution_ownership_lost()
+
         if self._checkpoint_handler is not None and context.run_id is not None:
+            context.raise_if_execution_ownership_lost()
             await self._checkpoint_handler.save(
                 AgentExecutionCheckpoint(
                     schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
@@ -240,6 +250,8 @@ class LLMAgent:
             assistant_tool_call_message,
         )
 
+        context.raise_if_execution_ownership_lost()
+
         messages.append(
             assistant_tool_call_message(
                 tool_calls=tool_calls,
@@ -247,7 +259,10 @@ class LLMAgent:
             )
         )
 
+        context.raise_if_execution_ownership_lost()
+
         if self._checkpoint_handler is not None and context.run_id is not None:
+            context.raise_if_execution_ownership_lost()
             await self._checkpoint_handler.save(
                 AgentExecutionCheckpoint(
                     schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
@@ -264,6 +279,8 @@ class LLMAgent:
                     ),
                 )
             )
+
+        context.raise_if_execution_ownership_lost()
 
         await self._execute_tool_calls_and_append_results(
             messages,
@@ -291,6 +308,8 @@ class LLMAgent:
             tools = await context.tools.list_tools()
 
             while True:
+                context.raise_if_execution_ownership_lost()
+
                 context.execution_budget_state.check_duration(
                     context.execution_budget,
                     self.definition.name,
@@ -299,6 +318,8 @@ class LLMAgent:
                     context.execution_budget,
                     self.definition.name,
                 )
+
+                context.raise_if_execution_ownership_lost()
 
                 await self._emit(
                     AgentExecutionEvent(
@@ -319,6 +340,8 @@ class LLMAgent:
                     metadata=context.metadata,
                 )
 
+                context.raise_if_execution_ownership_lost()
+
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_COMPLETED,
@@ -338,6 +361,8 @@ class LLMAgent:
                 )
 
                 if not result.tool_calls:
+                    context.raise_if_execution_ownership_lost()
+
                     await self._emit(
                         AgentExecutionEvent(
                             event_type=AgentExecutionEventType.AGENT_COMPLETED,
@@ -367,6 +392,8 @@ class LLMAgent:
                         },
                     )
 
+                context.raise_if_execution_ownership_lost()
+
                 context.execution_budget_state.check_duration(
                     context.execution_budget,
                     self.definition.name,
@@ -382,6 +409,8 @@ class LLMAgent:
                 )
 
                 tool_rounds += 1
+
+                context.raise_if_execution_ownership_lost()
 
                 await self._accumulate_tool_call_messages(
                     messages,
@@ -416,6 +445,8 @@ class LLMAgent:
         """
         if not isinstance(context, AgentExecutionContext):
             raise TypeError("LLMAgent context must be an AgentExecutionContext.")
+
+        context.raise_if_execution_ownership_lost()
 
         await self._emit(
             AgentExecutionEvent(
@@ -466,6 +497,8 @@ class LLMAgent:
         if not isinstance(context, AgentExecutionContext):
             raise TypeError("LLMAgent context must be an AgentExecutionContext.")
 
+        context.raise_if_execution_ownership_lost()
+
         if not isinstance(
             checkpoint,
             AgentExecutionCheckpoint,
@@ -507,12 +540,16 @@ class LLMAgent:
                 assistant_message,
             )
 
+            context.raise_if_execution_ownership_lost()
+
             await self._execute_tool_calls_and_append_results(
                 messages,
                 context,
                 tool_calls,
                 tool_round=tool_rounds,
             )
+
+        context.raise_if_execution_ownership_lost()
 
         return await self._continue(
             context,

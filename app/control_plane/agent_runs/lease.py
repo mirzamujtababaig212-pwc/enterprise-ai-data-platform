@@ -23,6 +23,7 @@ async def heartbeat_loop(
     run_id: str,
     lease_id: str,
     lease_seconds: int,
+    ownership_lost: asyncio.Event | None = None,
 ) -> None:
     interval_seconds = lease_seconds / 3
 
@@ -47,5 +48,8 @@ async def heartbeat_loop(
 
         if renewed_run is None:
             # Another worker owns the run, or the run is no longer
-            # RUNNING. Do not attempt to renew it again.
+            # RUNNING. Signal the active execution so it can stop
+            # rather than continuing as a stale worker.
+            if ownership_lost is not None:
+                ownership_lost.set()
             return

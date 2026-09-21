@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -11,7 +12,6 @@ from ai_platform.agents.observability import (
 )
 from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.runtime import AgentRuntime
-
 from app.control_plane.agent_runs.cancellation import (
     AgentRunCancellationRegistry,
 )
@@ -130,12 +130,15 @@ class AgentRunApplicationService:
 
         self._repository.update(run)
 
+        ownership_lost = asyncio.Event()
+
         heartbeat_task = asyncio.create_task(
             heartbeat_loop(
                 self._repository,
                 run_id=run.run_id,
                 lease_id=lease_id,
                 lease_seconds=self._lease_seconds,
+                ownership_lost=ownership_lost,
             )
         )
 
@@ -156,6 +159,7 @@ class AgentRunApplicationService:
                 agent_name,
                 request,
                 run_id=run.run_id,
+                execution_ownership_lost=ownership_lost,
             )
         except asyncio.CancelledError:
             cancelled_at = datetime.now(UTC)
@@ -182,6 +186,8 @@ class AgentRunApplicationService:
                         )
                     )
 
+            raise
+        except AgentExecutionOwnershipLostError:
             raise
         except Exception as exc:
             failed_at = datetime.now(UTC)

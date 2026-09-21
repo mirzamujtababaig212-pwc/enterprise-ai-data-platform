@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.llm_messages import (
     AgentMessage,
@@ -39,6 +42,7 @@ class AgentExecutionContext:
         history: tuple[AgentMessage, ...] = (),
         memory: MemoryContext | None = None,
         run_id: str | None = None,
+        execution_ownership_lost: asyncio.Event | None = None,
     ) -> None:
         self.request = request
         self.tools = tools
@@ -46,6 +50,7 @@ class AgentExecutionContext:
         self.history = history
         self.memory = memory
         self.run_id = run_id
+        self.execution_ownership_lost = execution_ownership_lost
 
         self.execution_budget = request.execution_budget or ExecutionBudget()
         self.execution_budget_state = ExecutionBudgetState()
@@ -60,6 +65,17 @@ class AgentExecutionContext:
         for message in self.history:
             if not isinstance(message, AgentMessage):
                 raise TypeError("Agent execution history must contain " "AgentMessage instances.")
+
+    def raise_if_execution_ownership_lost(self) -> None:
+        """
+        Stop execution when durable run ownership has been lost.
+
+        The control plane owns the lease and signals ownership loss through
+        the execution event. Agent code only observes the signal; it does
+        not know how lease ownership is persisted or renewed.
+        """
+        if self.execution_ownership_lost is not None and self.execution_ownership_lost.is_set():
+            raise AgentExecutionOwnershipLostError("Agent execution lost durable run ownership.")
 
     def build_llm_messages(
         self,

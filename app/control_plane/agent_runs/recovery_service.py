@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -205,12 +206,15 @@ class AgentRunRecoveryService:
             await self._mark_failed(run, exc)
             raise exc
 
+        ownership_lost = asyncio.Event()
+
         heartbeat_task = asyncio.create_task(
             heartbeat_loop(
                 self._repository,
                 run_id=run.run_id,
                 lease_id=run.lease_id,
                 lease_seconds=self._lease_seconds,
+                ownership_lost=ownership_lost,
             )
         )
 
@@ -233,7 +237,10 @@ class AgentRunRecoveryService:
                 request,
                 checkpoint,
                 run_id=run.run_id,
+                execution_ownership_lost=ownership_lost,
             )
+        except AgentExecutionOwnershipLostError:
+            raise
         except Exception as exc:
             await self._mark_failed(run, exc)
             await self._emit(

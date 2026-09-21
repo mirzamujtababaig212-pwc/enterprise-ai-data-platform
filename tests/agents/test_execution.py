@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.models import AgentDefinition, AgentRequest
@@ -73,6 +76,43 @@ def make_context(
         tools=tools,
         llm=llm,
     )
+
+
+def test_execution_context_defaults_to_no_ownership_loss_signal() -> None:
+    context = make_context()
+
+    assert context.execution_ownership_lost is None
+
+
+def test_execution_context_allows_execution_when_ownership_is_valid() -> None:
+    ownership_lost = asyncio.Event()
+
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        execution_ownership_lost=ownership_lost,
+    )
+
+    context.raise_if_execution_ownership_lost()
+
+
+def test_execution_context_raises_when_ownership_is_lost() -> None:
+    ownership_lost = asyncio.Event()
+    ownership_lost.set()
+
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        execution_ownership_lost=ownership_lost,
+    )
+
+    with pytest.raises(
+        AgentExecutionOwnershipLostError,
+        match="lost durable run ownership",
+    ):
+        context.raise_if_execution_ownership_lost()
 
 
 def test_execution_context_defaults_to_no_run_id() -> None:

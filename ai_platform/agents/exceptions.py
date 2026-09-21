@@ -102,3 +102,7 @@ class AgentExecutionDurationLimitError(AgentExecutionBudgetError):
             f"Agent '{agent_name}' exceeded the maximum execution "
             f"duration ({max_duration_seconds} seconds)."
         )
+
+
+class AgentExecutionOwnershipLostError(RuntimeError):
+    """Raised when an agent execution loses ownership of its durable run."""

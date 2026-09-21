@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from typing import Any
 
 import pytest
@@ -12,6 +14,7 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import (
+    AgentExecutionOwnershipLostError,
     AgentLLMCallLimitError,
     AgentToolLoopLimitError,
 )
@@ -518,6 +521,122 @@ class FakeToolCallingLLMGateway:
                 "total_tokens": 35,
             },
         }
+
+
+class OwnershipLossDuringLLMGateway(FakeToolCallingLLMGateway):
+    def __init__(self, ownership_lost: asyncio.Event) -> None:
+        super().__init__()
+        self.ownership_lost = ownership_lost
+
+    async def route_chat(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        response = await super().route_chat(request)
+        self.ownership_lost.set()
+        return response
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_stops_before_llm_when_execution_ownership_is_already_lost() -> None:
+    ownership_lost = asyncio.Event()
+    ownership_lost.set()
+
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+        ),
+        tools=tools,
+        llm=llm_context,
+        execution_ownership_lost=ownership_lost,
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentExecutionOwnershipLostError,
+        match="lost durable run ownership",
+    ):
+        await agent.run(context)
+
+    assert gateway.requests == []
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_does_not_execute_tool_after_ownership_is_lost_during_llm_call() -> None:
+    ownership_lost = asyncio.Event()
+
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+        tool_names=("search",),
+    )
+
+    gateway = OwnershipLossDuringLLMGateway(ownership_lost)
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool = FakeTool(name="search")
+
+    registry = InMemoryToolRegistry()
+    await registry.register(tool)
+
+    tools = AgentToolContext(
+        registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+        ),
+        tools=tools,
+        llm=llm_context,
+        execution_ownership_lost=ownership_lost,
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentExecutionOwnershipLostError,
+        match="lost durable run ownership",
+    ):
+        await agent.run(context)
+
+    assert len(gateway.requests) == 1
+    assert tool.execution_count == 0
 
 
 @pytest.mark.asyncio
