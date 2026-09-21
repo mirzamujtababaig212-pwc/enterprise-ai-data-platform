@@ -249,8 +249,12 @@ async def test_execute_does_not_reclaim_ambiguous_external_outcome():
         tool_name="test_tool",
     )
 
-    await store.claim(key)
-    await store.mark_ambiguous(key)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
+    await store.mark_ambiguous(
+        key,
+        claim_token=claim.claim_token,
+    )
 
     service = ToolExecutionService(
         registry,

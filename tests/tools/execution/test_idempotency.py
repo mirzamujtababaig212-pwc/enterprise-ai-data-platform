@@ -85,8 +85,9 @@ async def test_completed_result_is_replayed() -> None:
         output={"status": "success"},
     )
 
-    await store.claim(key)
-    await store.complete(key, result)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
+    await store.complete(key, result, claim_token=claim.claim_token)
 
     claim = await store.claim(key)
 
@@ -104,8 +105,9 @@ async def test_failed_execution_can_release_key_for_future_execution() -> None:
         tool_name="test_tool",
     )
 
-    await store.claim(key)
-    await store.release(key)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
+    await store.release(key, claim_token=claim.claim_token)
 
     claim = await store.claim(key)
 
@@ -168,8 +170,12 @@ async def test_ambiguous_claim_is_not_reclaimable() -> None:
 
     first = await store.claim(key)
     assert first.status == ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
 
-    await store.mark_ambiguous(key)
+    await store.mark_ambiguous(
+        key,
+        claim_token=first.claim_token,
+    )
 
     second = await store.claim(key)
 
@@ -187,8 +193,11 @@ async def test_mark_ambiguous_requires_an_active_claim() -> None:
         tool_name="test_tool",
     )
 
-    with pytest.raises(RuntimeError, match="active claim"):
-        await store.mark_ambiguous(key)
+    with pytest.raises(RuntimeError, match="claim is no longer owned"):
+        await store.mark_ambiguous(
+            key,
+            claim_token="missing-claim-token",
+        )
 
 
 def test_external_idempotency_key_is_deterministic() -> None:

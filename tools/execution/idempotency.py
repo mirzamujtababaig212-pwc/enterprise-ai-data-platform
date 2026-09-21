@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import uuid4
 
 from tools.models import ToolExecutionResult
 
@@ -48,6 +49,7 @@ class ToolIdempotencyClaimStatus(StrEnum):
 class ToolIdempotencyClaim:
     status: ToolIdempotencyClaimStatus
     result: ToolExecutionResult | None = None
+    claim_token: str | None = None
 
 
 class ToolExecutionIdempotencyStore:
@@ -61,29 +63,40 @@ class ToolExecutionIdempotencyStore:
         self,
         key: ToolExecutionIdempotencyKey,
         result: ToolExecutionResult,
+        *,
+        claim_token: str,
     ) -> None:
         raise NotImplementedError
 
     async def release(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         raise NotImplementedError
 
     async def mark_ambiguous(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         raise NotImplementedError
 
 
-class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
+class InMemoryToolExecutionIdempotencyStore(
+    ToolExecutionIdempotencyStore,
+):
     def __init__(self) -> None:
         self._completed: dict[
             ToolExecutionIdempotencyKey,
             ToolExecutionResult,
         ] = {}
-        self._in_progress: set[ToolExecutionIdempotencyKey] = set()
+        self._in_progress: dict[
+            ToolExecutionIdempotencyKey,
+            str,
+        ] = {}
         self._ambiguous: set[ToolExecutionIdempotencyKey] = set()
         self._lock = asyncio.Lock()
 
@@ -110,35 +123,64 @@ class InMemoryToolExecutionIdempotencyStore(ToolExecutionIdempotencyStore):
                     status=ToolIdempotencyClaimStatus.IN_PROGRESS,
                 )
 
-            self._in_progress.add(key)
+            claim_token = str(uuid4())
+            self._in_progress[key] = claim_token
 
             return ToolIdempotencyClaim(
                 status=ToolIdempotencyClaimStatus.CLAIMED,
+                claim_token=claim_token,
             )
 
     async def complete(
         self,
         key: ToolExecutionIdempotencyKey,
         result: ToolExecutionResult,
+        *,
+        claim_token: str,
     ) -> None:
         async with self._lock:
-            self._in_progress.discard(key)
+            current_token = self._in_progress.get(key)
+
+            if current_token != claim_token:
+                raise RuntimeError(
+                    "Unable to complete idempotency record because the "
+                    "claim is no longer owned by the caller."
+                )
+
+            self._in_progress.pop(key)
             self._completed[key] = result
 
     async def release(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         async with self._lock:
-            self._in_progress.discard(key)
+            current_token = self._in_progress.get(key)
+
+            if current_token != claim_token:
+                raise RuntimeError(
+                    "Unable to release idempotency record because the "
+                    "claim is no longer owned by the caller."
+                )
+
+            self._in_progress.pop(key)
 
     async def mark_ambiguous(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         async with self._lock:
-            if key not in self._in_progress:
-                raise RuntimeError("Cannot mark tool execution ambiguous without an active claim.")
+            current_token = self._in_progress.get(key)
 
-            self._in_progress.discard(key)
+            if current_token != claim_token:
+                raise RuntimeError(
+                    "Unable to mark idempotency record ambiguous because "
+                    "the claim is no longer owned by the caller."
+                )
+
+            self._in_progress.pop(key)
             self._ambiguous.add(key)

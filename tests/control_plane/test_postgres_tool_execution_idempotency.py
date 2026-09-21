@@ -2,7 +2,7 @@ import asyncio
 import os
 
 import pytest
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, delete, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from app.control_plane.persistence.models import (
@@ -46,6 +46,24 @@ def make_result(
         success=True,
         output={"value": 42} if output is None else output,
     )
+
+
+def clear_integration_key(
+    session_factory,
+    key: ToolExecutionIdempotencyKey,
+) -> None:
+    session = session_factory()
+    try:
+        session.execute(
+            delete(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == key.run_id,
+                ToolExecutionIdempotencyRecord.call_id == key.call_id,
+                ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
 
 
 @pytest.fixture()
@@ -112,8 +130,12 @@ async def test_ambiguous_claim_is_durable(repository) -> None:
     claim = await store.claim(key)
 
     assert claim.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert claim.claim_token is not None
 
-    await store.mark_ambiguous(key)
+    await store.mark_ambiguous(
+        key,
+        claim_token=claim.claim_token,
+    )
 
     session = session_factory()
     try:
@@ -143,8 +165,12 @@ async def test_ambiguous_claim_is_not_reclaimable(repository) -> None:
     first = await store.claim(key)
 
     assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
 
-    await store.mark_ambiguous(key)
+    await store.mark_ambiguous(
+        key,
+        claim_token=first.claim_token,
+    )
 
     second = await store.claim(key)
 
@@ -159,8 +185,13 @@ async def test_completed_result_is_replayed(repository) -> None:
 
     result = make_result()
 
-    await store.claim(key)
-    await store.complete(key, result)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
+    await store.complete(
+        key,
+        result,
+        claim_token=claim.claim_token,
+    )
 
     replay = await store.claim(key)
 
@@ -240,8 +271,12 @@ async def test_release_allows_future_claim(repository) -> None:
 
     first = await store.claim(key)
     assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
 
-    await store.release(key)
+    await store.release(
+        key,
+        claim_token=first.claim_token,
+    )
 
     second = await store.claim(key)
 
@@ -264,11 +299,16 @@ async def test_non_json_output_is_not_persisted(repository) -> None:
     _, _, store = repository
     key = make_key()
 
-    await store.claim(key)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
 
     result = make_result(output={"invalid": {1, 2, 3}})
 
-    await store.complete(key, result)
+    await store.complete(
+        key,
+        result,
+        claim_token=claim.claim_token,
+    )
 
     replay = await store.claim(key)
 
@@ -281,7 +321,8 @@ async def test_failed_result_releases_claim(repository) -> None:
     _, _, store = repository
     key = make_key()
 
-    await store.claim(key)
+    claim = await store.claim(key)
+    assert claim.claim_token is not None
 
     result = ToolExecutionResult(
         tool_name=key.tool_name,
@@ -290,7 +331,11 @@ async def test_failed_result_releases_claim(repository) -> None:
         failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
     )
 
-    await store.complete(key, result)
+    await store.complete(
+        key,
+        result,
+        claim_token=claim.claim_token,
+    )
 
     next_claim = await store.claim(key)
 
@@ -343,7 +388,7 @@ async def test_postgres_cross_session_claim_has_single_owner(
         tool_name="postgres_race_tool",
     )
 
-    await stores[0].release(key)
+    clear_integration_key(session_factory, key)
 
     first, second = await asyncio.gather(
         stores[0].claim(key),
@@ -357,8 +402,15 @@ async def test_postgres_cross_session_claim_has_single_owner(
         ToolIdempotencyClaimStatus.IN_PROGRESS,
     }
 
-    await stores[0].release(key)
-    await stores[1].release(key)
+    owner = first if first.status is ToolIdempotencyClaimStatus.CLAIMED else second
+    assert owner.claim_token is not None
+
+    owner_store = stores[0] if first.status is ToolIdempotencyClaimStatus.CLAIMED else stores[1]
+
+    await owner_store.release(
+        key,
+        claim_token=owner.claim_token,
+    )
 
 
 @pytest.mark.asyncio
@@ -376,13 +428,17 @@ async def test_postgres_ambiguous_claim_survives_restarted_store(
     first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
 
     # Ensure the test can be rerun against the same integration database.
-    await first_store.release(key)
+    clear_integration_key(session_factory, key)
 
     first = await first_store.claim(key)
 
     assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
 
-    await first_store.mark_ambiguous(key)
+    await first_store.mark_ambiguous(
+        key,
+        claim_token=first.claim_token,
+    )
 
     # Simulate a process restart: the second store has no in-memory state.
     second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
@@ -391,3 +447,118 @@ async def test_postgres_ambiguous_claim_survives_restarted_store(
 
     assert second.status is ToolIdempotencyClaimStatus.AMBIGUOUS
     assert second.result is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_completed_result_replays_across_restarted_store(
+    postgres_sessions,
+) -> None:
+    _, session_factory = postgres_sessions
+
+    key = make_key(
+        run_id="postgres-completed-run",
+        call_id="postgres-completed-call",
+        tool_name="postgres_completed_tool",
+    )
+
+    first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    # Ensure the test can be rerun against the same integration database.
+    clear_integration_key(session_factory, key)
+
+    result = make_result(
+        tool_name=key.tool_name,
+        output={"vehicle_id": "V-100", "status": "processed"},
+    )
+
+    first = await first_store.claim(key)
+
+    assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
+
+    await first_store.complete(
+        key,
+        result,
+        claim_token=first.claim_token,
+    )
+
+    # Simulate a process restart: the second store has no in-memory state.
+    second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    replay = await second_store.claim(key)
+
+    assert replay.status is ToolIdempotencyClaimStatus.COMPLETED
+    assert replay.result == result
+
+
+@pytest.mark.asyncio
+async def test_postgres_stale_completion_cannot_complete_released_claim(
+    postgres_sessions,
+) -> None:
+    _, session_factory = postgres_sessions
+
+    key = make_key(
+        run_id="postgres-stale-completion-run",
+        call_id="postgres-stale-completion-call",
+        tool_name="postgres-stale-completion-tool",
+    )
+
+    first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+    second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    # Ensure the test can be rerun against the same integration database.
+    clear_integration_key(session_factory, key)
+
+    first = await first_store.claim(key)
+
+    assert first.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert first.claim_token is not None
+
+    first_token = first.claim_token
+
+    # Worker A loses its claim before completing the external operation.
+    await first_store.release(
+        key,
+        claim_token=first_token,
+    )
+
+    # Worker B subsequently acquires the same logical operation.
+    second = await second_store.claim(key)
+
+    assert second.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert second.claim_token is not None
+    assert second.claim_token != first_token
+
+    # Worker A is stale and must not be able to complete Worker B's claim.
+    with pytest.raises(RuntimeError, match="claim is no longer owned"):
+        await first_store.complete(
+            key,
+            make_result(
+                tool_name=key.tool_name,
+                output={"owner": "stale-worker"},
+            ),
+            claim_token=first_token,
+        )
+
+    # Worker B's claim must remain active after the stale completion attempt.
+    in_progress = await first_store.claim(key)
+
+    assert in_progress.status is ToolIdempotencyClaimStatus.IN_PROGRESS
+
+    # Worker B can still complete its own claim.
+    current_result = make_result(
+        tool_name=key.tool_name,
+        output={"owner": "current-worker"},
+    )
+
+    await second_store.complete(
+        key,
+        current_result,
+        claim_token=second.claim_token,
+    )
+
+    # A replay must observe Worker B's durable result.
+    replay = await first_store.claim(key)
+
+    assert replay.status is ToolIdempotencyClaimStatus.COMPLETED
+    assert replay.result == current_result

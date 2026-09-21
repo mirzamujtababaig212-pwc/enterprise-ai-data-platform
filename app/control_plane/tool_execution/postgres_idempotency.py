@@ -5,6 +5,8 @@ from collections.abc import Callable
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
+from uuid import uuid4
+
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.models import ToolExecutionIdempotencyRecord
@@ -35,12 +37,15 @@ class PostgreSQLToolExecutionIdempotencyStore(
         session = self._session_factory()
 
         try:
+            claim_token = str(uuid4())
+
             record = ToolExecutionIdempotencyRecord(
                 run_id=key.run_id,
                 call_id=key.call_id,
                 tool_name=key.tool_name,
                 status=ToolIdempotencyClaimStatus.CLAIMED.value,
                 success=False,
+                claim_token=claim_token,
             )
 
             try:
@@ -50,6 +55,7 @@ class PostgreSQLToolExecutionIdempotencyStore(
 
                 return ToolIdempotencyClaim(
                     status=ToolIdempotencyClaimStatus.CLAIMED,
+                    claim_token=claim_token,
                 )
 
             except IntegrityError:
@@ -89,15 +95,17 @@ class PostgreSQLToolExecutionIdempotencyStore(
         self,
         key: ToolExecutionIdempotencyKey,
         result: ToolExecutionResult,
+        *,
+        claim_token: str,
     ) -> None:
         if not result.success:
-            await self.release(key)
+            await self.release(key, claim_token=claim_token)
             return
 
         try:
             json.dumps(result.output)
         except (TypeError, ValueError):
-            await self.release(key)
+            await self.release(key, claim_token=claim_token)
             return
 
         session = self._session_factory()
@@ -111,6 +119,7 @@ class PostgreSQLToolExecutionIdempotencyStore(
                     ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
                     ToolExecutionIdempotencyRecord.status
                     == ToolIdempotencyClaimStatus.CLAIMED.value,
+                    ToolExecutionIdempotencyRecord.claim_token == claim_token,
                 )
                 .values(
                     status=ToolIdempotencyClaimStatus.COMPLETED.value,
@@ -145,6 +154,8 @@ class PostgreSQLToolExecutionIdempotencyStore(
     async def release(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         session = self._session_factory()
 
@@ -153,10 +164,19 @@ class PostgreSQLToolExecutionIdempotencyStore(
                 ToolExecutionIdempotencyRecord.run_id == key.run_id,
                 ToolExecutionIdempotencyRecord.call_id == key.call_id,
                 ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
+                ToolExecutionIdempotencyRecord.claim_token == claim_token,
             )
 
             try:
-                session.execute(statement)
+                deleted = session.execute(statement)
+
+                if deleted.rowcount != 1:
+                    session.rollback()
+                    raise RuntimeError(
+                        "Unable to release idempotency record because the "
+                        "claim is no longer owned by the caller."
+                    )
+
                 session.commit()
             except Exception:
                 session.rollback()
@@ -167,6 +187,8 @@ class PostgreSQLToolExecutionIdempotencyStore(
     async def mark_ambiguous(
         self,
         key: ToolExecutionIdempotencyKey,
+        *,
+        claim_token: str,
     ) -> None:
         session = self._session_factory()
 
@@ -179,6 +201,7 @@ class PostgreSQLToolExecutionIdempotencyStore(
                     ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
                     ToolExecutionIdempotencyRecord.status
                     == ToolIdempotencyClaimStatus.CLAIMED.value,
+                    ToolExecutionIdempotencyRecord.claim_token == claim_token,
                 )
                 .values(
                     status=ToolIdempotencyClaimStatus.AMBIGUOUS.value,

@@ -223,6 +223,11 @@ class ToolExecutionIdempotencyRecord(Base):
         nullable=False,
         index=True,
     )
+    claim_token: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
 
     success: Mapped[bool] = mapped_column(
         nullable=False,

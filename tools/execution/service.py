@@ -142,6 +142,7 @@ class ToolExecutionService:
                 )
 
         idempotency_key = None
+        claim_token = None
         ownership_outcome_ambiguous = False
 
         if (
@@ -157,6 +158,13 @@ class ToolExecutionService:
             )
 
             claim = await self.idempotency_store.claim(idempotency_key)
+
+            if claim.status == ToolIdempotencyClaimStatus.CLAIMED:
+                claim_token = claim.claim_token
+                if claim_token is None:
+                    raise RuntimeError(
+                        "Idempotency store returned a claimed state without " "a claim token."
+                    )
 
             if claim.status == ToolIdempotencyClaimStatus.AMBIGUOUS:
                 return ToolExecutionResult(
@@ -218,7 +226,10 @@ class ToolExecutionService:
                         ownership_outcome_ambiguous = True
 
                         if idempotency_key is not None:
-                            await self.idempotency_store.mark_ambiguous(idempotency_key)
+                            await self.idempotency_store.mark_ambiguous(
+                                idempotency_key,
+                                claim_token=claim_token,
+                            )
 
                         raise ToolExecutionOwnershipLostError(
                             "Tool execution completed after durable run ownership was lost."
@@ -234,6 +245,7 @@ class ToolExecutionService:
                         await self.idempotency_store.complete(
                             idempotency_key,
                             result,
+                            claim_token=claim_token,
                         )
 
                     return result
@@ -250,7 +262,10 @@ class ToolExecutionService:
                         ownership_outcome_ambiguous = True
 
                         if idempotency_key is not None:
-                            await self.idempotency_store.mark_ambiguous(idempotency_key)
+                            await self.idempotency_store.mark_ambiguous(
+                                idempotency_key,
+                                claim_token=claim_token,
+                            )
 
                         raise ToolExecutionOwnershipLostError(
                             "Tool execution lost durable run ownership during tool execution."
@@ -281,7 +296,10 @@ class ToolExecutionService:
 
                 if not should_retry:
                     if idempotency_key is not None:
-                        await self.idempotency_store.release(idempotency_key)
+                        await self.idempotency_store.release(
+                            idempotency_key,
+                            claim_token=claim_token,
+                        )
                     return result
 
                 if policy.backoff_seconds > 0:
@@ -290,7 +308,10 @@ class ToolExecutionService:
             raise RuntimeError("Tool execution retry loop exited unexpectedly.")
         except BaseException:
             if idempotency_key is not None and not ownership_outcome_ambiguous:
-                await self.idempotency_store.release(idempotency_key)
+                await self.idempotency_store.release(
+                    idempotency_key,
+                    claim_token=claim_token,
+                )
             raise
 
     async def _audit_authorization(
