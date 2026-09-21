@@ -319,6 +319,69 @@ async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owne
 
 
 @pytest.mark.asyncio
+async def test_recovery_cancellation_does_not_mutate_run_after_lease_loss():
+    class LeaseLostRepository(RecordingRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancel_if_owner_called = False
+
+        def cancel_if_owner(
+            self,
+            run_id,
+            *,
+            lease_id,
+            completed_at,
+        ):
+            self.cancel_if_owner_called = True
+            return None
+
+    repository = LeaseLostRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    checkpoint_repository = FakeCheckpointRepository(checkpoint())
+    runtime = CancellationBlockingRuntime()
+    cancellation_registry = AgentRunCancellationRegistry()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=checkpoint_repository,
+        cancellation_registry=cancellation_registry,
+    )
+
+    recovery_task = asyncio.create_task(
+        service.recover("run-123"),
+    )
+
+    await runtime.started.wait()
+
+    registered_task = cancellation_registry._tasks.get("run-123")
+    assert registered_task is recovery_task
+
+    cancelled = cancellation_registry.cancel("run-123")
+
+    assert cancelled is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_task
+
+    assert runtime.cancelled is True
+    assert repository.cancel_if_owner_called is True
+    assert repository.complete_call is None
+    assert repository.fail_call is None
+
+    recovered = repository.get("run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.RUNNING
+    assert "run-123" not in cancellation_registry._tasks
+
+
+@pytest.mark.asyncio
 async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
     repository = RecordingRepository()
 

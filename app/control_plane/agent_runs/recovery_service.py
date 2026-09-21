@@ -226,6 +226,11 @@ class AgentRunRecoveryService:
         )
 
         try:
+            if execution_task is not None:
+                current_run = self._repository.get(run.run_id)
+                if current_run is not None and current_run.cancellation_requested:
+                    execution_task.cancel()
+
             checkpoint = self._checkpoints_repository.get_latest(run.run_id)
 
             if checkpoint is None:

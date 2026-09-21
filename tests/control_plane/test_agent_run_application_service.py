@@ -212,6 +212,92 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
 
 
 @pytest.mark.asyncio
+async def test_execute_cancels_when_cancellation_is_requested_during_registration_gap():
+    repository = _repository()
+
+    class BlockingRuntime:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def run(
+            self,
+            agent_name,
+            request,
+            *,
+            run_id=None,
+            execution_ownership_lost=None,
+        ):
+            self.started.set()
+
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    runtime = BlockingRuntime()
+
+    running_run = None
+    cancellation_checked = False
+
+    original_update = repository.update.side_effect
+
+    def capture_running_run(run):
+        nonlocal running_run
+        running_run = run
+        return original_update(run)
+
+    repository.update.side_effect = capture_running_run
+
+    def get_with_registration_race(run_id: str):
+        nonlocal cancellation_checked
+
+        if running_run is None:
+            return None
+
+        if not cancellation_checked:
+            cancellation_checked = True
+            return running_run.model_copy(
+                update={
+                    "cancellation_requested": True,
+                    "cancellation_requested_at": datetime.now(UTC),
+                }
+            )
+
+        return running_run
+
+    repository.get.side_effect = get_with_registration_race
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    execution_task = asyncio.create_task(
+        service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="session-1",
+                user_id="user-1",
+            ),
+        )
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+
+    assert cancellation_checked is True
+    assert runtime.cancelled is True
+    repository.cancel_if_owner.assert_called_once()
+    assert hasattr(repository, "cancelled_run")
+    assert repository.cancelled_run.status is AgentRunStatus.CANCELLED
+    repository.complete_if_owner.assert_not_called()
+    repository.fail_if_owner.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_execute_uses_one_run_id_across_lifecycle() -> None:
     repository = _repository()
 

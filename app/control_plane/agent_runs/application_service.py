@@ -155,6 +155,10 @@ class AgentRunApplicationService:
             self._cancellation_registry.register(run.run_id, execution_task)
 
         try:
+            current_run = self._repository.get(run.run_id)
+            if current_run is not None and current_run.cancellation_requested:
+                execution_task.cancel()
+
             response = await self._runtime.run(
                 agent_name,
                 request,
