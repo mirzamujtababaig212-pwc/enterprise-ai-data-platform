@@ -152,6 +152,7 @@ class AgentRuntime:
             history=checkpoint.messages,
             memory=None,
             run_id=run_id,
+            execution_ownership_lost=execution_ownership_lost,
         )
 
         return await resume_agent(context, checkpoint)

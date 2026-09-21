@@ -1128,6 +1128,79 @@ async def test_runtime_resume_uses_checkpoint_history_without_rebuilding_memory(
 
 
 @pytest.mark.asyncio
+async def test_runtime_resume_propagates_execution_ownership_loss_signal():
+    import asyncio
+
+    from ai_platform.agents.checkpoint import (
+        AgentCheckpointPosition,
+        AgentExecutionCheckpoint,
+    )
+    from ai_platform.agents.llm_messages import user_message
+
+    registry = InMemoryAgentRegistry()
+
+    class RecoverableTestAgent:
+        def __init__(self):
+            self._definition = AgentDefinition(
+                name="recoverable-agent",
+                description="Recoverable test agent.",
+                system_prompt="You are a recoverable test agent.",
+                model="test-model",
+            )
+            self.last_context = None
+
+        @property
+        def definition(self):
+            return self._definition
+
+        async def run(self, context):
+            raise AssertionError("run() must not be called during recovery")
+
+        async def resume(self, context, checkpoint):
+            self.last_context = context
+            return AgentResponse(
+                agent_name=self.definition.name,
+                output="recovered",
+                session_id=context.session_id,
+            )
+
+    agent = RecoverableTestAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=1,
+        run_id="run-ownership-123",
+        agent_name="recoverable-agent",
+        session_id="session-123",
+        user_id="user-123",
+        messages=(user_message("Original request"),),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    ownership_lost = asyncio.Event()
+
+    response = await runtime.resume(
+        "recoverable-agent",
+        AgentRequest(
+            input="Original request",
+            session_id="session-123",
+            user_id="user-123",
+            memory_namespace="project-a",
+        ),
+        checkpoint,
+        run_id="run-ownership-123",
+        execution_ownership_lost=ownership_lost,
+    )
+
+    assert response.output == "recovered"
+    assert agent.last_context.execution_ownership_lost is ownership_lost
+
+
+@pytest.mark.asyncio
 async def test_runtime_resume_rejects_non_recoverable_agent():
     from ai_platform.agents.checkpoint import (
         AgentCheckpointPosition,
