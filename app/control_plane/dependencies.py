@@ -31,6 +31,10 @@ from rag.retrieval.retriever import SemanticRetriever
 from rag.contracts import Retriever, VectorStore
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.rag.search import RAGSearchTool
+from tools.authorization.in_memory import InMemoryToolAuthorizer
+from tools.authorization.service import ToolAuthorizationService
+from data_platform.vehicle.service import VehicleDataService
+from tools.vehicle.data_query import VehicleDataQueryTool
 
 from app.config.settings import Settings
 from common.config.settings import Settings as CommonSettings
@@ -95,15 +99,23 @@ _tool_authorization_audit_sink = ToolAuthorizationAuditObserver(
     _agent_observer,
 )
 
+_tool_authorizer = InMemoryToolAuthorizer()
+_tool_authorization_service = ToolAuthorizationService(
+    _tool_authorizer,
+)
+
 _tool_idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
     SessionLocal,
 )
 
 _tool_execution_service = ToolExecutionService(
     _tool_registry,
+    authorization_service=_tool_authorization_service,
     audit_sink=_tool_authorization_audit_sink,
     idempotency_store=_tool_idempotency_store,
 )
+
+_vehicle_data_service = VehicleDataService()
 
 _memory_store = MemoryStoreFactory.create()
 
@@ -227,6 +239,16 @@ async def _initialize_agents() -> None:
         rag_search_tool = RAGSearchTool(_rag_retriever)
         await _tool_registry.register(rag_search_tool)
 
+        vehicle_data_query_tool = VehicleDataQueryTool(
+            _vehicle_data_service,
+        )
+        await _tool_registry.register(vehicle_data_query_tool)
+
+        await _tool_authorizer.allow(
+            "enterprise-demo-user",
+            "vehicle.data.query",
+        )
+
         analyst_definition = AgentDefinition(
             name="enterprise-analyst",
             description=(
@@ -253,15 +275,20 @@ async def _initialize_agents() -> None:
             system_prompt=(
                 "You are an enterprise RAG analyst. "
                 "Use the rag.search tool when relevant enterprise "
-                "knowledge is needed. Ground your answer in retrieved "
-                "sources and clearly distinguish retrieved information "
-                "from general reasoning. Do not invent facts that are "
-                "not supported by the available context."
+                "knowledge is needed. Use vehicle.data.query when "
+                "structured vehicle telemetry evidence is required. "
+                "Ground your answer in retrieved sources and structured "
+                "enterprise data, and clearly distinguish retrieved "
+                "information from general reasoning. Do not invent facts "
+                "that are not supported by the available context."
             ),
             model=settings.DEFAULT_CHAT_MODEL,
             temperature=0.2,
             max_tokens=2048,
-            tool_names=("rag.search",),
+            tool_names=(
+                "rag.search",
+                "vehicle.data.query",
+            ),
         )
 
         await _agent_registry.register(

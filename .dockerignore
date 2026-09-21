@@ -80,3 +80,10 @@ dist/
 # Environment files
 .env
 .env.*
+
+# Terraform generated provider directories
+terraform/**/.terraform/
+
+# Terraform state files/backups
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*

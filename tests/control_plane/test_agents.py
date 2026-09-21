@@ -206,7 +206,10 @@ async def test_agent_runtime_initializes_rag_enabled_agent() -> None:
     rag_agent = await runtime._registry.get("enterprise-rag-analyst")
 
     assert rag_agent is not None
-    assert rag_agent.definition.tool_names == ("rag.search",)
+    assert rag_agent.definition.tool_names == (
+        "rag.search",
+        "vehicle.data.query",
+    )
 
     tools = await dependencies._tool_registry.list_tools()
 
@@ -405,7 +408,6 @@ def test_list_agent_runs_serializes_all_lifecycle_statuses() -> None:
         "running",
         "completed",
         "failed",
-        "cancelled",
         "rejected",
         "cancelled",
     }
