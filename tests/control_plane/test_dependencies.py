@@ -130,6 +130,7 @@ async def test_get_agent_run_application_service_uses_configured_lease_duration(
         provider_credentials={},
         external_evaluation_release_required=False,
         agent_run_lease_duration_seconds=123,
+        agent_run_max_recovery_attempts=3,
     )
 
     monkeypatch.setattr(
@@ -167,6 +168,7 @@ async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
         provider_credentials={},
         external_evaluation_release_required=False,
         agent_run_lease_duration_seconds=123,
+        agent_run_max_recovery_attempts=3,
     )
 
     monkeypatch.setattr(
