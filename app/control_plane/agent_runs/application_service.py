@@ -162,6 +162,7 @@ class AgentRunApplicationService:
             response = await self._runtime.run(
                 agent_name,
                 request,
+                lease_id=lease_id,
                 run_id=run.run_id,
                 execution_ownership_lost=ownership_lost,
             )

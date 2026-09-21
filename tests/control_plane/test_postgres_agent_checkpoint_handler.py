@@ -45,9 +45,11 @@ class FakeRepository:
     def __init__(self, session) -> None:
         self.session = session
         self.saved = []
+        self.saved_lease_ids = []
 
-    def save(self, checkpoint):
+    def save(self, checkpoint, *, lease_id=None):
         self.saved.append(checkpoint)
+        self.saved_lease_ids.append(lease_id)
         return checkpoint
 
 
@@ -65,21 +67,22 @@ async def test_handler_persists_checkpoint_and_closes_session(monkeypatch):
     handler = PostgreSQLAgentCheckpointHandler(lambda: session)
     checkpoint = make_checkpoint()
 
-    await handler.save(checkpoint)
+    await handler.save(checkpoint, lease_id="lease-1")
 
     assert repository.saved == [checkpoint]
+    assert repository.saved_lease_ids == ["lease-1"]
     assert session.closed is True
 
 
 @pytest.mark.asyncio
-async def test_handler_does_not_raise_when_persistence_fails(monkeypatch):
+async def test_handler_propagates_persistence_failure_and_closes_session(monkeypatch):
     session = FakeSession()
 
     class FailingRepository:
         def __init__(self, supplied_session) -> None:
             pass
 
-        def save(self, checkpoint):
+        def save(self, checkpoint, *, lease_id=None):
             raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(
@@ -90,6 +93,7 @@ async def test_handler_does_not_raise_when_persistence_fails(monkeypatch):
 
     handler = PostgreSQLAgentCheckpointHandler(lambda: session)
 
-    await handler.save(make_checkpoint())
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await handler.save(make_checkpoint(), lease_id="lease-1")
 
     assert session.closed is True

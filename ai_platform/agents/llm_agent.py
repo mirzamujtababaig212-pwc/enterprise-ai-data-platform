@@ -231,7 +231,8 @@ class LLMAgent:
                     execution_budget_state=ExecutionBudgetState.from_dict(
                         context.execution_budget_state.to_dict()
                     ),
-                )
+                ),
+                lease_id=context.lease_id,
             )
 
     async def _accumulate_tool_call_messages(
@@ -277,7 +278,8 @@ class LLMAgent:
                     execution_budget_state=ExecutionBudgetState.from_dict(
                         context.execution_budget_state.to_dict()
                     ),
-                )
+                ),
+                lease_id=context.lease_id,
             )
 
         context.raise_if_execution_ownership_lost()

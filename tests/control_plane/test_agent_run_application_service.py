@@ -206,6 +206,7 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
             session_id="session-1",
             user_id="user-1",
         ),
+        lease_id=running.lease_id,
         run_id=pending.run_id,
         execution_ownership_lost=runtime.run.await_args.kwargs["execution_ownership_lost"],
     )
@@ -225,6 +226,7 @@ async def test_execute_cancels_when_cancellation_is_requested_during_registratio
             agent_name,
             request,
             *,
+            lease_id=None,
             run_id=None,
             execution_ownership_lost=None,
         ):

@@ -70,6 +70,7 @@ class FakeRuntime:
         checkpoint,
         *,
         run_id=None,
+        lease_id=None,
         execution_ownership_lost=None,
     ):
         self.calls.append(
@@ -270,7 +271,12 @@ class CrashBoundaryCheckpointHandler:
         self._session_factory = session_factory
         self.suppress_after_tool_checkpoint = True
 
-    async def save(self, checkpoint: AgentExecutionCheckpoint) -> None:
+    async def save(
+        self,
+        checkpoint: AgentExecutionCheckpoint,
+        *,
+        lease_id: str | None = None,
+    ) -> None:
         if (
             self.suppress_after_tool_checkpoint
             and checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION

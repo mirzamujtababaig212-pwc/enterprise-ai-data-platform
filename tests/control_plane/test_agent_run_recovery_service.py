@@ -226,6 +226,7 @@ class FakeRuntime:
         checkpoint,
         *,
         run_id=None,
+        lease_id=None,
         execution_ownership_lost=None,
     ):
         self.calls.append(
@@ -257,6 +258,7 @@ class CancellationBlockingRuntime:
         checkpoint,
         *,
         run_id=None,
+        lease_id=None,
         execution_ownership_lost=None,
     ):
         self.started.set()
@@ -500,6 +502,7 @@ async def test_recovery_propagates_execution_ownership_loss_without_marking_fail
             checkpoint,
             *,
             run_id=None,
+            lease_id=None,
             execution_ownership_lost=None,
         ):
             raise AgentExecutionOwnershipLostError("Agent execution lost durable run ownership.")
@@ -548,6 +551,7 @@ async def test_recovery_emits_started_and_failed_events_on_resume_failure():
             checkpoint,
             *,
             run_id=None,
+            lease_id=None,
             execution_ownership_lost=None,
         ):
             raise ValueError("LLM provider unavailable")
@@ -754,6 +758,7 @@ async def test_recovery_marks_run_failed_when_runtime_resume_fails():
             checkpoint,
             *,
             run_id=None,
+            lease_id=None,
             execution_ownership_lost=None,
         ):
             raise ValueError("LLM provider unavailable")
@@ -1224,6 +1229,7 @@ async def test_recover_stale_runs_continues_after_one_run_fails():
             checkpoint,
             *,
             run_id=None,
+            lease_id=None,
             execution_ownership_lost=None,
         ):
             self.calls.append(

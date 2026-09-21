@@ -71,6 +71,7 @@ class AgentRuntime:
         checkpoint: AgentExecutionCheckpoint,
         *,
         run_id: str | None = None,
+        lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
     ) -> AgentResponse:
         """
@@ -152,6 +153,7 @@ class AgentRuntime:
             history=checkpoint.messages,
             memory=None,
             run_id=run_id,
+            lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
         )
 
@@ -164,6 +166,7 @@ class AgentRuntime:
         *,
         history: tuple[AgentMessage, ...] = (),
         run_id: str | None = None,
+        lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
     ) -> AgentResponse:
         if not agent_name.strip():
@@ -240,6 +243,7 @@ class AgentRuntime:
             history=history,
             memory=memory_context,
             run_id=run_id,
+            lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
         )
 

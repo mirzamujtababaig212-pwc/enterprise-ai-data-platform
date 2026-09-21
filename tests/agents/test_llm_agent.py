@@ -1050,6 +1050,8 @@ class FakeAgentCheckpointHandler:
     async def save(
         self,
         checkpoint: AgentExecutionCheckpoint,
+        *,
+        lease_id: str | None = None,
     ) -> None:
         self.checkpoints.append(checkpoint)
 
@@ -1066,6 +1068,8 @@ class FailingAgentCheckpointHandler:
     async def save(
         self,
         checkpoint: AgentExecutionCheckpoint,
+        *,
+        lease_id: str | None = None,
     ) -> None:
         self.attempted_checkpoints.append(checkpoint)
         if checkpoint.position is self.fail_position:

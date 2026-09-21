@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import create_engine, delete, inspect
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,9 @@ from ai_platform.agents.checkpoint import (
     AgentExecutionCheckpoint,
 )
 from ai_platform.agents.llm_messages import AgentMessage, AgentMessageRole
+from app.control_plane.agent_checkpoints.exceptions import (
+    AgentCheckpointOwnershipLostError,
+)
 from app.control_plane.agent_checkpoints.postgres_repository import (
     PostgreSQLAgentCheckpointsRepository,
 )
@@ -357,6 +362,168 @@ def test_postgres_get_latest_returns_newest_checkpoint(
         assert (
             restored.execution_budget_state.tool_rounds == second.execution_budget_state.tool_rounds
         )
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
+        )
+        session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+        session.commit()
+
+
+def test_postgres_save_with_active_lease_succeeds(postgres_repository) -> None:
+    _, session, checkpoint_repository = postgres_repository
+    run_id = "checkpoint-postgres-active-lease"
+    lease_id = "lease-active"
+    run_repository = PostgreSQLAgentRunRepository(session)
+
+    try:
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="vehicle-agent",
+                session_id="session-1",
+                user_id="user-1",
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+
+        run_record = session.get(AgentRunRecord, run_id)
+        assert run_record is not None
+        run_record.lease_id = lease_id
+        run_record.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        session.commit()
+
+        checkpoint = make_checkpoint(run_id=run_id)
+
+        result = checkpoint_repository.save(
+            checkpoint,
+            lease_id=lease_id,
+        )
+
+        assert result == checkpoint
+
+        restored = checkpoint_repository.get_latest(run_id)
+        assert restored is not None
+        assert restored.run_id == checkpoint.run_id
+        assert restored.tool_round == checkpoint.tool_round
+        assert restored.position == checkpoint.position
+        assert restored.metadata == checkpoint.metadata
+        assert restored.messages == checkpoint.messages
+        assert (
+            restored.execution_budget_state.llm_calls == checkpoint.execution_budget_state.llm_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_calls
+            == checkpoint.execution_budget_state.tool_calls
+        )
+        assert (
+            restored.execution_budget_state.tool_rounds
+            == checkpoint.execution_budget_state.tool_rounds
+        )
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
+        )
+        session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+        session.commit()
+
+
+def test_postgres_save_rejects_expired_lease(postgres_repository) -> None:
+    _, session, checkpoint_repository = postgres_repository
+    run_id = "checkpoint-postgres-expired-lease"
+    lease_id = "lease-expired"
+    run_repository = PostgreSQLAgentRunRepository(session)
+
+    try:
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="vehicle-agent",
+                session_id="session-1",
+                user_id="user-1",
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+
+        run_record = session.get(AgentRunRecord, run_id)
+        assert run_record is not None
+        run_record.lease_id = lease_id
+        run_record.lease_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        session.commit()
+
+        checkpoint = make_checkpoint(run_id=run_id)
+
+        with pytest.raises(
+            AgentCheckpointOwnershipLostError,
+            match="no longer owns the active run lease",
+        ):
+            checkpoint_repository.save(
+                checkpoint,
+                lease_id=lease_id,
+            )
+
+        assert checkpoint_repository.get_latest(run_id) is None
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)
+        )
+        session.execute(delete(AgentRunRecord).where(AgentRunRecord.run_id == run_id))
+        session.commit()
+
+
+def test_postgres_save_rejects_stale_lease_after_takeover(
+    postgres_repository,
+) -> None:
+    _, session, checkpoint_repository = postgres_repository
+    run_id = "checkpoint-postgres-stale-lease"
+    old_lease_id = "lease-old"
+    new_lease_id = "lease-new"
+    run_repository = PostgreSQLAgentRunRepository(session)
+
+    try:
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="vehicle-agent",
+                session_id="session-1",
+                user_id="user-1",
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+
+        run_record = session.get(AgentRunRecord, run_id)
+        assert run_record is not None
+        run_record.lease_id = old_lease_id
+        run_record.lease_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        session.commit()
+
+        takeover_started_at = datetime.now(UTC)
+        takeover_expires_at = takeover_started_at + timedelta(minutes=5)
+
+        claimed = run_repository.claim_expired_running_run(
+            run_id,
+            stale_before=takeover_started_at,
+            started_at=takeover_started_at,
+            lease_id=new_lease_id,
+            lease_expires_at=takeover_expires_at,
+        )
+
+        assert claimed is not None
+        assert claimed.lease_id == new_lease_id
+        assert claimed.lease_expires_at == takeover_expires_at
+
+        checkpoint = make_checkpoint(run_id=run_id)
+
+        with pytest.raises(
+            AgentCheckpointOwnershipLostError,
+            match="no longer owns the active run lease",
+        ):
+            checkpoint_repository.save(
+                checkpoint,
+                lease_id=old_lease_id,
+            )
+
+        assert checkpoint_repository.get_latest(run_id) is None
     finally:
         session.execute(
             delete(AgentRunCheckpointRecord).where(AgentRunCheckpointRecord.run_id == run_id)

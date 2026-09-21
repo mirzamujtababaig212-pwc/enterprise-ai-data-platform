@@ -10,6 +10,7 @@ class AgentCheckpointsRepository(Protocol):
         self,
         checkpoint: AgentExecutionCheckpoint,
         *,
+        lease_id: str | None = None,
         commit: bool = True,
     ) -> AgentExecutionCheckpoint: ...
 

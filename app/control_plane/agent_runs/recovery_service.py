@@ -249,6 +249,7 @@ class AgentRunRecoveryService:
                 request,
                 checkpoint,
                 run_id=run.run_id,
+                lease_id=run.lease_id,
                 execution_ownership_lost=ownership_lost,
             )
         except asyncio.CancelledError:

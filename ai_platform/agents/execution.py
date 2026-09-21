@@ -43,6 +43,7 @@ class AgentExecutionContext:
         history: tuple[AgentMessage, ...] = (),
         memory: MemoryContext | None = None,
         run_id: str | None = None,
+        lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
     ) -> None:
         self.request = request
@@ -51,6 +52,7 @@ class AgentExecutionContext:
         self.history = history
         self.memory = memory
         self.run_id = run_id
+        self.lease_id = lease_id
         self.execution_ownership_lost = execution_ownership_lost
 
         self.execution_budget = request.execution_budget or ExecutionBudget()

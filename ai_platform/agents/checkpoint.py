@@ -28,6 +28,8 @@ class AgentCheckpointHandler(Protocol):
     async def save(
         self,
         checkpoint: AgentExecutionCheckpoint,
+        *,
+        lease_id: str | None = None,
     ) -> None: ...
 
 
