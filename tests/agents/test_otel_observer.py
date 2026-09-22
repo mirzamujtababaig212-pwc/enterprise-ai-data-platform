@@ -610,3 +610,281 @@ def test_irrelevant_agent_events_do_not_create_spans() -> None:
     run(scenario())
 
     assert not exporter.get_finished_spans()
+
+
+def test_memory_write_creates_completed_span_without_sensitive_attributes() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "latency_ms": 7.5,
+                    "content": "secret output",
+                    "namespace": "secret-namespace",
+                    "memory_id": "secret-memory-id",
+                    "session_id": "secret-session",
+                },
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.memory.write")
+
+    assert span.status.status_code is trace.StatusCode.OK
+    assert span.attributes["agent.name"] == "test-agent"
+    assert span.attributes["memory.type"] == "episodic"
+    assert span.attributes["memory.latency_ms"] == 7.5
+    assert "agent.run_id" not in span.attributes
+
+    for forbidden in (
+        "content",
+        "namespace",
+        "memory_id",
+        "session_id",
+        "memory.metadata",
+    ):
+        assert forbidden not in span.attributes
+
+
+def test_memory_write_failure_creates_error_span_without_exception_message() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_FAILED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "latency_ms": 3.25,
+                    "error_type": "RuntimeError",
+                    "error": "secret exception message",
+                    "content": "secret output",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.memory.write")
+
+    assert span.status.status_code is trace.StatusCode.ERROR
+    assert span.attributes["agent.name"] == "test-agent"
+    assert span.attributes["memory.type"] == "episodic"
+    assert span.attributes["memory.latency_ms"] == 3.25
+    assert span.attributes["error.type"] == "RuntimeError"
+    assert "agent.run_id" not in span.attributes
+    assert "error" not in span.attributes
+    assert "content" not in span.attributes
+    assert "namespace" not in span.attributes
+
+
+def test_agent_failure_closes_active_memory_write_span() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                agent_name="test-agent",
+                metadata={
+                    "memory_type": "episodic",
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_FAILED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    memory_span = span_by_name(exporter, "agent.memory.write")
+    agent_span = span_by_name(exporter, "agent.run")
+
+    assert memory_span.status.status_code is trace.StatusCode.ERROR
+    assert agent_span.status.status_code is trace.StatusCode.ERROR
+
+
+def test_memory_retrieval_creates_completed_span_without_sensitive_attributes() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+                run_id="run-123",
+                metadata={
+                    "memory_type": "semantic",
+                    "requested_top_k": 5,
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-123",
+                metadata={
+                    "memory_type": "semantic",
+                    "requested_top_k": 5,
+                    "returned_count": 3,
+                    "latency_ms": 4.25,
+                    "retrieval_methods": ["postgresql.semantic.cosine"],
+                    "retrieval_score_min": 0.2,
+                    "retrieval_score_max": 0.95,
+                    "reranker_score_min": 0.4,
+                    "reranker_score_max": 0.91,
+                    "query": "DO NOT STORE THIS",
+                    "namespace": "tenant-secret",
+                    "memory_id": "memory-secret",
+                    "content": "sensitive memory",
+                },
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.memory.retrieval")
+
+    assert span.status.status_code is trace.StatusCode.OK
+    assert span.attributes["agent.name"] == "test-agent"
+    assert span.attributes["agent.run_id"] == "run-123"
+    assert span.attributes["memory.type"] == "semantic"
+    assert span.attributes["memory.requested_top_k"] == 5
+    assert span.attributes["memory.returned_count"] == 3
+    assert span.attributes["memory.latency_ms"] == 4.25
+    assert span.attributes["memory.retrieval_methods"] == ("postgresql.semantic.cosine",)
+    assert span.attributes["memory.retrieval_score_min"] == 0.2
+    assert span.attributes["memory.retrieval_score_max"] == 0.95
+    assert span.attributes["memory.reranker_score_min"] == 0.4
+    assert span.attributes["memory.reranker_score_max"] == 0.91
+
+    for forbidden in (
+        "query",
+        "namespace",
+        "memory_id",
+        "content",
+        "memory.metadata",
+    ):
+        assert forbidden not in span.attributes
+
+
+def test_memory_retrieval_failure_creates_error_span_without_exception_message() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+                run_id="run-123",
+                metadata={
+                    "memory_type": "episodic",
+                    "requested_top_k": 7,
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_FAILED,
+                agent_name="test-agent",
+                run_id="run-123",
+                metadata={
+                    "memory_type": "episodic",
+                    "requested_top_k": 7,
+                    "latency_ms": 2.5,
+                    "error_type": "RuntimeError",
+                    "error": "secret exception message",
+                    "namespace": "tenant-secret",
+                },
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.memory.retrieval")
+
+    assert span.status.status_code is trace.StatusCode.ERROR
+    assert span.attributes["agent.name"] == "test-agent"
+    assert span.attributes["agent.run_id"] == "run-123"
+    assert span.attributes["memory.type"] == "episodic"
+    assert span.attributes["memory.requested_top_k"] == 7
+    assert span.attributes["memory.latency_ms"] == 2.5
+    assert span.attributes["error.type"] == "RuntimeError"
+
+    assert "error" not in span.attributes
+    assert "namespace" not in span.attributes
+
+
+def test_agent_failure_closes_active_memory_retrieval_span() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+                metadata={
+                    "memory_type": "working",
+                    "requested_top_k": 5,
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_FAILED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    memory_span = span_by_name(exporter, "agent.memory.retrieval")
+    agent_span = span_by_name(exporter, "agent.run")
+
+    assert memory_span.status.status_code is trace.StatusCode.ERROR
+    assert agent_span.status.status_code is trace.StatusCode.ERROR

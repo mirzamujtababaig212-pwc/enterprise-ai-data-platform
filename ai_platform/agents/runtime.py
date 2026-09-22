@@ -1,23 +1,43 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.contracts import AgentRegistry
 from ai_platform.agents.execution import AgentExecutionContext
-from ai_platform.agents.plans import build_agent_orchestration_plan
 from ai_platform.agents.llm_context import (
     AgentLLMContext,
     LLMGateway,
     UnavailableLLMGateway,
 )
-from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.llm_messages import AgentMessage
+from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
+from ai_platform.agents.plans import build_agent_orchestration_plan
 from ai_platform.agents.tool_context import AgentToolContext
 from memory.context.builder import MemoryContextBuilder
 from memory.service import MemoryService
 from tools.contracts import ToolRegistry
 from tools.execution.service import ToolExecutionService
+
+
+async def _record_memory_write_event(
+    observer: AgentExecutionObserver | None,
+    event: AgentExecutionEvent,
+) -> None:
+    if observer is None:
+        return
+
+    try:
+        await observer.record(event)
+    except Exception:
+        # Observability must not change the outcome of agent execution.
+        pass
 
 
 class AgentRuntime:
@@ -47,6 +67,7 @@ class AgentRuntime:
         llm_gateway: LLMGateway | None = None,
         memory_context_builder: MemoryContextBuilder | None = None,
         memory_service: MemoryService | None = None,
+        observer: AgentExecutionObserver | None = None,
     ) -> None:
         self._registry = registry
         self._tool_registry = tool_registry
@@ -64,6 +85,7 @@ class AgentRuntime:
         self._llm_gateway = llm_gateway if llm_gateway is not None else UnavailableLLMGateway()
         self._memory_context_builder = memory_context_builder
         self._memory_service = memory_service
+        self._observer = observer
 
     async def resume(
         self,
@@ -241,6 +263,8 @@ class AgentRuntime:
             memory_context = await self._memory_context_builder.build(
                 request.memory_namespace,
                 query=request.input,
+                agent_name=agent_name,
+                run_id=run_id,
             )
 
         llm_context = AgentLLMContext(
@@ -269,6 +293,21 @@ class AgentRuntime:
             and isinstance(response.output, str)
             and response.output.strip()
         ):
+            memory_type = "episodic"
+            write_started_at = time.perf_counter()
+
+            await _record_memory_write_event(
+                self._observer,
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                    agent_name=agent.definition.name,
+                    run_id=run_id,
+                    metadata={
+                        "memory_type": memory_type,
+                    },
+                ),
+            )
+
             metadata = {
                 "source": "agent_execution",
                 "agent_name": agent.definition.name,
@@ -281,13 +320,43 @@ class AgentRuntime:
                 await self._memory_service.remember(
                     response.output,
                     namespace=request.memory_namespace,
-                    memory_type="episodic",
+                    memory_type=memory_type,
                     metadata=metadata,
                     retention_seconds=(agent.definition.memory_episodic_retention_seconds),
                 )
-            except Exception:
+            except Exception as exc:
+                latency_ms = (time.perf_counter() - write_started_at) * 1000.0
+
+                await _record_memory_write_event(
+                    self._observer,
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.MEMORY_WRITE_FAILED,
+                        agent_name=agent.definition.name,
+                        run_id=run_id,
+                        metadata={
+                            "memory_type": memory_type,
+                            "latency_ms": latency_ms,
+                            "error_type": type(exc).__name__,
+                        },
+                    ),
+                )
+
                 # Memory persistence must not turn a successful agent
                 # execution into a failed agent execution.
-                pass
+            else:
+                latency_ms = (time.perf_counter() - write_started_at) * 1000.0
+
+                await _record_memory_write_event(
+                    self._observer,
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.MEMORY_WRITE_COMPLETED,
+                        agent_name=agent.definition.name,
+                        run_id=run_id,
+                        metadata={
+                            "memory_type": memory_type,
+                            "latency_ms": latency_ms,
+                        },
+                    ),
+                )
 
         return response

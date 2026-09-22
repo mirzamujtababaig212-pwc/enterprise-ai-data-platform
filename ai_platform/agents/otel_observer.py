@@ -41,6 +41,8 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
         )
         self._agent_spans: dict[asyncio.Task[object], _ActiveSpan] = {}
         self._llm_spans: dict[asyncio.Task[object], _ActiveSpan] = {}
+        self._memory_spans: dict[asyncio.Task[object], _ActiveSpan] = {}
+        self._memory_write_spans: dict[asyncio.Task[object], _ActiveSpan] = {}
         self._tool_spans: dict[
             tuple[asyncio.Task[object], str],
             _ActiveSpan,
@@ -77,6 +79,46 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
 
         if event.event_type is AgentExecutionEventType.AGENT_CANCELLED:
             self._finish_agent_span(
+                task,
+                event,
+                status=trace.StatusCode.ERROR,
+            )
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED:
+            self._start_memory_span(task, event)
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_COMPLETED:
+            self._finish_memory_span(
+                task,
+                event,
+                status=trace.StatusCode.OK,
+            )
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_FAILED:
+            self._finish_memory_span(
+                task,
+                event,
+                status=trace.StatusCode.ERROR,
+            )
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_STARTED:
+            self._start_memory_write_span(task, event)
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_COMPLETED:
+            self._finish_memory_write_span(
+                task,
+                event,
+                status=trace.StatusCode.OK,
+            )
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_FAILED:
+            self._finish_memory_write_span(
                 task,
                 event,
                 status=trace.StatusCode.ERROR,
@@ -160,6 +202,18 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
                 active_llm.span.end()
                 context.detach(active_llm.token)
 
+            active_memory = self._memory_spans.pop(task, None)
+            if active_memory is not None:
+                active_memory.span.set_status(status)
+                active_memory.span.end()
+                context.detach(active_memory.token)
+
+            active_memory_write = self._memory_write_spans.pop(task, None)
+            if active_memory_write is not None:
+                active_memory_write.span.set_status(status)
+                active_memory_write.span.end()
+                context.detach(active_memory_write.token)
+
             active_tools = [key for key in self._tool_spans if key[0] is task]
 
             for key in active_tools:
@@ -172,6 +226,176 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
 
         if active is None:
             return
+
+        active.span.set_status(status)
+        active.span.end()
+
+        context.detach(active.token)
+
+    def _start_memory_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+    ) -> None:
+        if task in self._memory_spans:
+            return
+
+        span = self._tracer.start_span(
+            "agent.memory.retrieval",
+        )
+
+        span.set_attribute(
+            "agent.name",
+            event.agent_name,
+        )
+
+        if event.run_id is not None:
+            span.set_attribute(
+                "agent.run_id",
+                event.run_id,
+            )
+
+        memory_type = event.metadata.get("memory_type")
+        if isinstance(memory_type, str) and memory_type:
+            span.set_attribute(
+                "memory.type",
+                memory_type,
+            )
+
+        requested_top_k = event.metadata.get("requested_top_k")
+        if isinstance(requested_top_k, int):
+            span.set_attribute(
+                "memory.requested_top_k",
+                requested_top_k,
+            )
+
+        token = context.attach(
+            trace.set_span_in_context(span),
+        )
+
+        self._memory_spans[task] = _ActiveSpan(
+            span=span,
+            token=token,
+        )
+
+    def _finish_memory_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+        *,
+        status: trace.StatusCode,
+    ) -> None:
+        active = self._memory_spans.pop(task, None)
+
+        if active is None:
+            return
+
+        returned_count = event.metadata.get("returned_count")
+        if isinstance(returned_count, int):
+            active.span.set_attribute(
+                "memory.returned_count",
+                returned_count,
+            )
+
+        retrieval_methods = event.metadata.get("retrieval_methods")
+        if isinstance(retrieval_methods, list) and all(
+            isinstance(method, str) for method in retrieval_methods
+        ):
+            active.span.set_attribute(
+                "memory.retrieval_methods",
+                retrieval_methods,
+            )
+
+        latency_ms = event.metadata.get("latency_ms")
+        if isinstance(latency_ms, (int, float)):
+            active.span.set_attribute(
+                "memory.latency_ms",
+                float(latency_ms),
+            )
+
+        for metadata_key, attribute_name in (
+            ("retrieval_score_min", "memory.retrieval_score_min"),
+            ("retrieval_score_max", "memory.retrieval_score_max"),
+            ("reranker_score_min", "memory.reranker_score_min"),
+            ("reranker_score_max", "memory.reranker_score_max"),
+        ):
+            value = event.metadata.get(metadata_key)
+            if isinstance(value, (int, float)):
+                active.span.set_attribute(
+                    attribute_name,
+                    float(value),
+                )
+
+        error_type = event.metadata.get("error_type")
+        if isinstance(error_type, str) and error_type:
+            active.span.set_attribute(
+                "error.type",
+                error_type,
+            )
+
+        active.span.set_status(status)
+        active.span.end()
+
+        context.detach(active.token)
+
+    def _start_memory_write_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+    ) -> None:
+        if task in self._memory_write_spans:
+            return
+
+        span = self._tracer.start_span(
+            "agent.memory.write",
+        )
+
+        span.set_attribute(
+            "agent.name",
+            event.agent_name,
+        )
+
+        memory_type = event.metadata.get("memory_type")
+        if isinstance(memory_type, str) and memory_type:
+            span.set_attribute(
+                "memory.type",
+                memory_type,
+            )
+
+        token = context.attach(
+            trace.set_span_in_context(span),
+        )
+
+        self._memory_write_spans[task] = _ActiveSpan(
+            span=span,
+            token=token,
+        )
+
+    def _finish_memory_write_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+        *,
+        status: trace.StatusCode,
+    ) -> None:
+        active = self._memory_write_spans.pop(task, None)
+
+        if active is None:
+            return
+
+        latency_ms = event.metadata.get("latency_ms")
+        if isinstance(latency_ms, (int, float)):
+            active.span.set_attribute(
+                "memory.latency_ms",
+                float(latency_ms),
+            )
+
+        error_type = event.metadata.get("error_type")
+        if isinstance(error_type, str) and error_type:
+            active.span.set_attribute(
+                "error.type",
+                error_type,
+            )
 
         active.span.set_status(status)
         active.span.end()

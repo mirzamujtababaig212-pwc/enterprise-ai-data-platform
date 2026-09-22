@@ -3,19 +3,20 @@ from __future__ import annotations
 import pytest
 
 from ai_platform.agents.execution import AgentExecutionContext
-from memory.context.builder import MemoryContext
-from ai_platform.agents.models import (
-    AgentDefinition,
-    AgentRequest,
-    AgentResponse,
-)
-from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
-from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.agents.llm_messages import (
     assistant_message,
     system_message,
     user_message,
 )
+from ai_platform.agents.models import (
+    AgentDefinition,
+    AgentRequest,
+    AgentResponse,
+)
+from ai_platform.agents.observability import AgentExecutionEventType
+from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
+from ai_platform.agents.runtime import AgentRuntime
+from memory.context.builder import MemoryContext
 from tools.authorization.in_memory import InMemoryToolAuthorizer
 from tools.authorization.service import ToolAuthorizationService
 from tools.execution.service import ToolExecutionService
@@ -29,6 +30,8 @@ class EmptyMemoryBuilder:
         namespace: str,
         *,
         query: str | None = None,
+        agent_name: str | None = None,
+        run_id: str | None = None,
     ) -> MemoryContext:
         return MemoryContext(
             working=(),
@@ -266,6 +269,174 @@ async def test_runtime_unauthorized_principal_cannot_execute_declared_tool() -> 
 
 
 @pytest.mark.asyncio
+async def test_runtime_memory_write_emits_started_and_completed_events():
+    registry = InMemoryAgentRegistry()
+
+    class MemoryWriteAgent(FakeAgent):
+        def __init__(self) -> None:
+            super().__init__(name="memory-write-agent", output="remember this")
+            self._definition = AgentDefinition(
+                name="memory-write-agent",
+                description="Memory write test agent.",
+                system_prompt="You are a memory test agent.",
+                model="test-model",
+                memory_write_enabled=True,
+                memory_episodic_retention_seconds=3600,
+            )
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def remember(self, content, **kwargs):
+            self.calls.append((content, kwargs))
+            return None
+
+    class TrackingObserver:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def record(self, event) -> None:
+            self.events.append(event)
+
+    agent = MemoryWriteAgent()
+    memory_service = TrackingMemoryService()
+    observer = TrackingObserver()
+
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=memory_service,
+        observer=observer,
+    )
+
+    response = await runtime.run(
+        "memory-write-agent",
+        AgentRequest(
+            input="Generate something worth remembering.",
+            session_id="session-secret",
+            memory_namespace="tenant-secret",
+            metadata={"secret": "must-not-leak"},
+        ),
+        run_id="run-123",
+    )
+
+    assert response.output == "remember this"
+    assert memory_service.calls == [
+        (
+            "remember this",
+            {
+                "namespace": "tenant-secret",
+                "memory_type": "episodic",
+                "metadata": {
+                    "source": "agent_execution",
+                    "agent_name": "memory-write-agent",
+                    "session_id": "session-secret",
+                },
+                "retention_seconds": 3600,
+            },
+        )
+    ]
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.MEMORY_WRITE_STARTED,
+        AgentExecutionEventType.MEMORY_WRITE_COMPLETED,
+    ]
+
+    started, completed = observer.events
+
+    assert started.agent_name == "memory-write-agent"
+    assert started.run_id == "run-123"
+    assert started.metadata == {
+        "memory_type": "episodic",
+    }
+
+    assert completed.agent_name == "memory-write-agent"
+    assert completed.run_id == "run-123"
+    assert completed.metadata["memory_type"] == "episodic"
+    assert completed.metadata["latency_ms"] >= 0.0
+    assert "content" not in completed.metadata
+    assert "namespace" not in completed.metadata
+    assert "session_id" not in completed.metadata
+    assert "secret" not in completed.metadata
+
+
+@pytest.mark.asyncio
+async def test_runtime_memory_write_failure_is_suppressed_and_emits_failed_event():
+    registry = InMemoryAgentRegistry()
+
+    class MemoryWriteAgent(FakeAgent):
+        def __init__(self) -> None:
+            super().__init__(name="memory-write-failure-agent", output="remember this")
+            self._definition = AgentDefinition(
+                name="memory-write-failure-agent",
+                description="Memory write failure test agent.",
+                system_prompt="You are a memory test agent.",
+                model="test-model",
+                memory_write_enabled=True,
+                memory_episodic_retention_seconds=3600,
+            )
+
+    class FailingMemoryService:
+        async def remember(self, content, **kwargs):
+            raise RuntimeError("secret persistence failure")
+
+    class TrackingObserver:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def record(self, event) -> None:
+            self.events.append(event)
+
+    agent = MemoryWriteAgent()
+    observer = TrackingObserver()
+
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=FailingMemoryService(),
+        observer=observer,
+    )
+
+    response = await runtime.run(
+        "memory-write-failure-agent",
+        AgentRequest(
+            input="Generate something worth remembering.",
+            memory_namespace="tenant-secret",
+            metadata={"secret": "must-not-leak"},
+        ),
+        run_id="run-456",
+    )
+
+    assert response.output == "remember this"
+
+    assert [event.event_type for event in observer.events] == [
+        AgentExecutionEventType.MEMORY_WRITE_STARTED,
+        AgentExecutionEventType.MEMORY_WRITE_FAILED,
+    ]
+
+    started, failed = observer.events
+
+    assert started.metadata == {
+        "memory_type": "episodic",
+    }
+
+    assert failed.metadata["memory_type"] == "episodic"
+    assert failed.metadata["latency_ms"] >= 0.0
+    assert failed.metadata["error_type"] == "RuntimeError"
+
+    assert "error" not in failed.metadata
+    assert "exception" not in failed.metadata
+    assert "content" not in failed.metadata
+    assert "namespace" not in failed.metadata
+    assert "secret" not in failed.metadata
+
+
+@pytest.mark.asyncio
 async def test_runtime_builds_memory_context_for_requested_namespace():
     registry = InMemoryAgentRegistry()
 
@@ -281,6 +452,8 @@ async def test_runtime_builds_memory_context_for_requested_namespace():
             namespace: str,
             *,
             query: str | None = None,
+            agent_name: str | None = None,
+            run_id: str | None = None,
         ) -> MemoryContext:
             self.requested_namespace = namespace
             return MemoryContext(
@@ -326,6 +499,8 @@ async def test_runtime_passes_request_input_to_memory_context_builder():
             namespace: str,
             *,
             query: str | None = None,
+            agent_name: str | None = None,
+            run_id: str | None = None,
         ) -> MemoryContext:
             self.requested_namespace = namespace
             self.requested_query = query

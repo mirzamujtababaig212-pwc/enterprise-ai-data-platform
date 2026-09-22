@@ -24,6 +24,13 @@ class AgentExecutionEventType(StrEnum):
 
     TOOL_AUTHORIZATION_DECISION = "tool.authorization.decision"
 
+    MEMORY_RETRIEVAL_STARTED = "memory.retrieval.started"
+    MEMORY_RETRIEVAL_COMPLETED = "memory.retrieval.completed"
+    MEMORY_RETRIEVAL_FAILED = "memory.retrieval.failed"
+    MEMORY_WRITE_STARTED = "memory.write.started"
+    MEMORY_WRITE_COMPLETED = "memory.write.completed"
+    MEMORY_WRITE_FAILED = "memory.write.failed"
+
 
 @dataclass(frozen=True)
 class AgentExecutionEvent:

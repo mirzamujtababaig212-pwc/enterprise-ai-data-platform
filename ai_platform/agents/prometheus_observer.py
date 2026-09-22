@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -45,6 +45,69 @@ AGENT_TOOL_FAILURES_TOTAL = Counter(
     ],
 )
 
+AGENT_MEMORY_RETRIEVALS_TOTAL = Counter(
+    "deldai_agent_memory_retrievals_total",
+    "Total memory retrieval operations by memory type.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL = Counter(
+    "deldai_agent_memory_retrieval_failures_total",
+    "Total failed memory retrieval operations by memory type.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_RETRIEVAL_ITEMS_TOTAL = Counter(
+    "deldai_agent_memory_retrieval_items_total",
+    "Total memory items returned by retrieval operations.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS = Histogram(
+    "deldai_agent_memory_retrieval_duration_seconds",
+    "Memory retrieval duration in seconds.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_WRITES_TOTAL = Counter(
+    "deldai_agent_memory_writes_total",
+    "Total memory write operations by memory type.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_WRITE_FAILURES_TOTAL = Counter(
+    "deldai_agent_memory_write_failures_total",
+    "Total failed memory write operations by memory type.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
+AGENT_MEMORY_WRITE_DURATION_SECONDS = Histogram(
+    "deldai_agent_memory_write_duration_seconds",
+    "Memory write duration in seconds.",
+    [
+        "agent_name",
+        "memory_type",
+    ],
+)
+
 
 class PrometheusAgentExecutionObserver(AgentExecutionObserver):
     """
@@ -78,6 +141,110 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
                 agent_name=event.agent_name,
                 status="cancelled",
             ).inc()
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            AGENT_MEMORY_RETRIEVALS_TOTAL.labels(
+                agent_name=event.agent_name,
+                memory_type=memory_type,
+            ).inc()
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_COMPLETED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            labels = {
+                "agent_name": event.agent_name,
+                "memory_type": memory_type,
+            }
+
+            returned_count = event.metadata.get("returned_count")
+            if isinstance(returned_count, int) and returned_count >= 0:
+                AGENT_MEMORY_RETRIEVAL_ITEMS_TOTAL.labels(
+                    **labels,
+                ).inc(returned_count)
+
+            latency_ms = event.metadata.get("latency_ms")
+            if isinstance(latency_ms, (int, float)) and latency_ms >= 0:
+                AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS.labels(
+                    **labels,
+                ).observe(float(latency_ms) / 1000.0)
+
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_FAILED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            labels = {
+                "agent_name": event.agent_name,
+                "memory_type": memory_type,
+            }
+
+            AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL.labels(
+                **labels,
+            ).inc()
+
+            latency_ms = event.metadata.get("latency_ms")
+            if isinstance(latency_ms, (int, float)) and latency_ms >= 0:
+                AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS.labels(
+                    **labels,
+                ).observe(float(latency_ms) / 1000.0)
+
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_STARTED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            AGENT_MEMORY_WRITES_TOTAL.labels(
+                agent_name=event.agent_name,
+                memory_type=memory_type,
+            ).inc()
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_COMPLETED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            latency_ms = event.metadata.get("latency_ms")
+            if isinstance(latency_ms, (int, float)) and latency_ms >= 0:
+                AGENT_MEMORY_WRITE_DURATION_SECONDS.labels(
+                    agent_name=event.agent_name,
+                    memory_type=memory_type,
+                ).observe(float(latency_ms) / 1000.0)
+
+            return
+
+        if event.event_type is AgentExecutionEventType.MEMORY_WRITE_FAILED:
+            memory_type = event.metadata.get("memory_type")
+            if not isinstance(memory_type, str) or not memory_type:
+                return
+
+            labels = {
+                "agent_name": event.agent_name,
+                "memory_type": memory_type,
+            }
+
+            AGENT_MEMORY_WRITE_FAILURES_TOTAL.labels(
+                **labels,
+            ).inc()
+
+            latency_ms = event.metadata.get("latency_ms")
+            if isinstance(latency_ms, (int, float)) and latency_ms >= 0:
+                AGENT_MEMORY_WRITE_DURATION_SECONDS.labels(
+                    **labels,
+                ).observe(float(latency_ms) / 1000.0)
+
             return
 
         if event.event_type is AgentExecutionEventType.LLM_REQUESTED:

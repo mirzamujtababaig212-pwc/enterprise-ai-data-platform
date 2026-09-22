@@ -7,6 +7,13 @@ from ai_platform.agents.observability import (
 from ai_platform.agents.prometheus_observer import (
     AGENT_EXECUTIONS_TOTAL,
     AGENT_LLM_REQUESTS_TOTAL,
+    AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS,
+    AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL,
+    AGENT_MEMORY_RETRIEVAL_ITEMS_TOTAL,
+    AGENT_MEMORY_RETRIEVALS_TOTAL,
+    AGENT_MEMORY_WRITES_TOTAL,
+    AGENT_MEMORY_WRITE_FAILURES_TOTAL,
+    AGENT_MEMORY_WRITE_DURATION_SECONDS,
     AGENT_TOOL_CALLS_TOTAL,
     AGENT_TOOL_FAILURES_TOTAL,
     PrometheusAgentExecutionObserver,
@@ -357,3 +364,361 @@ def test_irrelevant_agent_lifecycle_events_do_not_increment_agent_execution_coun
 
     assert after_completed == before_completed
     assert after_failed == before_failed
+
+
+def test_memory_write_completed_records_metrics():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "memory_type": "episodic",
+    }
+
+    before_writes = _sample_value(
+        AGENT_MEMORY_WRITES_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_MEMORY_WRITE_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "content": "secret output",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "latency_ms": 15.0,
+                    "content": "secret output",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+    )
+
+    after_writes = _sample_value(
+        AGENT_MEMORY_WRITES_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_MEMORY_WRITE_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_writes == before_writes + 1
+    assert after_duration >= before_duration
+
+
+def test_memory_write_failure_records_failure_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "memory_type": "episodic",
+    }
+
+    before_failures = _sample_value(
+        AGENT_MEMORY_WRITE_FAILURES_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_MEMORY_WRITE_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_FAILED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "latency_ms": 12.5,
+                    "error_type": "RuntimeError",
+                    "error": "secret error",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+    )
+
+    after_failures = _sample_value(
+        AGENT_MEMORY_WRITE_FAILURES_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_MEMORY_WRITE_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_failures == before_failures + 1
+    assert after_duration >= before_duration
+
+
+def test_memory_write_metrics_use_only_low_cardinality_labels():
+    observer = PrometheusAgentExecutionObserver()
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_WRITE_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "content": "secret content",
+                    "namespace": "secret-namespace",
+                    "memory_id": "secret-memory-id",
+                    "request_id": "secret-request-id",
+                },
+            )
+        )
+    )
+
+    samples = AGENT_MEMORY_WRITES_TOTAL.collect()[0].samples
+
+    matching = [
+        sample
+        for sample in samples
+        if sample.labels.get("agent_name") == "test-agent"
+        and sample.labels.get("memory_type") == "episodic"
+    ]
+
+    assert matching
+    assert set(matching[0].labels) == {
+        "agent_name",
+        "memory_type",
+    }
+
+
+def test_memory_retrieval_completed_records_metrics():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "memory_type": "semantic",
+    }
+
+    before_retrievals = _sample_value(
+        AGENT_MEMORY_RETRIEVALS_TOTAL,
+        labels,
+    )
+    before_items = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_ITEMS_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "semantic",
+                    "requested_top_k": 5,
+                    "query": "secret query",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "semantic",
+                    "requested_top_k": 5,
+                    "returned_count": 3,
+                    "latency_ms": 25.0,
+                    "query": "secret query",
+                    "namespace": "secret-namespace",
+                    "memory_id": "secret-memory-id",
+                },
+            )
+        )
+    )
+
+    after_retrievals = _sample_value(
+        AGENT_MEMORY_RETRIEVALS_TOTAL,
+        labels,
+    )
+    after_items = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_ITEMS_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_retrievals == before_retrievals + 1
+    assert after_items == before_items + 3
+    assert after_duration >= before_duration
+
+
+def test_memory_retrieval_failure_records_failure_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "memory_type": "episodic",
+    }
+
+    before_failures = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_FAILED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "memory_type": "episodic",
+                    "latency_ms": 12.5,
+                    "error_type": "RuntimeError",
+                    "error": "secret error",
+                    "namespace": "secret-namespace",
+                },
+            )
+        )
+    )
+
+    after_failures = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_MEMORY_RETRIEVAL_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_failures == before_failures + 1
+    assert after_duration >= before_duration
+
+
+def test_memory_metrics_use_only_low_cardinality_labels():
+    observer = PrometheusAgentExecutionObserver()
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                metadata={
+                    "memory_type": "semantic",
+                    "query": "secret query",
+                    "namespace": "secret-namespace",
+                    "memory_id": "secret-memory-id",
+                    "content": "secret content",
+                    "request_id": "secret-request-id",
+                },
+            )
+        )
+    )
+
+    samples = AGENT_MEMORY_RETRIEVALS_TOTAL.collect()[0].samples
+
+    matching = [
+        sample
+        for sample in samples
+        if sample.labels.get("agent_name") == "test-agent"
+        and sample.labels.get("memory_type") == "semantic"
+    ]
+
+    assert matching
+    assert set(matching[0].labels) == {
+        "agent_name",
+        "memory_type",
+    }
+
+
+def test_memory_retrieval_without_memory_type_does_not_create_metrics():
+    observer = PrometheusAgentExecutionObserver()
+
+    before_retrievals = list(AGENT_MEMORY_RETRIEVALS_TOTAL.collect()[0].samples)
+    before_failures = list(AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL.collect()[0].samples)
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED,
+                agent_name="test-agent",
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.MEMORY_RETRIEVAL_FAILED,
+                agent_name="test-agent",
+            )
+        )
+    )
+
+    assert list(AGENT_MEMORY_RETRIEVALS_TOTAL.collect()[0].samples) == before_retrievals
+    assert list(AGENT_MEMORY_RETRIEVAL_FAILURES_TOTAL.collect()[0].samples) == before_failures
