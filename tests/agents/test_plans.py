@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from ai_platform.agents.orchestration import OrchestrationStepStatus
+from ai_platform.agents.orchestration import (
+    OrchestrationStepCompletionPolicy,
+    OrchestrationStepStatus,
+)
 from ai_platform.agents.plans import (
     ENTERPRISE_RAG_ANALYST_AGENT,
     build_agent_orchestration_plan,
@@ -26,6 +29,15 @@ def test_enterprise_rag_analyst_plan_has_expected_steps() -> None:
         "Analyze retrieved evidence",
         "Produce grounded answer",
     ]
+
+
+def test_enterprise_rag_analyst_retrieval_step_uses_rag_tool_completion_boundary() -> None:
+    plan = build_enterprise_rag_analyst_plan()
+
+    retrieve_step = plan.steps[0]
+
+    assert retrieve_step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
+    assert retrieve_step.metadata["completion_tool_name"] == "rag.search"
 
 
 def test_enterprise_rag_analyst_plan_starts_all_steps_pending() -> None:

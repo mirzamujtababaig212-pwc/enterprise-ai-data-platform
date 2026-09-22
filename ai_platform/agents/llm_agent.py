@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ai_platform.agents.budget import ExecutionBudgetState
 from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.checkpoint import (
@@ -8,6 +10,10 @@ from ai_platform.agents.checkpoint import (
     AgentExecutionCheckpoint,
 )
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.orchestration import (
+    OrchestrationStepCompletionPolicy,
+    OrchestrationStepStatus,
+)
 from ai_platform.agents.llm_messages import AgentMessage
 from ai_platform.agents.models import (
     AgentDefinition,
@@ -17,6 +23,20 @@ from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
 )
+
+
+@dataclass(frozen=True)
+class _AgentContinuationResult:
+    """
+    Internal continuation state returned by the LLM/tool execution engine.
+
+    The caller retains the authoritative mutable conversation state so
+    orchestration can advance logical steps without rebuilding context.
+    """
+
+    response: AgentResponse | None
+    tool_rounds: int
+    boundary_reached: bool
 
 
 class LLMAgent:
@@ -168,6 +188,13 @@ class LLMAgent:
             tool_results,
         ):
             if tool_result.success:
+                self._record_orchestration_tool_result(
+                    context,
+                    tool_call,
+                    tool_result,
+                    tool_round=tool_round,
+                )
+
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
@@ -306,6 +333,27 @@ class LLMAgent:
 
         return step.step_index
 
+    def _set_orchestration_step_result(
+        self,
+        context: AgentExecutionContext,
+        step_index: int | None,
+        response: AgentResponse,
+    ) -> None:
+        """Publish the completed interaction as the logical step result."""
+        if step_index is None:
+            return
+
+        step = context.orchestration_state.steps[step_index]
+
+        if step.completion_policy is not OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE:
+            return
+
+        context.orchestration_state.set_step_result(
+            step.step_id,
+            response.output,
+            metadata=dict(response.metadata),
+        )
+
     def _complete_orchestration_step(
         self,
         context: AgentExecutionContext,
@@ -317,10 +365,153 @@ class LLMAgent:
             return
 
         state = context.orchestration_state
+        step = state.steps[step_index]
+
+        if step.completion_policy is not OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE:
+            return
+
         state.complete_step(
             step_index,
             tool_round=tool_round,
         )
+
+    def _record_orchestration_tool_result(
+        self,
+        context: AgentExecutionContext,
+        tool_call,
+        tool_result,
+        *,
+        tool_round: int,
+    ) -> None:
+        """
+        Complete a logical orchestration step at its configured tool boundary.
+
+        Tool rounds remain execution mechanics. A logical step is completed
+        only when its declared completion policy and expected tool match the
+        successful tool result.
+        """
+        if context.orchestration_plan is None:
+            return
+
+        state = context.orchestration_state
+        step = state.current_step
+
+        if step is None:
+            return
+
+        if step.completion_policy is not OrchestrationStepCompletionPolicy.ON_TOOL_RESULT:
+            return
+
+        expected_tool_name = step.metadata.get("completion_tool_name")
+
+        if expected_tool_name != tool_call.name:
+            return
+
+        if not tool_result.success:
+            return
+
+        metadata = self._tool_provenance_metadata(
+            tool_call.name,
+            tool_result.output,
+        )
+
+        state.set_step_result(
+            step.step_id,
+            tool_result.output,
+            metadata=metadata,
+        )
+
+        state.complete_step(
+            step.step_index,
+            tool_round=tool_round,
+        )
+
+    def _restore_orchestration_tool_result_from_messages(
+        self,
+        context: AgentExecutionContext,
+        messages,
+        *,
+        tool_round: int,
+    ) -> None:
+        """
+        Restore a completed tool-bound orchestration step from checkpoint messages.
+
+        This path is used only after tool execution has already happened.
+        It reconstructs the logical step result without executing the tool again.
+        """
+        if context.orchestration_plan is None:
+            return
+
+        state = context.orchestration_state
+        step = state.current_step
+
+        if step is None:
+            return
+
+        if step.completion_policy is not OrchestrationStepCompletionPolicy.ON_TOOL_RESULT:
+            return
+
+        expected_tool_name = step.metadata.get("completion_tool_name")
+
+        if not isinstance(expected_tool_name, str) or not expected_tool_name.strip():
+            return
+
+        import json
+
+        for message in reversed(messages):
+            if getattr(message.role, "value", None) != "tool":
+                continue
+
+            try:
+                payload = json.loads(message.content)
+            except (TypeError, json.JSONDecodeError):
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            if payload.get("tool_name") != expected_tool_name:
+                continue
+
+            if payload.get("success") is not True:
+                continue
+
+            if "output" not in payload:
+                continue
+
+            output = payload["output"]
+
+            metadata = self._tool_provenance_metadata(
+                expected_tool_name,
+                output,
+            )
+
+            state.set_step_result(
+                step.step_id,
+                output,
+                metadata=metadata,
+            )
+
+            state.complete_step(
+                step.step_index,
+                tool_round=tool_round,
+            )
+            return
+
+    def _advance_orchestration_step(
+        self,
+        context: AgentExecutionContext,
+    ) -> int | None:
+        """Advance to the next logical orchestration step, if configured."""
+        if context.orchestration_plan is None:
+            return None
+
+        next_step = context.orchestration_state.advance()
+
+        if next_step is None:
+            return None
+
+        return next_step.step_index
 
     async def _continue(
         self,
@@ -328,9 +519,12 @@ class LLMAgent:
         messages: list[AgentMessage],
         *,
         tool_rounds: int,
-    ) -> AgentResponse:
+    ) -> _AgentContinuationResult:
         """
         Continue an agent execution from an existing conversation state.
+
+        Control returns to the orchestration coordinator when the current
+        logical step reaches its configured completion boundary.
 
         ``messages`` is authoritative continuation state. In particular,
         a resumed execution must not rebuild the conversation from the
@@ -409,7 +603,7 @@ class LLMAgent:
                         )
                     )
 
-                    return AgentResponse(
+                    response = AgentResponse(
                         agent_name=self.definition.name,
                         output=result.text,
                         session_id=context.session_id,
@@ -423,6 +617,22 @@ class LLMAgent:
                             },
                             "tool_rounds": tool_rounds,
                         },
+                    )
+
+                    boundary_reached = context.orchestration_plan is None
+
+                    if context.orchestration_plan is not None:
+                        current_step = context.orchestration_state.current_step
+                        boundary_reached = (
+                            current_step is not None
+                            and current_step.completion_policy
+                            is OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE
+                        )
+
+                    return _AgentContinuationResult(
+                        response=response,
+                        tool_rounds=tool_rounds,
+                        boundary_reached=boundary_reached,
                     )
 
                 context.raise_if_execution_ownership_lost()
@@ -453,6 +663,18 @@ class LLMAgent:
                     assistant_content=result.text,
                 )
 
+                if (
+                    context.orchestration_plan is not None
+                    and context.orchestration_state.current_step is not None
+                    and context.orchestration_state.current_step.status
+                    is OrchestrationStepStatus.COMPLETED
+                ):
+                    return _AgentContinuationResult(
+                        response=None,
+                        tool_rounds=tool_rounds,
+                        boundary_reached=True,
+                    )
+
         except Exception as exc:
             await self._emit(
                 AgentExecutionEvent(
@@ -475,6 +697,10 @@ class LLMAgent:
     ) -> AgentResponse:
         """
         Execute a new agent interaction.
+
+        When an orchestration plan is configured, the logical steps are
+        coordinated around the single LLM/tool continuation engine. The
+        conversation messages remain authoritative across step boundaries.
         """
         if not isinstance(context, AgentExecutionContext):
             raise TypeError("LLMAgent context must be an AgentExecutionContext.")
@@ -511,19 +737,64 @@ class LLMAgent:
             )
             raise
 
-        response = await self._continue(
-            context,
-            messages,
-            tool_rounds=0,
-        )
+        if context.orchestration_plan is None:
+            continuation = await self._continue(
+                context,
+                messages,
+                tool_rounds=0,
+            )
+            if continuation.response is None:
+                raise RuntimeError("LLM continuation reached a boundary without a response.")
+            return continuation.response
 
-        self._complete_orchestration_step(
-            context,
-            orchestration_step_index,
-            tool_round=response.metadata.get("tool_rounds"),
-        )
+        while True:
+            context.raise_if_execution_ownership_lost()
 
-        return response
+            continuation = await self._continue(
+                context,
+                messages,
+                tool_rounds=(
+                    0
+                    if orchestration_step_index is None
+                    else context.orchestration_state.steps[orchestration_step_index].tool_round or 0
+                ),
+            )
+
+            if continuation.response is not None:
+                self._set_orchestration_step_result(
+                    context,
+                    orchestration_step_index,
+                    continuation.response,
+                )
+
+                self._complete_orchestration_step(
+                    context,
+                    orchestration_step_index,
+                    tool_round=continuation.tool_rounds,
+                )
+
+            if not continuation.boundary_reached:
+                raise RuntimeError(
+                    "Orchestration continuation returned without a completion boundary."
+                )
+
+            current_step = context.orchestration_state.current_step
+            if current_step is None:
+                return continuation.response  # pragma: no cover
+
+            if current_step.status is not OrchestrationStepStatus.COMPLETED:
+                raise RuntimeError(
+                    "Orchestration boundary was reached before the current " "step completed."
+                )
+
+            next_step_index = self._advance_orchestration_step(context)
+
+            if next_step_index is None:
+                if continuation.response is None:
+                    raise RuntimeError("Final orchestration step completed without a response.")
+                return continuation.response
+
+            orchestration_step_index = next_step_index
 
     async def resume(
         self,
@@ -593,19 +864,38 @@ class LLMAgent:
                 tool_calls,
                 tool_round=tool_rounds,
             )
+        else:
+            self._restore_orchestration_tool_result_from_messages(
+                context,
+                messages,
+                tool_round=tool_rounds,
+            )
 
         context.raise_if_execution_ownership_lost()
 
-        response = await self._continue(
+        continuation = await self._continue(
             context,
             messages,
             tool_rounds=tool_rounds,
         )
 
+        response = continuation.response
+        if response is None:
+            raise RuntimeError(
+                "LLM continuation reached an orchestration boundary without "
+                "a final response during resume."
+            )
+
+        self._set_orchestration_step_result(
+            context,
+            orchestration_step_index,
+            response,
+        )
+
         self._complete_orchestration_step(
             context,
             orchestration_step_index,
-            tool_round=response.metadata.get("tool_rounds"),
+            tool_round=continuation.tool_rounds,
         )
 
         return response

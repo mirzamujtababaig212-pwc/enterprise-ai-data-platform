@@ -8,6 +8,8 @@ from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.models import AgentDefinition, AgentRequest
+from ai_platform.agents.orchestration import OrchestrationStepStatus
+from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
 from ai_platform.agents.tool_context import AgentToolContext
 from ai_platform.agents.tool_calls import (
     AgentToolCall,
@@ -76,6 +78,59 @@ def make_context(
         tools=tools,
         llm=llm,
     )
+
+
+def test_execution_context_defaults_to_empty_orchestration_state() -> None:
+    context = make_context()
+
+    assert context.orchestration_plan is None
+    assert context.orchestration_state.steps == []
+    assert context.orchestration_state.current_step_index is None
+
+
+def test_execution_context_materializes_supplied_orchestration_plan() -> None:
+    plan = build_enterprise_rag_analyst_plan()
+
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        orchestration_plan=plan,
+    )
+
+    assert context.orchestration_plan is plan
+    assert [step.step_id for step in context.orchestration_state.steps] == [
+        "retrieve_evidence",
+        "analyze_evidence",
+        "produce_answer",
+    ]
+    assert all(
+        step.status is OrchestrationStepStatus.PENDING for step in context.orchestration_state.steps
+    )
+    assert context.orchestration_state.current_step_index is None
+
+
+def test_execution_context_orchestration_state_is_independent_per_context() -> None:
+    plan = build_enterprise_rag_analyst_plan()
+
+    first = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        orchestration_plan=plan,
+    )
+    second = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        orchestration_plan=plan,
+    )
+
+    first.orchestration_state.start_step(0)
+
+    assert first.orchestration_state.current_step_index == 0
+    assert second.orchestration_state.current_step_index is None
+    assert plan.steps[0].status is OrchestrationStepStatus.PENDING
 
 
 def test_execution_context_defaults_to_no_ownership_loss_signal() -> None:

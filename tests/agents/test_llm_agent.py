@@ -30,6 +30,11 @@ from ai_platform.agents.llm_messages import (
     tool_result_message,
     user_message,
 )
+from ai_platform.agents.orchestration import (
+    OrchestrationPlan,
+    OrchestrationStep,
+    OrchestrationStepStatus,
+)
 from ai_platform.agents.models import (
     AgentDefinition,
     AgentRequest,
@@ -45,7 +50,6 @@ from tools.execution.context import ToolExecutionContext
 from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
 from ai_platform.agents.llm_agent import LLMAgent
-from ai_platform.agents.orchestration import OrchestrationStepStatus
 from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
 from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.agents.observability import (
@@ -324,13 +328,27 @@ async def test_executable_llm_agent_can_build_messages_with_tool_results() -> No
 
 
 @pytest.mark.asyncio
-async def test_llm_agent_run_completes_current_orchestration_step() -> None:
-    from ai_platform.agents.orchestration import OrchestrationStepStatus
-    from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
+async def test_llm_agent_run_completes_current_agent_response_orchestration_step() -> None:
+    from ai_platform.agents.orchestration import (
+        OrchestrationPlan,
+        OrchestrationStep,
+        OrchestrationStepCompletionPolicy,
+        OrchestrationStepStatus,
+    )
 
     context, gateway = make_context()
 
-    plan = build_enterprise_rag_analyst_plan()
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
     context.orchestration_plan = plan
     context.orchestration_state = plan.materialize_state()
 
@@ -350,24 +368,15 @@ async def test_llm_agent_run_completes_current_orchestration_step() -> None:
 
     state = context.orchestration_state
 
-    assert state.current_step_index == 0
-    assert len(state.steps) == 3
+    assert state.current_step_index is None
 
-    first_step = state.steps[0]
-    second_step = state.steps[1]
-    third_step = state.steps[2]
+    step = state.steps[0]
+    assert step.step_id == "answer"
+    assert step.status is OrchestrationStepStatus.COMPLETED
+    assert step.tool_round == 0
 
-    assert first_step.step_id == "retrieve_evidence"
-    assert first_step.status is OrchestrationStepStatus.COMPLETED
-    assert first_step.tool_round == 0
-
-    assert second_step.step_id == "analyze_evidence"
-    assert second_step.status is OrchestrationStepStatus.PENDING
-    assert second_step.tool_round is None
-
-    assert third_step.step_id == "produce_answer"
-    assert third_step.status is OrchestrationStepStatus.PENDING
-    assert third_step.tool_round is None
+    result = state.get_completed_step_result("answer")
+    assert result.output == "Generated answer."
 
 
 def test_llm_agent_starts_first_orchestration_step() -> None:
@@ -537,6 +546,97 @@ def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
     assert context.orchestration_state.steps == []
 
 
+def test_llm_agent_advances_to_next_orchestration_step() -> None:
+    from ai_platform.agents.orchestration import (
+        OrchestrationStepStatus,
+    )
+    from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
+
+    context, _ = make_context()
+
+    context.orchestration_plan = build_enterprise_rag_analyst_plan()
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="enterprise-rag-analyst",
+            description="Enterprise RAG analyst.",
+            system_prompt="You are an enterprise RAG analyst.",
+            model="mock-gpt",
+        )
+    )
+
+    context.orchestration_state.start_step(0)
+    context.orchestration_state.complete_step(tool_round=1)
+
+    next_step_index = agent._advance_orchestration_step(context)
+
+    assert next_step_index == 1
+    assert context.orchestration_state.current_step_index == 1
+
+    assert context.orchestration_state.steps[0].status is (OrchestrationStepStatus.COMPLETED)
+    assert context.orchestration_state.steps[0].tool_round == 1
+
+    assert context.orchestration_state.steps[1].status is (OrchestrationStepStatus.RUNNING)
+    assert context.orchestration_state.steps[1].tool_round is None
+
+
+def test_llm_agent_finishes_orchestration_without_advancing_past_final_step() -> None:
+    from ai_platform.agents.orchestration import (
+        OrchestrationPlan,
+        OrchestrationStep,
+        OrchestrationStepStatus,
+    )
+
+    context, _ = make_context()
+
+    context.orchestration_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="final",
+                step_index=0,
+                name="Final step",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        )
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test LLM-backed agent.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        )
+    )
+
+    context.orchestration_state.start_step(0)
+    context.orchestration_state.complete_step(tool_round=2)
+
+    next_step_index = agent._advance_orchestration_step(context)
+
+    assert next_step_index is None
+    assert context.orchestration_state.current_step_index is None
+    assert context.orchestration_state.steps[0].status is (OrchestrationStepStatus.COMPLETED)
+
+
+def test_llm_agent_does_not_advance_without_orchestration_plan() -> None:
+    context, _ = make_context()
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test LLM-backed agent.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        )
+    )
+
+    assert agent._advance_orchestration_step(context) is None
+    assert context.orchestration_state.current_step_index is None
+
+
 @pytest.mark.asyncio
 async def test_llm_agent_implements_agent_contract() -> None:
     from ai_platform.agents.contracts import Agent
@@ -606,6 +706,85 @@ async def test_llm_agent_returns_agent_response() -> None:
             "tool_rounds": 0,
         },
     )
+
+
+def test_llm_agent_publishes_orchestration_step_result() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    context, _ = make_context()
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="step-0",
+                step_index=0,
+                name="Test step",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        )
+    )
+
+    context.orchestration_plan = plan
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(definition)
+
+    step_index = agent._start_orchestration_step(context)
+
+    response = AgentResponse(
+        agent_name="production-llm-agent",
+        output="Generated answer.",
+        session_id=context.session_id,
+        metadata={
+            "provider": "fake",
+            "model": "mock-gpt",
+            "tool_rounds": 1,
+        },
+    )
+
+    agent._set_orchestration_step_result(
+        context,
+        step_index,
+        response,
+    )
+
+    result = context.orchestration_state.get_step_result("step-0")
+
+    assert result is not None
+    assert result.step_id == "step-0"
+    assert result.output == "Generated answer."
+    assert result.metadata == response.metadata
+
+
+def test_llm_agent_does_not_publish_result_without_orchestration_step() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    context, _ = make_context()
+
+    agent = LLMAgent(definition)
+
+    response = AgentResponse(
+        agent_name="production-llm-agent",
+        output="Generated answer.",
+    )
+
+    agent._set_orchestration_step_result(
+        context,
+        None,
+        response,
+    )
+
+    assert context.orchestration_state.step_results == {}
 
 
 @pytest.mark.asyncio
@@ -1928,6 +2107,126 @@ async def test_llm_agent_emits_tool_call_lifecycle_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_completes_rag_orchestration_step_on_tool_result() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    await tool_registry.register(FakeRAGTool())
+
+    plan = build_enterprise_rag_analyst_plan()
+    state = plan.materialize_state()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-orchestration",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    context.orchestration_plan = plan
+    context.orchestration_state = state
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    retrieve_step = state.steps[0]
+
+    assert retrieve_step.status is OrchestrationStepStatus.COMPLETED
+    assert retrieve_step.tool_round == 1
+
+    result = state.get_completed_step_result("retrieve_evidence")
+
+    assert result.output["query"] == "RAG"
+    assert result.output["retrieved_count"] == 2
+    assert result.metadata["rag_provenance"]["retrieved_count"] == 2
+
+    assert response.output == "RAG retrieves relevant context for generation."
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_stops_at_rag_orchestration_boundary_before_next_llm_call() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+
+    await tool_registry.register(tool)
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-boundary",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+    )
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    assert response.output == "RAG retrieves relevant context for generation."
+
+    # Each logical orchestration step gets its own LLM interaction.
+    # The retrieval tool result is the boundary between step 0 and step 1;
+    # the agent-response boundaries separate the remaining steps.
+    assert len(gateway.requests) == 3
+
+    state = context.orchestration_state
+
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[0].step_id == "retrieve_evidence"
+
+    assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[1].step_id == "analyze_evidence"
+
+    assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[2].step_id == "produce_answer"
+
+    assert tool.execute_count == 1
+
+    retrieval_result = state.get_completed_step_result("retrieve_evidence")
+    assert retrieval_result.output["retrieved_count"] == 2
+
+    analysis_result = state.get_completed_step_result("analyze_evidence")
+    assert analysis_result.output == "RAG retrieves relevant context for generation."
+
+    answer_result = state.get_completed_step_result("produce_answer")
+    assert answer_result.output == "RAG retrieves relevant context for generation."
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
     definition = AgentDefinition(
         name="production-llm-agent",
@@ -2659,7 +2958,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
     )
 
     tool_registry = InMemoryToolRegistry()
-    tool = FakeRAGTool(name="search")
+    tool = FakeRAGTool(name="rag.search")
     await tool_registry.register(tool)
 
     tools = AgentToolContext(
@@ -2692,7 +2991,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
                 tool_calls=(
                     AgentToolCall(
                         call_id="call-completed-1",
-                        name="search",
+                        name="rag.search",
                         arguments={"query": "RAG"},
                     ),
                 ),
@@ -2700,7 +2999,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
             ),
             tool_result_message(
                 call_id="call-completed-1",
-                tool_name="search",
+                tool_name="rag.search",
                 output={
                     "query": "RAG",
                     "retrieved_count": 2,
@@ -2743,7 +3042,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
         description="Enterprise RAG analyst.",
         system_prompt="You are an enterprise RAG analyst.",
         model="mock-gpt",
-        tool_names=("search",),
+        tool_names=("rag.search",),
     )
 
     gateway = FakeLLMGateway()
@@ -2757,7 +3056,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
     )
 
     tool_registry = InMemoryToolRegistry()
-    tool = FakeRAGTool(name="search")
+    tool = FakeRAGTool(name="rag.search")
     await tool_registry.register(tool)
 
     tools = AgentToolContext(
@@ -2790,7 +3089,7 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
                 tool_calls=(
                     AgentToolCall(
                         call_id="call-recover-1",
-                        name="search",
+                        name="rag.search",
                         arguments={"query": "RAG"},
                     ),
                 ),

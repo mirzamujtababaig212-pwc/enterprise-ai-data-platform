@@ -7,6 +7,7 @@ from typing import Any
 
 class OrchestrationStepCompletionPolicy(StrEnum):
     ON_AGENT_RESPONSE = "on_agent_response"
+    ON_TOOL_RESULT = "on_tool_result"
 
 
 class OrchestrationStepStatus(StrEnum):
@@ -140,6 +141,30 @@ class OrchestrationPlan:
         return OrchestrationState(steps=list(steps))
 
 
+@dataclass(frozen=True)
+class OrchestrationStepResult:
+    """
+    Durable-in-memory result produced by one logical orchestration step.
+
+    The result is intentionally provider- and domain-neutral. Lifecycle
+    transitions remain owned by OrchestrationState and storing a result
+    does not change step status.
+    """
+
+    step_id: str
+    output: Any
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.step_id, str) or not self.step_id.strip():
+            raise ValueError("Orchestration step result step_id must not be empty.")
+
+        if not isinstance(self.metadata, dict):
+            raise TypeError("Orchestration step result metadata must be a dictionary.")
+
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
 @dataclass
 class OrchestrationState:
     """
@@ -148,6 +173,7 @@ class OrchestrationState:
 
     steps: list[OrchestrationStep] = field(default_factory=list)
     current_step_index: int | None = None
+    step_results: dict[str, OrchestrationStepResult] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.current_step_index is not None:
@@ -168,6 +194,27 @@ class OrchestrationState:
         if self.current_step_index is not None and self.current_step_index >= len(self.steps):
             raise ValueError("Orchestration current_step_index must reference an existing step.")
 
+        self.step_results = dict(self.step_results)
+
+        step_ids = {step.step_id for step in self.steps}
+
+        for step_id, result in self.step_results.items():
+            if not isinstance(step_id, str) or not step_id.strip():
+                raise ValueError("Orchestration step result keys must not be empty.")
+
+            if step_id not in step_ids:
+                raise ValueError(
+                    f"Orchestration step result references unknown step_id {step_id!r}."
+                )
+
+            if not isinstance(result, OrchestrationStepResult):
+                raise TypeError(
+                    "Orchestration step_results must contain " "OrchestrationStepResult instances."
+                )
+
+            if result.step_id != step_id:
+                raise ValueError("Orchestration step result key must match result.step_id.")
+
     @property
     def current_step(self) -> OrchestrationStep | None:
         """Return the current logical step, if one is selected."""
@@ -175,6 +222,69 @@ class OrchestrationState:
             return None
 
         return self.steps[self.current_step_index]
+
+    def set_step_result(
+        self,
+        step_id: str,
+        output: Any,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> OrchestrationStepResult:
+        """
+        Store the result produced by a logical orchestration step.
+
+        Storing a result is deliberately independent from lifecycle status.
+        Callers must explicitly complete or fail the step.
+        """
+        index = self._resolve_step_id(step_id)
+        resolved_step_id = self.steps[index].step_id
+
+        result = OrchestrationStepResult(
+            step_id=resolved_step_id,
+            output=output,
+            metadata={} if metadata is None else metadata,
+        )
+
+        self.step_results[resolved_step_id] = result
+
+        return result
+
+    def get_step_result(
+        self,
+        step_id: str,
+    ) -> OrchestrationStepResult | None:
+        """Return the stored result for a logical step, if one exists."""
+        index = self._resolve_step_id(step_id)
+        resolved_step_id = self.steps[index].step_id
+        return self.step_results.get(resolved_step_id)
+
+    def get_completed_step_result(
+        self,
+        step_id: str,
+    ) -> OrchestrationStepResult:
+        """
+        Return a logical step result only after the step has completed.
+
+        Downstream orchestration stages must not consume a result from a
+        still-running or otherwise incomplete step.
+        """
+        index = self._resolve_step_id(step_id)
+        step = self.steps[index]
+
+        if step.status is not OrchestrationStepStatus.COMPLETED:
+            raise ValueError(
+                f"Orchestration step {step.step_id!r} must be COMPLETED "
+                "before its result can be consumed."
+            )
+
+        result = self.step_results.get(step.step_id)
+
+        if result is None:
+            raise ValueError(
+                f"Orchestration step {step.step_id!r} is COMPLETED " "but has no stored result."
+            )
+
+        return result
 
     def start_step(self, step_index: int) -> OrchestrationStep:
         """
@@ -306,6 +416,17 @@ class OrchestrationState:
             return None
 
         return self.start_step(next_index)
+
+    def _resolve_step_id(self, step_id: str) -> int:
+        """Resolve a logical step ID to its state index."""
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ValueError("Orchestration step_id must not be empty.")
+
+        for index, step in enumerate(self.steps):
+            if step.step_id == step_id:
+                return index
+
+        raise ValueError(f"Unknown orchestration step {step_id!r}")
 
     def _resolve_step_index(self, step_index: int | None) -> int:
         index = self.current_step_index if step_index is None else step_index

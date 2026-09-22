@@ -1,6 +1,7 @@
 import pytest
 
 from ai_platform.agents.orchestration import (
+    OrchestrationStepResult,
     OrchestrationPlan,
     OrchestrationState,
     OrchestrationStep,
@@ -193,6 +194,82 @@ def test_orchestration_state_completes_and_advances() -> None:
     assert next_step.step_id == "answer"
     assert next_step.status is OrchestrationStepStatus.RUNNING
     assert state.current_step_index == 1
+
+
+def test_orchestration_state_cannot_advance_without_current_step() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="without a current step"):
+        state.advance()
+
+
+def test_orchestration_state_cannot_advance_failed_step() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+            OrchestrationStep(
+                step_id="answer",
+                step_index=1,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    state.start_step(0)
+    state.fail_step(metadata={"reason": "timeout"})
+
+    with pytest.raises(ValueError, match="COMPLETED"):
+        state.advance()
+
+
+def test_orchestration_state_advance_preserves_completed_step() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+            OrchestrationStep(
+                step_id="analyze",
+                step_index=1,
+                name="Analyze evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    state.start_step(0)
+    completed = state.complete_step(tool_round=2)
+
+    next_step = state.advance()
+
+    assert completed.status is OrchestrationStepStatus.COMPLETED
+    assert completed.tool_round == 2
+
+    assert state.steps[0] is completed
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[0].tool_round == 2
+
+    assert next_step is not None
+    assert next_step.status is OrchestrationStepStatus.RUNNING
+    assert next_step.tool_round is None
 
 
 def test_orchestration_state_finishes_after_last_step() -> None:
@@ -421,3 +498,178 @@ def test_orchestration_plan_materializes_fresh_state() -> None:
     assert first.current_step_index == 0
     assert second.current_step_index is None
     assert plan.steps[0].status is OrchestrationStepStatus.PENDING
+
+
+def test_orchestration_state_stores_and_retrieves_step_result() -> None:
+    steps = [
+        OrchestrationStep(
+            step_id="retrieve",
+            step_index=0,
+            name="Retrieve",
+            status=OrchestrationStepStatus.PENDING,
+        ),
+        OrchestrationStep(
+            step_id="answer",
+            step_index=1,
+            name="Answer",
+            status=OrchestrationStepStatus.PENDING,
+        ),
+    ]
+    state = OrchestrationState(steps=steps)
+
+    result = state.set_step_result(
+        "retrieve",
+        {"documents": ["doc-1", "doc-2"]},
+        metadata={"count": 2},
+    )
+
+    assert result.step_id == "retrieve"
+    assert result.output == {"documents": ["doc-1", "doc-2"]}
+    assert result.metadata == {"count": 2}
+    assert state.get_step_result("retrieve") is result
+    assert state.get_step_result("answer") is None
+
+
+def test_orchestration_state_rejects_consuming_running_step_result() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve",
+                status=OrchestrationStepStatus.PENDING,
+            )
+        ]
+    )
+
+    state.start_step(0)
+    state.set_step_result("retrieve", {"documents": ["doc-1"]})
+
+    with pytest.raises(ValueError, match="must be COMPLETED"):
+        state.get_completed_step_result("retrieve")
+
+
+def test_orchestration_state_rejects_completed_step_without_result() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve",
+                status=OrchestrationStepStatus.PENDING,
+            )
+        ]
+    )
+
+    state.start_step(0)
+    state.complete_step()
+
+    with pytest.raises(ValueError, match="COMPLETED but has no stored result"):
+        state.get_completed_step_result("retrieve")
+
+
+def test_orchestration_state_returns_completed_step_result() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve",
+                status=OrchestrationStepStatus.PENDING,
+            )
+        ]
+    )
+
+    state.start_step(0)
+
+    result = state.set_step_result(
+        "retrieve",
+        {"documents": ["doc-1", "doc-2"]},
+        metadata={"retrieved_count": 2},
+    )
+
+    state.complete_step()
+
+    completed_result = state.get_completed_step_result("retrieve")
+
+    assert completed_result is result
+    assert completed_result.output == {"documents": ["doc-1", "doc-2"]}
+    assert completed_result.metadata == {"retrieved_count": 2}
+
+
+def test_orchestration_state_step_result_metadata_is_copied() -> None:
+    steps = [
+        OrchestrationStep(
+            step_id="retrieve",
+            step_index=0,
+            name="Retrieve",
+            status=OrchestrationStepStatus.PENDING,
+        )
+    ]
+    state = OrchestrationState(steps=steps)
+    metadata = {"source": "rag"}
+
+    result = state.set_step_result(
+        "retrieve",
+        "evidence",
+        metadata=metadata,
+    )
+
+    metadata["source"] = "mutated"
+
+    assert result.metadata == {"source": "rag"}
+
+
+def test_orchestration_state_rejects_unknown_step_result() -> None:
+    state = OrchestrationState(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve",
+                step_index=0,
+                name="Retrieve",
+                status=OrchestrationStepStatus.PENDING,
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Unknown orchestration step 'missing'"):
+        state.set_step_result("missing", "output")
+
+
+def test_orchestration_state_rejects_result_key_mismatch() -> None:
+    step = OrchestrationStep(
+        step_id="retrieve",
+        step_index=0,
+        name="Retrieve",
+        status=OrchestrationStepStatus.PENDING,
+    )
+
+    result = OrchestrationStepResult(
+        step_id="different",
+        output="output",
+    )
+
+    with pytest.raises(ValueError, match="result key must match"):
+        OrchestrationState(
+            steps=[step],
+            step_results={"retrieve": result},
+        )
+
+
+def test_orchestration_state_results_are_independent_per_state() -> None:
+    steps = [
+        OrchestrationStep(
+            step_id="retrieve",
+            step_index=0,
+            name="Retrieve",
+            status=OrchestrationStepStatus.PENDING,
+        )
+    ]
+
+    first = OrchestrationState(steps=steps)
+    second = OrchestrationState(steps=steps)
+
+    first.set_step_result("retrieve", "first")
+
+    assert first.get_step_result("retrieve") is not None
+    assert second.get_step_result("retrieve") is None

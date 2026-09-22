@@ -139,6 +139,49 @@ class RuntimeTestTool:
 
 
 @pytest.mark.asyncio
+async def test_runtime_injects_orchestration_plan_for_known_agent() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(name="enterprise-rag-analyst")
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    await runtime.run(
+        "enterprise-rag-analyst",
+        AgentRequest(input="Analyze the enterprise vehicle data."),
+    )
+
+    assert agent.last_context is not None
+    assert agent.last_context.orchestration_plan is not None
+    assert [step.step_id for step in agent.last_context.orchestration_state.steps] == [
+        "retrieve_evidence",
+        "analyze_evidence",
+        "produce_answer",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_keeps_orchestration_opt_in_for_unknown_plan() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent(name="test-agent")
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    await runtime.run(
+        "test-agent",
+        AgentRequest(input="Run without orchestration."),
+    )
+
+    assert agent.last_context is not None
+    assert agent.last_context.orchestration_plan is None
+    assert agent.last_context.orchestration_state.steps == []
+    assert agent.last_context.orchestration_state.current_step_index is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_authorized_principal_can_execute_declared_tool() -> None:
     agent_registry = InMemoryAgentRegistry()
     tool_registry = InMemoryToolRegistry()

@@ -25,9 +25,10 @@ def build_enterprise_rag_analyst_plan() -> OrchestrationPlan:
                 step_index=0,
                 name="Retrieve enterprise evidence",
                 status=OrchestrationStepStatus.PENDING,
-                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
                 metadata={
                     "phase": "evidence_retrieval",
+                    "completion_tool_name": "rag.search",
                 },
             ),
             OrchestrationStep(
