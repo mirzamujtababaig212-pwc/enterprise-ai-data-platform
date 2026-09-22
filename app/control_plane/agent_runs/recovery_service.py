@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -145,6 +146,7 @@ class AgentRunRecoveryService:
                 user_id=run.user_id,
                 metadata={
                     "recovery_type": "failed_run",
+                    "recovery_attempt": run.recovery_attempts,
                 },
             )
         )
@@ -200,6 +202,7 @@ class AgentRunRecoveryService:
                             user_id=exhausted_run.user_id,
                             metadata={
                                 "recovery_type": "stale_run",
+                                "recovery_attempt": exhausted_run.recovery_attempts,
                                 "error_type": RecoveryExhaustedError.__name__,
                                 "reason": "max_recovery_attempts_exceeded",
                             },
@@ -229,6 +232,7 @@ class AgentRunRecoveryService:
                     user_id=run.user_id,
                     metadata={
                         "recovery_type": "stale_run",
+                        "recovery_attempt": run.recovery_attempts,
                     },
                 )
             )
@@ -267,6 +271,7 @@ class AgentRunRecoveryService:
             await self._mark_failed(run, exc)
             raise exc
 
+        recovery_started_at = time.perf_counter()
         ownership_lost = asyncio.Event()
         execution_task = asyncio.current_task()
 
@@ -313,6 +318,10 @@ class AgentRunRecoveryService:
             )
         except asyncio.CancelledError:
             cancelled_at = datetime.now(UTC)
+            duration_ms = round(
+                (time.perf_counter() - recovery_started_at) * 1000,
+                3,
+            )
 
             cancelled_run = self._repository.cancel_if_owner(
                 run.run_id,
@@ -330,6 +339,8 @@ class AgentRunRecoveryService:
                         user_id=run.user_id,
                         metadata={
                             "recovery_type": recovery_type,
+                            "recovery_attempt": run.recovery_attempts,
+                            "duration_ms": duration_ms,
                         },
                     )
                 )
@@ -348,6 +359,11 @@ class AgentRunRecoveryService:
                 else exc
             )
 
+            duration_ms = round(
+                (time.perf_counter() - recovery_started_at) * 1000,
+                3,
+            )
+
             await self._mark_failed(run, failure)
             await self._emit(
                 AgentExecutionEvent(
@@ -358,6 +374,8 @@ class AgentRunRecoveryService:
                     user_id=run.user_id,
                     metadata={
                         "recovery_type": recovery_type,
+                        "recovery_attempt": run.recovery_attempts,
+                        "duration_ms": duration_ms,
                         "error_type": type(failure).__name__,
                         **({"reason": "max_recovery_attempts_exceeded"} if exhausted else {}),
                     },
@@ -395,6 +413,11 @@ class AgentRunRecoveryService:
                 f"Agent run '{run.run_id}' lost lease ownership before completion.",
             )
 
+        duration_ms = round(
+            (time.perf_counter() - recovery_started_at) * 1000,
+            3,
+        )
+
         await self._emit(
             AgentExecutionEvent(
                 event_type=AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
@@ -404,6 +427,8 @@ class AgentRunRecoveryService:
                 user_id=run.user_id,
                 metadata={
                     "recovery_type": recovery_type,
+                    "recovery_attempt": run.recovery_attempts,
+                    "duration_ms": duration_ms,
                 },
             )
         )

@@ -479,10 +479,12 @@ async def test_recovery_emits_started_and_completed_events_for_failed_run():
 
     assert observer.events[0].metadata == {
         "recovery_type": "failed_run",
+        "recovery_attempt": 1,
     }
-    assert observer.events[1].metadata == {
-        "recovery_type": "failed_run",
-    }
+    assert observer.events[1].metadata["recovery_type"] == "failed_run"
+    assert observer.events[1].metadata["recovery_attempt"] == 1
+    assert isinstance(observer.events[1].metadata["duration_ms"], (int, float))
+    assert observer.events[1].metadata["duration_ms"] >= 0
 
     for event in observer.events:
         assert event.run_id == "run-123"
@@ -582,11 +584,13 @@ async def test_recovery_emits_started_and_failed_events_on_resume_failure():
 
     assert observer.events[0].metadata == {
         "recovery_type": "failed_run",
+        "recovery_attempt": 1,
     }
-    assert observer.events[1].metadata == {
-        "recovery_type": "failed_run",
-        "error_type": "ValueError",
-    }
+    assert observer.events[1].metadata["recovery_type"] == "failed_run"
+    assert observer.events[1].metadata["recovery_attempt"] == 1
+    assert isinstance(observer.events[1].metadata["duration_ms"], (int, float))
+    assert observer.events[1].metadata["duration_ms"] >= 0
+    assert observer.events[1].metadata["error_type"] == "ValueError"
 
     assert "lease_id" not in observer.events[1].metadata
 
@@ -853,12 +857,14 @@ async def test_final_recovery_attempt_failure_exhausts_recovery_budget():
 
     assert observer.events[0].metadata == {
         "recovery_type": "failed_run",
+        "recovery_attempt": 3,
     }
-    assert observer.events[1].metadata == {
-        "recovery_type": "failed_run",
-        "error_type": "RecoveryExhaustedError",
-        "reason": "max_recovery_attempts_exceeded",
-    }
+    assert observer.events[1].metadata["recovery_type"] == "failed_run"
+    assert observer.events[1].metadata["recovery_attempt"] == 3
+    assert isinstance(observer.events[1].metadata["duration_ms"], (int, float))
+    assert observer.events[1].metadata["duration_ms"] >= 0
+    assert observer.events[1].metadata["error_type"] == "RecoveryExhaustedError"
+    assert observer.events[1].metadata["reason"] == "max_recovery_attempts_exceeded"
 
 
 @pytest.mark.asyncio
@@ -1095,6 +1101,7 @@ async def test_recover_stale_runs_marks_exhausted_run_failed_without_resuming():
 
     assert observer.events[0].metadata == {
         "recovery_type": "stale_run",
+        "recovery_attempt": 3,
         "error_type": "RecoveryExhaustedError",
         "reason": "max_recovery_attempts_exceeded",
     }
@@ -1214,10 +1221,12 @@ async def test_recover_stale_runs_emits_started_and_completed_events():
 
     assert observer.events[0].metadata == {
         "recovery_type": "stale_run",
+        "recovery_attempt": 1,
     }
-    assert observer.events[1].metadata == {
-        "recovery_type": "stale_run",
-    }
+    assert observer.events[1].metadata["recovery_type"] == "stale_run"
+    assert observer.events[1].metadata["recovery_attempt"] == 1
+    assert isinstance(observer.events[1].metadata["duration_ms"], (int, float))
+    assert observer.events[1].metadata["duration_ms"] >= 0
 
     for event in observer.events:
         assert event.run_id == "stale-run-123"

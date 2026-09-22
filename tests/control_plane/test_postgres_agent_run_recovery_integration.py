@@ -882,14 +882,16 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
         assert events[0].user_id == "user-postgres"
         assert events[0].metadata == {
             "recovery_type": "stale_run",
+            "recovery_attempt": 1,
         }
 
         assert events[1].agent_name == "recoverable-agent"
         assert events[1].session_id == "session-postgres"
         assert events[1].user_id == "user-postgres"
-        assert events[1].metadata == {
-            "recovery_type": "stale_run",
-        }
+        assert events[1].metadata["recovery_type"] == "stale_run"
+        assert events[1].metadata["recovery_attempt"] == 1
+        assert isinstance(events[1].metadata["duration_ms"], (int, float))
+        assert events[1].metadata["duration_ms"] >= 0
 
         assert "lease_id" not in events[0].metadata
         assert "lease_id" not in events[1].metadata

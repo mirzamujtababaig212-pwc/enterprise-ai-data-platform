@@ -16,6 +16,10 @@ from ai_platform.agents.prometheus_observer import (
     AGENT_MEMORY_WRITE_DURATION_SECONDS,
     AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
     AGENT_ORCHESTRATION_STEPS_TOTAL,
+    AGENT_RECOVERY_ATTEMPTS_TOTAL,
+    AGENT_RECOVERY_COMPLETED_TOTAL,
+    AGENT_RECOVERY_DURATION_SECONDS,
+    AGENT_RECOVERY_FAILED_TOTAL,
     AGENT_TOOL_CALLS_TOTAL,
     AGENT_TOOL_FAILURES_TOTAL,
     PrometheusAgentExecutionObserver,
@@ -31,6 +35,253 @@ def _sample_value(metric, labels):
         if sample.labels == labels:
             return sample.value
     return 0.0
+
+
+def test_recovery_started_records_attempt_counter():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "recovery_type": "failed_run",
+    }
+
+    before_attempts = _sample_value(
+        AGENT_RECOVERY_ATTEMPTS_TOTAL,
+        labels,
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                metadata={
+                    "recovery_type": "failed_run",
+                    "recovery_attempt": 2,
+                    "secret": "must-not-be-a-label",
+                },
+            )
+        )
+    )
+
+    after_attempts = _sample_value(
+        AGENT_RECOVERY_ATTEMPTS_TOTAL,
+        labels,
+    )
+
+    assert after_attempts == before_attempts + 1
+
+
+def test_recovery_completed_records_counter_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    counter_labels = {
+        "agent_name": "test-agent",
+        "recovery_type": "stale_run",
+    }
+    duration_labels = {
+        **counter_labels,
+        "status": "completed",
+    }
+
+    before_completed = _sample_value(
+        AGENT_RECOVERY_COMPLETED_TOTAL,
+        counter_labels,
+    )
+    before_duration = _sample_value(
+        AGENT_RECOVERY_DURATION_SECONDS,
+        {
+            **duration_labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "recovery_type": "stale_run",
+                    "recovery_attempt": 3,
+                },
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                metadata={
+                    "recovery_type": "stale_run",
+                    "recovery_attempt": 3,
+                    "secret": "must-not-be-a-label",
+                },
+            )
+        )
+    )
+
+    after_completed = _sample_value(
+        AGENT_RECOVERY_COMPLETED_TOTAL,
+        counter_labels,
+    )
+    after_duration = _sample_value(
+        AGENT_RECOVERY_DURATION_SECONDS,
+        {
+            **duration_labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_completed == before_completed + 1
+    assert after_duration >= before_duration
+
+
+def test_recovery_failure_records_failure_counter_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    counter_labels = {
+        "agent_name": "test-agent",
+        "recovery_type": "failed_run",
+    }
+    duration_labels = {
+        **counter_labels,
+        "status": "failed",
+    }
+
+    before_failures = _sample_value(
+        AGENT_RECOVERY_FAILED_TOTAL,
+        counter_labels,
+    )
+    before_duration = _sample_value(
+        AGENT_RECOVERY_DURATION_SECONDS,
+        {
+            **duration_labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "recovery_type": "failed_run",
+                    "recovery_attempt": 1,
+                },
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "recovery_type": "failed_run",
+                    "recovery_attempt": 1,
+                    "error_type": "RuntimeError",
+                    "error": "secret error",
+                },
+            )
+        )
+    )
+
+    after_failures = _sample_value(
+        AGENT_RECOVERY_FAILED_TOTAL,
+        counter_labels,
+    )
+    after_duration = _sample_value(
+        AGENT_RECOVERY_DURATION_SECONDS,
+        {
+            **duration_labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_failures == before_failures + 1
+    assert after_duration >= before_duration
+
+
+def test_recovery_metrics_use_only_low_cardinality_labels():
+    observer = PrometheusAgentExecutionObserver()
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                metadata={
+                    "recovery_type": "stale_run",
+                    "recovery_attempt": 7,
+                    "lease_id": "lease-secret",
+                    "error": "secret error",
+                },
+            )
+        )
+    )
+
+    samples = AGENT_RECOVERY_ATTEMPTS_TOTAL.collect()[0].samples
+
+    matching = [
+        sample
+        for sample in samples
+        if sample.labels.get("agent_name") == "test-agent"
+        and sample.labels.get("recovery_type") == "stale_run"
+    ]
+
+    assert matching
+    assert set(matching[0].labels) == {
+        "agent_name",
+        "recovery_type",
+    }
+
+
+def test_recovery_events_without_recovery_type_are_ignored():
+    observer = PrometheusAgentExecutionObserver()
+
+    before_attempts = sum(
+        sample.value
+        for sample in AGENT_RECOVERY_ATTEMPTS_TOTAL.collect()[0].samples
+        if sample.labels.get("agent_name") == "test-agent"
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_RECOVERY_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                metadata={
+                    "recovery_attempt": 1,
+                },
+            )
+        )
+    )
+
+    after_attempts = sum(
+        sample.value
+        for sample in AGENT_RECOVERY_ATTEMPTS_TOTAL.collect()[0].samples
+        if sample.labels.get("agent_name") == "test-agent"
+    )
+
+    assert after_attempts == before_attempts
 
 
 def test_orchestration_step_completed_records_counter_and_duration():

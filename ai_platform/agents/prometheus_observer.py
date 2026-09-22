@@ -131,6 +131,43 @@ AGENT_ORCHESTRATION_STEP_DURATION_SECONDS = Histogram(
     ],
 )
 
+AGENT_RECOVERY_ATTEMPTS_TOTAL = Counter(
+    "deldai_agent_recovery_attempts_total",
+    "Total agent recovery attempts by recovery type.",
+    [
+        "agent_name",
+        "recovery_type",
+    ],
+)
+
+AGENT_RECOVERY_COMPLETED_TOTAL = Counter(
+    "deldai_agent_recovery_completed_total",
+    "Total agent recoveries completed successfully.",
+    [
+        "agent_name",
+        "recovery_type",
+    ],
+)
+
+AGENT_RECOVERY_FAILED_TOTAL = Counter(
+    "deldai_agent_recovery_failed_total",
+    "Total agent recoveries that failed.",
+    [
+        "agent_name",
+        "recovery_type",
+    ],
+)
+
+AGENT_RECOVERY_DURATION_SECONDS = Histogram(
+    "deldai_agent_recovery_duration_seconds",
+    "Agent recovery duration in seconds.",
+    [
+        "agent_name",
+        "recovery_type",
+        "status",
+    ],
+)
+
 
 class PrometheusAgentExecutionObserver(AgentExecutionObserver):
     """
@@ -146,11 +183,85 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
             asyncio.Task[object],
             float,
         ] = {}
+        self._recovery_started_at: dict[
+            asyncio.Task[object],
+            float,
+        ] = {}
 
     async def record(
         self,
         event: AgentExecutionEvent,
     ) -> None:
+        if event.event_type is AgentExecutionEventType.AGENT_RECOVERY_STARTED:
+            recovery_type = event.metadata.get("recovery_type")
+            if not isinstance(recovery_type, str) or not recovery_type.strip():
+                return
+
+            labels = {
+                "agent_name": event.agent_name,
+                "recovery_type": recovery_type,
+            }
+
+            AGENT_RECOVERY_ATTEMPTS_TOTAL.labels(
+                **labels,
+            ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                self._recovery_started_at[task] = time.perf_counter()
+
+            return
+
+        if event.event_type in (
+            AgentExecutionEventType.AGENT_RECOVERY_COMPLETED,
+            AgentExecutionEventType.AGENT_RECOVERY_FAILED,
+        ):
+            recovery_type = event.metadata.get("recovery_type")
+            if not isinstance(recovery_type, str) or not recovery_type.strip():
+                return
+
+            status = (
+                "completed"
+                if event.event_type is AgentExecutionEventType.AGENT_RECOVERY_COMPLETED
+                else "failed"
+            )
+
+            labels = {
+                "agent_name": event.agent_name,
+                "recovery_type": recovery_type,
+                "status": status,
+            }
+
+            if status == "completed":
+                AGENT_RECOVERY_COMPLETED_TOTAL.labels(
+                    agent_name=event.agent_name,
+                    recovery_type=recovery_type,
+                ).inc()
+            else:
+                AGENT_RECOVERY_FAILED_TOTAL.labels(
+                    agent_name=event.agent_name,
+                    recovery_type=recovery_type,
+                ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                started_at = self._recovery_started_at.pop(
+                    task,
+                    None,
+                )
+
+                if started_at is not None:
+                    AGENT_RECOVERY_DURATION_SECONDS.labels(
+                        **labels,
+                    ).observe(
+                        max(
+                            0.0,
+                            time.perf_counter() - started_at,
+                        ),
+                    )
+
+            return
+
         if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_STARTED:
             if event.step_name is None:
                 return
@@ -212,6 +323,7 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
             task = asyncio.current_task()
             if task is not None:
                 self._orchestration_step_started_at.pop(task, None)
+                self._recovery_started_at.pop(task, None)
 
             return
 
@@ -224,6 +336,7 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
             task = asyncio.current_task()
             if task is not None:
                 self._orchestration_step_started_at.pop(task, None)
+                self._recovery_started_at.pop(task, None)
 
             return
 
@@ -236,6 +349,7 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
             task = asyncio.current_task()
             if task is not None:
                 self._orchestration_step_started_at.pop(task, None)
+                self._recovery_started_at.pop(task, None)
 
             return
 
