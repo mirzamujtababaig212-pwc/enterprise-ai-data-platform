@@ -3008,7 +3008,17 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
         ),
         tool_round=1,
         position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
-        metadata={},
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
     )
 
     agent = LLMAgent(definition)
@@ -3018,19 +3028,24 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
     assert response.output == "Generated answer."
     assert response.metadata["tool_rounds"] == 1
     assert tool.execute_count == 0
+    assert len(gateway.requests) == 2
 
     state = context.orchestration_state
 
-    assert state.current_step is not None
-    assert state.current_step.step_id == "retrieve_evidence"
-    assert state.current_step.status is OrchestrationStepStatus.COMPLETED
-    assert state.current_step.tool_round == 1
+    assert state.current_step is None
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[0].tool_round == 1
+    assert state.get_step_result("retrieve_evidence") is not None
 
     assert state.steps[1].step_id == "analyze_evidence"
-    assert state.steps[1].status is OrchestrationStepStatus.PENDING
+    assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
+    assert state.get_step_result("analyze_evidence") is not None
 
     assert state.steps[2].step_id == "produce_answer"
-    assert state.steps[2].status is OrchestrationStepStatus.PENDING
+    assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
+    assert state.get_step_result("produce_answer") is not None
 
 
 @pytest.mark.asyncio
@@ -3098,7 +3113,17 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
         ),
         tool_round=1,
         position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
-        metadata={},
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.RUNNING.value,
+                        "tool_round": None,
+                    },
+                },
+            },
+        },
         execution_budget_state=ExecutionBudgetState(
             llm_calls=1,
             tool_calls=1,
@@ -3113,19 +3138,178 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
     assert response.output == "Generated answer."
     assert response.metadata["tool_rounds"] == 1
     assert tool.execute_count == 1
+    assert len(gateway.requests) == 2
 
     state = context.orchestration_state
 
-    assert state.current_step is not None
-    assert state.current_step.step_id == "retrieve_evidence"
-    assert state.current_step.status is OrchestrationStepStatus.COMPLETED
-    assert state.current_step.tool_round == 1
+    assert state.current_step is None
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[0].tool_round == 1
+    assert state.get_step_result("retrieve_evidence") is not None
 
     assert state.steps[1].step_id == "analyze_evidence"
-    assert state.steps[1].status is OrchestrationStepStatus.PENDING
+    assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
+    assert state.get_step_result("analyze_evidence") is not None
 
     assert state.steps[2].step_id == "produce_answer"
-    assert state.steps[2].status is OrchestrationStepStatus.PENDING
+    assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
+    assert state.get_step_result("produce_answer") is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_rejects_non_running_current_orchestration_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="mock-gpt",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-orchestration-invalid",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-orchestration-invalid-1",
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-orchestration-invalid-1",
+        agent_name=definition.name,
+        session_id="session-orchestration-invalid",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+        ),
+        tool_round=0,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        ValueError,
+        match="current step must be RUNNING before tool execution",
+    ):
+        await agent.resume(context, checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_rejects_completed_step_after_current_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="mock-gpt",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-orchestration-invalid",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-orchestration-invalid-2",
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-orchestration-invalid-2",
+        agent_name=definition.name,
+        session_id="session-orchestration-invalid",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+        ),
+        tool_round=0,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.RUNNING.value,
+                        "tool_round": None,
+                    },
+                    "analyze_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        ValueError,
+        match="steps after the current step must be PENDING",
+    ):
+        await agent.resume(context, checkpoint)
 
 
 @pytest.mark.asyncio

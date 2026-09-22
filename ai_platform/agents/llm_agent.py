@@ -11,6 +11,7 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.orchestration import (
+    OrchestrationStep,
     OrchestrationStepCompletionPolicy,
     OrchestrationStepStatus,
 )
@@ -254,7 +255,7 @@ class LLMAgent:
                     messages=tuple(messages),
                     tool_round=tool_round,
                     position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
-                    metadata=context.metadata,
+                    metadata=self._orchestration_checkpoint_metadata(context),
                     execution_budget_state=ExecutionBudgetState.from_dict(
                         context.execution_budget_state.to_dict()
                     ),
@@ -301,7 +302,7 @@ class LLMAgent:
                     messages=tuple(messages),
                     tool_round=tool_round,
                     position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
-                    metadata=context.metadata,
+                    metadata=self._orchestration_checkpoint_metadata(context),
                     execution_budget_state=ExecutionBudgetState.from_dict(
                         context.execution_budget_state.to_dict()
                     ),
@@ -316,6 +317,194 @@ class LLMAgent:
             context,
             tool_calls,
             tool_round=tool_round,
+        )
+
+    def _orchestration_checkpoint_metadata(
+        self,
+        context: AgentExecutionContext,
+    ) -> dict:
+        """
+        Return checkpoint metadata with the logical orchestration position.
+
+        Canonical messages remain authoritative for conversation and tool
+        execution state. This snapshot only persists bounded logical-step
+        lifecycle state so recovery can resume the correct orchestration step.
+        """
+        metadata = dict(context.metadata)
+
+        if context.orchestration_plan is None:
+            return metadata
+
+        state = context.orchestration_state
+
+        metadata["orchestration"] = {
+            "current_step_index": state.current_step_index,
+            "steps": {
+                step.step_id: {
+                    "status": step.status.value,
+                    "tool_round": step.tool_round,
+                }
+                for step in state.steps
+                if step.status is not OrchestrationStepStatus.PENDING
+            },
+        }
+
+        return metadata
+
+    def _validate_restored_orchestration_state(
+        self,
+        context: AgentExecutionContext,
+        checkpoint_position: AgentCheckpointPosition,
+    ) -> None:
+        """
+        Validate the restored orchestration lifecycle against the checkpoint
+        position.
+
+        BEFORE_TOOL_EXECUTION checkpoints retain a RUNNING current step
+        because the tool still needs to execute. AFTER_TOOL_EXECUTION
+        checkpoints retain a COMPLETED current step because the tool result
+        has already been persisted and the logical step boundary was reached.
+        """
+        state = context.orchestration_state
+
+        if state.current_step_index is None:
+            if any(step.status is not OrchestrationStepStatus.COMPLETED for step in state.steps):
+                raise ValueError(
+                    "Checkpoint orchestration state without a current step "
+                    "must have all steps COMPLETED."
+                )
+            return
+
+        current_index = state.current_step_index
+        current_step = state.steps[current_index]
+
+        if checkpoint_position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION:
+            if current_step.status is not OrchestrationStepStatus.RUNNING:
+                raise ValueError(
+                    "Checkpoint orchestration current step must be RUNNING "
+                    "before tool execution."
+                )
+        elif checkpoint_position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
+            if current_step.status is not OrchestrationStepStatus.COMPLETED:
+                raise ValueError(
+                    "Checkpoint orchestration current step must be COMPLETED "
+                    "after tool execution."
+                )
+        else:
+            raise ValueError("Unsupported checkpoint position for orchestration recovery.")
+
+        for index, step in enumerate(state.steps):
+            if index < current_index:
+                if step.status is not OrchestrationStepStatus.COMPLETED:
+                    raise ValueError(
+                        "Checkpoint orchestration steps before the current "
+                        "step must be COMPLETED."
+                    )
+            elif index > current_index:
+                if step.status is not OrchestrationStepStatus.PENDING:
+                    raise ValueError(
+                        "Checkpoint orchestration steps after the current " "step must be PENDING."
+                    )
+
+    def _restore_orchestration_checkpoint_state(
+        self,
+        context: AgentExecutionContext,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> None:
+        """
+        Restore bounded logical orchestration lifecycle state from checkpoint
+        metadata.
+
+        Step results are intentionally not restored from metadata. Successful
+        tool results are reconstructed from canonical checkpoint messages,
+        while LLM-produced results remain part of the resumed conversation.
+        """
+        if context.orchestration_plan is None:
+            return
+
+        orchestration_metadata = checkpoint.metadata.get("orchestration")
+
+        if orchestration_metadata is None:
+            return
+
+        if not isinstance(orchestration_metadata, dict):
+            raise ValueError("Checkpoint orchestration metadata must be a dictionary.")
+
+        current_step_index = orchestration_metadata.get("current_step_index")
+
+        if current_step_index is not None:
+            if not isinstance(current_step_index, int) or isinstance(
+                current_step_index,
+                bool,
+            ):
+                raise ValueError("Checkpoint orchestration current_step_index must be an integer.")
+
+            if current_step_index < 0 or current_step_index >= len(
+                context.orchestration_state.steps
+            ):
+                raise ValueError("Checkpoint orchestration current_step_index is out of range.")
+
+        steps_metadata = orchestration_metadata.get("steps", {})
+
+        if not isinstance(steps_metadata, dict):
+            raise ValueError("Checkpoint orchestration steps metadata must be a dictionary.")
+
+        state = context.orchestration_state
+
+        for step_id, step_snapshot in steps_metadata.items():
+            if not isinstance(step_id, str) or not step_id.strip():
+                raise ValueError("Checkpoint orchestration step IDs must not be empty.")
+
+            if not isinstance(step_snapshot, dict):
+                raise ValueError(
+                    f"Checkpoint orchestration step {step_id!r} " "metadata must be a dictionary."
+                )
+
+            index = state._resolve_step_id(step_id)
+            step = state.steps[index]
+
+            status_value = step_snapshot.get("status")
+            tool_round = step_snapshot.get("tool_round")
+
+            if status_value not in {
+                OrchestrationStepStatus.RUNNING.value,
+                OrchestrationStepStatus.COMPLETED.value,
+                OrchestrationStepStatus.FAILED.value,
+            }:
+                raise ValueError(
+                    f"Checkpoint orchestration step {step_id!r} " "has an invalid status."
+                )
+
+            if tool_round is not None:
+                if not isinstance(tool_round, int) or isinstance(tool_round, bool):
+                    raise ValueError(
+                        f"Checkpoint orchestration step {step_id!r} "
+                        "tool_round must be an integer."
+                    )
+
+                if tool_round < 0:
+                    raise ValueError(
+                        f"Checkpoint orchestration step {step_id!r} "
+                        "tool_round must not be negative."
+                    )
+
+            restored_status = OrchestrationStepStatus(status_value)
+
+            context.orchestration_state.steps[index] = OrchestrationStep(
+                step_id=step.step_id,
+                step_index=step.step_index,
+                name=step.name,
+                status=restored_status,
+                completion_policy=step.completion_policy,
+                tool_round=tool_round,
+                metadata=step.metadata,
+            )
+
+        state.current_step_index = current_step_index
+
+        self._validate_restored_orchestration_state(
+            context,
+            checkpoint.position,
         )
 
     def _start_orchestration_step(
@@ -437,7 +626,9 @@ class LLMAgent:
         Restore a completed tool-bound orchestration step from checkpoint messages.
 
         This path is used only after tool execution has already happened.
-        It reconstructs the logical step result without executing the tool again.
+        It reconstructs the logical step result without executing the tool again
+        and is idempotent when checkpoint metadata already marks the step
+        completed.
         """
         if context.orchestration_plan is None:
             return
@@ -491,6 +682,15 @@ class LLMAgent:
                 output,
                 metadata=metadata,
             )
+
+            if step.status is OrchestrationStepStatus.COMPLETED:
+                return
+
+            if step.status is not OrchestrationStepStatus.RUNNING:
+                raise RuntimeError(
+                    "Cannot restore orchestration tool result for a step "
+                    f"in {step.status.value!r} status."
+                )
 
             state.complete_step(
                 step.step_index,
@@ -804,8 +1004,9 @@ class LLMAgent:
         """
         Resume an agent from a durable execution checkpoint.
 
-        The checkpoint conversation is the authoritative continuation
-        state. Completed tools represented by the checkpoint are not
+        The checkpoint conversation is the authoritative continuation state.
+        Logical orchestration position is restored from bounded checkpoint
+        metadata, while completed tools represented by the checkpoint are not
         executed again.
         """
         if not isinstance(context, AgentExecutionContext):
@@ -837,11 +1038,75 @@ class LLMAgent:
             checkpoint.execution_budget_state.to_dict()
         )
 
-        orchestration_step_index = self._start_orchestration_step(context)
+        self._restore_orchestration_checkpoint_state(
+            context,
+            checkpoint,
+        )
 
         messages = list(checkpoint.messages)
         tool_rounds = checkpoint.tool_round
 
+        # Non-orchestrated agents retain the existing recovery semantics.
+        if context.orchestration_plan is None:
+            if checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION:
+                from ai_platform.agents.llm_messages import (
+                    assistant_tool_calls_from_message,
+                )
+
+                if not messages:
+                    raise ValueError("Before-tool-execution checkpoint must contain messages.")
+
+                tool_calls = assistant_tool_calls_from_message(messages[-1])
+
+                context.raise_if_execution_ownership_lost()
+
+                await self._execute_tool_calls_and_append_results(
+                    messages,
+                    context,
+                    tool_calls,
+                    tool_round=tool_rounds,
+                )
+            else:
+                self._restore_orchestration_tool_result_from_messages(
+                    context,
+                    messages,
+                    tool_round=tool_rounds,
+                )
+
+            context.raise_if_execution_ownership_lost()
+
+            continuation = await self._continue(
+                context,
+                messages,
+                tool_rounds=tool_rounds,
+            )
+
+            response = continuation.response
+
+            if response is None:
+                raise RuntimeError("LLM continuation did not produce a response during resume.")
+
+            return response
+
+        state = context.orchestration_state
+
+        # A checkpoint without an orchestration snapshot represents a
+        # pre-orchestration checkpoint. Start from the first logical step.
+        if state.current_step is None:
+            orchestration_step_index = self._start_orchestration_step(context)
+        else:
+            orchestration_step_index = state.current_step.step_index
+
+        if orchestration_step_index is None:
+            raise RuntimeError("Orchestration recovery could not determine the current step.")
+
+        current_step = state.current_step
+
+        if current_step is None:
+            raise RuntimeError("Orchestration recovery has no current step.")
+
+        # A BEFORE_TOOL checkpoint represents an in-progress tool-bound
+        # logical step. Execute the captured tool call exactly once.
         if checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION:
             from ai_platform.agents.llm_messages import (
                 assistant_tool_calls_from_message,
@@ -850,11 +1115,7 @@ class LLMAgent:
             if not messages:
                 raise ValueError("Before-tool-execution checkpoint must contain messages.")
 
-            assistant_message = messages[-1]
-
-            tool_calls = assistant_tool_calls_from_message(
-                assistant_message,
-            )
+            tool_calls = assistant_tool_calls_from_message(messages[-1])
 
             context.raise_if_execution_ownership_lost()
 
@@ -864,7 +1125,11 @@ class LLMAgent:
                 tool_calls,
                 tool_round=tool_rounds,
             )
+
         else:
+            # An AFTER_TOOL checkpoint already contains the successful tool
+            # result. Reconstruct the logical tool-bound step without replaying
+            # the side effect.
             self._restore_orchestration_tool_result_from_messages(
                 context,
                 messages,
@@ -873,29 +1138,86 @@ class LLMAgent:
 
         context.raise_if_execution_ownership_lost()
 
-        continuation = await self._continue(
-            context,
-            messages,
-            tool_rounds=tool_rounds,
-        )
+        # The current recovered step is now complete if it was tool-bound.
+        current_step = state.current_step
 
-        response = continuation.response
-        if response is None:
-            raise RuntimeError(
-                "LLM continuation reached an orchestration boundary without "
-                "a final response during resume."
+        if (
+            current_step is not None
+            and current_step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
+            and current_step.status is OrchestrationStepStatus.COMPLETED
+        ):
+            next_step_index = self._advance_orchestration_step(context)
+
+            if next_step_index is None:
+                raise RuntimeError(
+                    "Orchestration recovery completed without a final response step."
+                )
+
+            orchestration_step_index = next_step_index
+
+        elif current_step is not None and current_step.status is OrchestrationStepStatus.COMPLETED:
+            next_step_index = self._advance_orchestration_step(context)
+
+            if next_step_index is None:
+                raise RuntimeError("Orchestration recovery completed without a final response.")
+
+            orchestration_step_index = next_step_index
+
+        while True:
+            context.raise_if_execution_ownership_lost()
+
+            current_step = state.current_step
+
+            if current_step is None:
+                raise RuntimeError("Orchestration recovery has no current step.")
+
+            if current_step.status is not OrchestrationStepStatus.RUNNING:
+                raise RuntimeError(
+                    "Orchestration recovery current step must be RUNNING " "before continuation."
+                )
+
+            continuation = await self._continue(
+                context,
+                messages,
+                tool_rounds=(
+                    current_step.tool_round if current_step.tool_round is not None else tool_rounds
+                ),
             )
 
-        self._set_orchestration_step_result(
-            context,
-            orchestration_step_index,
-            response,
-        )
+            if not continuation.boundary_reached:
+                raise RuntimeError(
+                    "LLM continuation did not reach an orchestration boundary " "during resume."
+                )
 
-        self._complete_orchestration_step(
-            context,
-            orchestration_step_index,
-            tool_round=continuation.tool_rounds,
-        )
+            response = continuation.response
 
-        return response
+            if response is not None:
+                self._set_orchestration_step_result(
+                    context,
+                    orchestration_step_index,
+                    response,
+                )
+
+            self._complete_orchestration_step(
+                context,
+                orchestration_step_index,
+                tool_round=continuation.tool_rounds,
+            )
+
+            current_step = state.current_step
+
+            if current_step is None:
+                raise RuntimeError("Orchestration recovery lost the current step after completion.")
+
+            next_step_index = self._advance_orchestration_step(context)
+
+            if next_step_index is None:
+                if response is None:
+                    raise RuntimeError(
+                        "Final orchestration recovery step completed without " "an agent response."
+                    )
+
+                return response
+
+            orchestration_step_index = next_step_index
+            tool_rounds = continuation.tool_rounds
