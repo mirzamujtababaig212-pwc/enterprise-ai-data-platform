@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.config.settings import Settings
@@ -91,3 +93,91 @@ def test_agent_run_lease_duration_can_be_overridden(
     settings = Settings.from_environment()
 
     assert settings.agent_run_lease_duration_seconds == 120
+
+
+def test_mcp_servers_rejects_non_array_args(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "name": "server-a",
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": "server.py",
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="MCP_SERVERS contains an invalid server configuration",
+    ):
+        Settings.from_environment()
+
+
+def test_mcp_servers_rejects_non_object_env(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "name": "server-a",
+                    "transport": "stdio",
+                    "command": "python",
+                    "env": [],
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="MCP_SERVERS contains an invalid server configuration",
+    ):
+        Settings.from_environment()
+
+
+def test_mcp_servers_rejects_non_object_headers(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "name": "server-a",
+                    "transport": "streamable-http",
+                    "url": "http://127.0.0.1:9000/mcp",
+                    "headers": [],
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="MCP_SERVERS contains an invalid server configuration",
+    ):
+        Settings.from_environment()
+
+
+def test_mcp_servers_rejects_non_boolean_verify_ssl(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "name": "server-a",
+                    "transport": "streamable-http",
+                    "url": "http://127.0.0.1:9000/mcp",
+                    "verify_ssl": "false",
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="MCP_SERVERS contains an invalid server configuration",
+    ):
+        Settings.from_environment()

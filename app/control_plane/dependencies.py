@@ -75,6 +75,7 @@ from rag.stores.factory import VectorStoreFactory
 from tools.authorization.in_memory import InMemoryToolAuthorizer
 from tools.authorization.service import ToolAuthorizationService
 from tools.execution.service import ToolExecutionService
+from tools.mcp.manager import MCPServerManager
 from tools.rag.search import RAGSearchTool
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.vehicle.data_query import VehicleDataQueryTool
@@ -83,6 +84,7 @@ _llm_router = Router()
 
 _agent_registry = InMemoryAgentRegistry()
 _tool_registry = InMemoryToolRegistry()
+_mcp_server_manager = MCPServerManager(_tool_registry)
 _agent_run_cancellation_registry = AgentRunCancellationRegistry()
 
 _agent_observer = CompositeAgentExecutionObserver(
@@ -162,6 +164,9 @@ _agent_runtime = AgentRuntime(
 _agent_initialization_lock = asyncio.Lock()
 _agents_initialized = False
 
+_mcp_initialization_lock = asyncio.Lock()
+_mcp_servers_initialized = False
+
 _vehicle_risk_predictor = VehicleRiskPredictor(
     model_alias="champion",
 )
@@ -225,6 +230,22 @@ _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
     chat_service=_rag_chat_service,
 )
+
+
+async def _validate_agent_tool_capabilities() -> None:
+    """Validate that every declared agent tool is registered and enabled."""
+    tools = await _tool_registry.list_tools()
+    available_tools = {tool.name for tool in tools}
+
+    agents = await _agent_registry.list_agents()
+
+    for agent in agents:
+        for tool_name in agent.tool_names:
+            if tool_name not in available_tools:
+                raise RuntimeError(
+                    f"Agent '{agent.name}' declares tool '{tool_name}', "
+                    "but that tool is not registered or enabled."
+                )
 
 
 async def _initialize_agents() -> None:
@@ -307,7 +328,50 @@ async def _initialize_agents() -> None:
             )
         )
 
+        await _validate_agent_tool_capabilities()
+
         _agents_initialized = True
+
+
+async def initialize_mcp_servers() -> None:
+    global _mcp_servers_initialized
+
+    if _mcp_servers_initialized:
+        return
+
+    async with _mcp_initialization_lock:
+        if _mcp_servers_initialized:
+            return
+
+        app_settings = Settings.from_environment()
+
+        try:
+            for server_config in app_settings.mcp_servers:
+                await _mcp_server_manager.register_server(server_config)
+                await _mcp_server_manager.connect_and_discover(server_config.name)
+        except Exception:
+            await _mcp_server_manager.disconnect_all()
+            raise
+
+        _mcp_servers_initialized = True
+
+
+async def close_mcp_servers() -> None:
+    global _mcp_servers_initialized
+
+    try:
+        await _mcp_server_manager.disconnect_all()
+    finally:
+        _mcp_servers_initialized = False
+
+
+def get_mcp_server_manager() -> MCPServerManager:
+    return _mcp_server_manager
+
+
+async def initialize_agents() -> None:
+    """Initialize agents and validate their declared capabilities."""
+    await _initialize_agents()
 
 
 async def get_agent_runtime() -> AgentRuntime:

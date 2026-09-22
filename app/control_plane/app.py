@@ -12,13 +12,23 @@ from app.control_plane.routes.llm import router as llm_router
 from app.control_plane.routes.ml import router as ml_router
 from app.control_plane.routes.platform import router as platform_router
 from app.control_plane.routes.rag import router as rag_router
-from app.control_plane.dependencies import close_rag_vector_store
+from app.control_plane.dependencies import (
+    close_mcp_servers,
+    close_rag_vector_store,
+    initialize_agents,
+    initialize_mcp_servers,
+)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    await close_rag_vector_store()
+    try:
+        await initialize_mcp_servers()
+        await initialize_agents()
+        yield
+    finally:
+        await close_mcp_servers()
+        await close_rag_vector_store()
 
 
 app = FastAPI(

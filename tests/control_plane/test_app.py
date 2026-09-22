@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
@@ -56,3 +58,45 @@ def test_lifespan_closes_rag_vector_store(monkeypatch) -> None:
         pass
 
     assert calls == [True]
+
+
+def test_lifespan_closes_mcp_servers_when_startup_fails(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_initialize() -> None:
+        calls.append("initialize")
+        raise RuntimeError("MCP startup failed")
+
+    async def fake_close_mcp() -> None:
+        calls.append("close_mcp")
+
+    async def fake_close_rag() -> None:
+        calls.append("close_rag")
+
+    monkeypatch.setattr(
+        "app.control_plane.app.initialize_mcp_servers",
+        fake_initialize,
+    )
+    monkeypatch.setattr(
+        "app.control_plane.app.close_mcp_servers",
+        fake_close_mcp,
+    )
+    monkeypatch.setattr(
+        "app.control_plane.app.close_rag_vector_store",
+        fake_close_rag,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="MCP startup failed",
+    ):
+        with TestClient(app):
+            pass
+
+    assert calls == [
+        "initialize",
+        "close_mcp",
+        "close_rag",
+    ]

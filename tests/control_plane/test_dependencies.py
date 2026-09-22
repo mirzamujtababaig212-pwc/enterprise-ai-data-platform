@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from app.config.settings import Settings
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
@@ -18,6 +18,7 @@ from app.control_plane.tool_execution.postgres_idempotency import (
 )
 from rag.retrieval import HybridRetriever
 from tools.execution.service import ToolExecutionService
+from tools.mcp.config import MCPServerConfig
 
 
 def test_get_usage_store_creates_repository_from_injected_session() -> None:
@@ -192,3 +193,308 @@ async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
     from app.control_plane import dependencies
 
     assert service._cancellation_registry is dependencies._agent_run_cancellation_registry
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_servers_registers_connects_and_discovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    class FakeMCPManager:
+        def __init__(self) -> None:
+            self.registered: list[MCPServerConfig] = []
+            self.connected: list[str] = []
+            self.discovered: list[str] = []
+
+        async def register_server(self, config: MCPServerConfig) -> None:
+            self.registered.append(config)
+
+        async def connect_and_discover(self, name: str) -> None:
+            self.connected.append(name)
+            self.discovered.append(name)
+
+        async def disconnect_all(self) -> None:
+            return None
+
+    manager = FakeMCPManager()
+
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=60,
+        agent_run_max_recovery_attempts=3,
+        mcp_servers=(
+            MCPServerConfig(
+                name="server-a",
+                transport="stdio",
+                command="python",
+            ),
+            MCPServerConfig(
+                name="server-b",
+                transport="streamable-http",
+                url="http://127.0.0.1:9000/mcp",
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(dependencies, "_mcp_server_manager", manager)
+    monkeypatch.setattr(
+        dependencies,
+        "_mcp_servers_initialized",
+        False,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "Settings",
+        Mock(from_environment=Mock(return_value=configured_settings)),
+    )
+
+    await dependencies.initialize_mcp_servers()
+
+    assert manager.registered == list(configured_settings.mcp_servers)
+    assert manager.connected == ["server-a", "server-b"]
+    assert manager.discovered == ["server-a", "server-b"]
+    assert dependencies._mcp_servers_initialized is True
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_servers_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    manager = Mock()
+    manager.register_server = AsyncMock()
+    manager.connect_and_discover = AsyncMock()
+
+    monkeypatch.setattr(dependencies, "_mcp_server_manager", manager)
+    monkeypatch.setattr(
+        dependencies,
+        "_mcp_servers_initialized",
+        True,
+    )
+
+    await dependencies.initialize_mcp_servers()
+
+    manager.register_server.assert_not_awaited()
+    manager.connect_and_discover.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_servers_disconnects_partial_startup_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    manager = Mock()
+    manager.register_server = AsyncMock()
+    manager.connect_and_discover = AsyncMock(
+        side_effect=[
+            None,
+            RuntimeError("server-b discovery failed"),
+        ]
+    )
+    manager.disconnect_all = AsyncMock()
+
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=60,
+        agent_run_max_recovery_attempts=3,
+        mcp_servers=(
+            MCPServerConfig(
+                name="server-a",
+                transport="stdio",
+                command="python",
+            ),
+            MCPServerConfig(
+                name="server-b",
+                transport="stdio",
+                command="python",
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(dependencies, "_mcp_server_manager", manager)
+    monkeypatch.setattr(
+        dependencies,
+        "_mcp_servers_initialized",
+        False,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "Settings",
+        Mock(from_environment=Mock(return_value=configured_settings)),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="server-b discovery failed",
+    ):
+        await dependencies.initialize_mcp_servers()
+
+    manager.disconnect_all.assert_awaited_once()
+    assert dependencies._mcp_servers_initialized is False
+
+
+@pytest.mark.asyncio
+async def test_close_mcp_servers_disconnects_all_and_resets_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    manager = Mock()
+    manager.disconnect_all = AsyncMock()
+
+    monkeypatch.setattr(dependencies, "_mcp_server_manager", manager)
+    monkeypatch.setattr(
+        dependencies,
+        "_mcp_servers_initialized",
+        True,
+    )
+
+    await dependencies.close_mcp_servers()
+
+    manager.disconnect_all.assert_awaited_once()
+    assert dependencies._mcp_servers_initialized is False
+
+
+def test_get_mcp_server_manager_returns_shared_manager() -> None:
+    from app.control_plane import dependencies
+
+    assert dependencies.get_mcp_server_manager() is dependencies._mcp_server_manager
+
+
+@pytest.mark.asyncio
+async def test_validate_agent_tool_capabilities_accepts_registered_enabled_tools(
+    monkeypatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    class FakeTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.name = "test-agent"
+            self.tool_names = ("test.tool",)
+
+    class FakeToolRegistry:
+        async def list_tools(self):
+            return [FakeTool("test.tool")]
+
+    class FakeAgentRegistry:
+        async def list_agents(self):
+            return [FakeAgent()]
+
+    monkeypatch.setattr(
+        dependencies,
+        "_tool_registry",
+        FakeToolRegistry(),
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "_agent_registry",
+        FakeAgentRegistry(),
+    )
+
+    await dependencies._validate_agent_tool_capabilities()
+
+
+@pytest.mark.asyncio
+async def test_validate_agent_tool_capabilities_rejects_missing_tool(
+    monkeypatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    class FakeTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.name = "test-agent"
+            self.tool_names = ("missing.tool",)
+
+    class FakeToolRegistry:
+        async def list_tools(self):
+            return [FakeTool("existing.tool")]
+
+    class FakeAgentRegistry:
+        async def list_agents(self):
+            return [FakeAgent()]
+
+    monkeypatch.setattr(
+        dependencies,
+        "_tool_registry",
+        FakeToolRegistry(),
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "_agent_registry",
+        FakeAgentRegistry(),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Agent 'test-agent' declares tool 'missing.tool', "
+            "but that tool is not registered or enabled"
+        ),
+    ):
+        await dependencies._validate_agent_tool_capabilities()
+
+
+@pytest.mark.asyncio
+async def test_validate_agent_tool_capabilities_rejects_disabled_tool(
+    monkeypatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    class FakeTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.name = "test-agent"
+            self.tool_names = ("disabled.tool",)
+
+    class FakeToolRegistry:
+        async def list_tools(self):
+            # ToolRegistry.list_tools() exposes enabled tools only.
+            return []
+
+    class FakeAgentRegistry:
+        async def list_agents(self):
+            return [FakeAgent()]
+
+    monkeypatch.setattr(
+        dependencies,
+        "_tool_registry",
+        FakeToolRegistry(),
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "_agent_registry",
+        FakeAgentRegistry(),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Agent 'test-agent' declares tool 'disabled.tool', "
+            "but that tool is not registered or enabled"
+        ),
+    ):
+        await dependencies._validate_agent_tool_capabilities()
