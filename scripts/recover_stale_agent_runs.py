@@ -34,8 +34,18 @@ async def recover_stale_runs(limit: int) -> int:
             recovery_service=recovery_service,
             limit=limit,
         )
-        results = await worker.run_once()
-        print(f"Recovered {len(results)} stale agent run(s).")
+        result = await worker.run_once()
+        print(f"Recovered {len(result.recovered)} stale agent run(s).")
+
+        if result.failed_run_ids:
+            print(
+                "Failed to recover "
+                f"{len(result.failed_run_ids)} stale agent run(s): "
+                f"{', '.join(result.failed_run_ids)}",
+                file=sys.stderr,
+            )
+            return 1
+
         return 0
     finally:
         db.close()

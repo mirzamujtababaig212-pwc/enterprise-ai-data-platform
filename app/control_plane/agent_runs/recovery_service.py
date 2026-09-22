@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
@@ -26,6 +27,14 @@ from app.control_plane.agent_runs.lease import (
     create_lease,
     heartbeat_loop,
 )
+
+
+@dataclass(frozen=True)
+class AgentRunRecoverySweepResult:
+    """Outcome of one automatic stale-run recovery sweep."""
+
+    recovered: tuple[AgentRunExecutionResult, ...]
+    failed_run_ids: tuple[str, ...]
 
 
 class AgentRunRecoveryService:
@@ -150,7 +159,7 @@ class AgentRunRecoveryService:
         *,
         stale_before: datetime | None = None,
         limit: int = 100,
-    ) -> list[AgentRunExecutionResult]:
+    ) -> AgentRunRecoverySweepResult:
         if limit <= 0:
             raise ValueError("Recovery limit must be greater than zero.")
 
@@ -162,6 +171,7 @@ class AgentRunRecoveryService:
         )
 
         results: list[AgentRunExecutionResult] = []
+        failed_run_ids: list[str] = []
 
         for candidate in candidates:
             claimed_at = datetime.now(UTC)
@@ -231,9 +241,13 @@ class AgentRunRecoveryService:
                     )
                 )
             except Exception:
+                failed_run_ids.append(candidate.run_id)
                 continue
 
-        return results
+        return AgentRunRecoverySweepResult(
+            recovered=tuple(results),
+            failed_run_ids=tuple(failed_run_ids),
+        )
 
     async def _resume_claimed_run(
         self,

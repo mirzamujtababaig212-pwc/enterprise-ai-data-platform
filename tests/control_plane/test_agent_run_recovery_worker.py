@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.control_plane.agent_runs.models import AgentRunExecutionResult
+from app.control_plane.agent_runs.recovery_service import AgentRunRecoverySweepResult
 from app.control_plane.agent_runs.recovery_worker import (
     AgentRunRecoveryWorker,
 )
@@ -27,12 +28,15 @@ def test_worker_rejects_non_positive_limit() -> None:
 async def test_run_once_delegates_to_recovery_service() -> None:
     recovery_service = AsyncMock()
 
-    expected = [
-        AgentRunExecutionResult(
-            run_id="run-1",
-            response={"output": "recovered"},
-        )
-    ]
+    expected = AgentRunRecoverySweepResult(
+        recovered=(
+            AgentRunExecutionResult(
+                run_id="run-1",
+                response={"output": "recovered"},
+            ),
+        ),
+        failed_run_ids=(),
+    )
     recovery_service.recover_stale_runs.return_value = expected
 
     worker = AgentRunRecoveryWorker(
@@ -51,7 +55,10 @@ async def test_run_once_delegates_to_recovery_service() -> None:
 @pytest.mark.asyncio
 async def test_run_once_returns_empty_result_when_nothing_is_recovered() -> None:
     recovery_service = AsyncMock()
-    recovery_service.recover_stale_runs.return_value = []
+    recovery_service.recover_stale_runs.return_value = AgentRunRecoverySweepResult(
+        recovered=(),
+        failed_run_ids=(),
+    )
 
     worker = AgentRunRecoveryWorker(
         recovery_service=recovery_service,
@@ -60,7 +67,8 @@ async def test_run_once_returns_empty_result_when_nothing_is_recovered() -> None
 
     result = await worker.run_once()
 
-    assert result == []
+    assert result.recovered == ()
+    assert result.failed_run_ids == ()
     recovery_service.recover_stale_runs.assert_awaited_once_with(
         limit=10,
     )

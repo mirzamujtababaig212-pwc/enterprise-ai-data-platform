@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import scripts.recover_stale_agent_runs as cli
+from app.control_plane.agent_runs.recovery_service import AgentRunRecoverySweepResult
 
 
 class FakeSession:
@@ -24,10 +25,13 @@ async def test_recover_stale_runs_closes_session_and_returns_success(
     db = FakeSession()
     recovery_service = AsyncMock()
     worker = AsyncMock()
-    worker.run_once.return_value = [
-        SimpleNamespace(run_id="run-1"),
-        SimpleNamespace(run_id="run-2"),
-    ]
+    worker.run_once.return_value = AgentRunRecoverySweepResult(
+        recovered=(
+            SimpleNamespace(run_id="run-1"),
+            SimpleNamespace(run_id="run-2"),
+        ),
+        failed_run_ids=(),
+    )
 
     monkeypatch.setattr(cli, "SessionLocal", lambda: db)
     monkeypatch.setattr(
@@ -49,6 +53,42 @@ async def test_recover_stale_runs_closes_session_and_returns_success(
 
     output = capsys.readouterr().out
     assert output == "Recovered 2 stale agent run(s).\n"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_returns_one_when_sweep_has_failed_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db = FakeSession()
+    recovery_service = AsyncMock()
+    worker = AsyncMock()
+    worker.run_once.return_value = AgentRunRecoverySweepResult(
+        recovered=(SimpleNamespace(run_id="run-1"),),
+        failed_run_ids=("run-2",),
+    )
+
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        cli,
+        "build_agent_run_recovery_service",
+        AsyncMock(return_value=recovery_service),
+    )
+    monkeypatch.setattr(
+        cli,
+        "AgentRunRecoveryWorker",
+        Mock(return_value=worker),
+    )
+
+    result = await cli.recover_stale_runs(25)
+
+    assert result == 1
+    assert db.closed is True
+    worker.run_once.assert_awaited_once()
+
+    captured = capsys.readouterr()
+    assert captured.out == "Recovered 1 stale agent run(s).\n"
+    assert captured.err == "Failed to recover 1 stale agent run(s): run-2\n"
 
 
 @pytest.mark.asyncio

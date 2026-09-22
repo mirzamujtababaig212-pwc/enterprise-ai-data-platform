@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from app.control_plane.agent_runs.models import AgentRunExecutionResult
-from app.control_plane.agent_runs.recovery_service import AgentRunRecoveryService
+from app.control_plane.agent_runs.recovery_service import (
+    AgentRunRecoveryService,
+    AgentRunRecoverySweepResult,
+)
 
 
 class AgentRunRecoveryWorker:
@@ -25,7 +27,7 @@ class AgentRunRecoveryWorker:
         self._recovery_service = recovery_service
         self._limit = limit
 
-    async def run_once(self) -> list[AgentRunExecutionResult]:
+    async def run_once(self) -> AgentRunRecoverySweepResult:
         return await self._recovery_service.recover_stale_runs(
             limit=self._limit,
         )

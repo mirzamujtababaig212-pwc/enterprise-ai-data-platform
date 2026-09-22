@@ -456,9 +456,12 @@ def test_postgres_recovery_replays_completed_tool_from_before_checkpoint() -> No
             )
         )
 
-        assert len(results) == 1
-        assert results[0].run_id == run_id
-        assert results[0].response.output == ("Recovered execution completed successfully.")
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == run_id
+        assert results.recovered[0].response.output == (
+            "Recovered execution completed successfully."
+        )
+        assert results.failed_run_ids == ()
 
         # The recovery path reconstructed the original call_id and reached
         # ToolExecutionService, but PostgreSQL idempotency returned the
@@ -671,11 +674,12 @@ def test_postgres_recovery_does_not_repeat_side_effect_after_lease_loss() -> Non
             )
         )
 
-        assert len(results) == 1
-        assert results[0].run_id == run_id
-        assert results[0].response.output == (
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == run_id
+        assert results.recovered[0].response.output == (
             "Recovered without duplicating the external side effect."
         )
+        assert results.failed_run_ids == ()
 
         # Recovery encountered the same logical tool call, but the durable
         # AMBIGUOUS state prevented another external side effect.
@@ -780,9 +784,10 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
             )
         )
 
-        assert len(results) == 1
-        assert results[0].run_id == run_id
-        assert results[0].response.output == ("Recovered from PostgreSQL checkpoint.")
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == run_id
+        assert results.recovered[0].response.output == ("Recovered from PostgreSQL checkpoint.")
+        assert results.failed_run_ids == ()
 
         assert len(runtime.calls) == 1
 

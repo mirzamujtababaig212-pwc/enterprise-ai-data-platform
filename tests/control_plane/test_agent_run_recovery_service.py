@@ -1043,8 +1043,8 @@ async def test_recover_stale_runs_limit_applies_to_stale_candidates():
         limit=1,
     )
 
-    assert len(results) == 1
-    assert results[0].run_id == "stale-run"
+    assert len(results.recovered) == 1
+    assert results.recovered[0].run_id == "stale-run"
 
 
 @pytest.mark.asyncio
@@ -1072,7 +1072,8 @@ async def test_recover_stale_runs_marks_exhausted_run_failed_without_resuming():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert results == []
+    assert results.recovered == ()
+    assert results.failed_run_ids == ()
     assert runtime.calls == []
     assert repository.stale_recovery_claim is None
 
@@ -1128,8 +1129,10 @@ async def test_recover_stale_runs_does_not_emit_duplicate_exhaustion_event():
         stale_before=stale_before,
     )
 
-    assert first_results == []
-    assert second_results == []
+    assert first_results.recovered == ()
+    assert first_results.failed_run_ids == ()
+    assert second_results.recovered == ()
+    assert second_results.failed_run_ids == ()
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_RECOVERY_FAILED,
@@ -1165,9 +1168,9 @@ async def test_recover_stale_runs_claims_and_resumes_expired_run():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert len(results) == 1
-    assert results[0].run_id == "stale-run-123"
-    assert results[0].response.output == "Recovered successfully."
+    assert len(results.recovered) == 1
+    assert results.recovered[0].run_id == "stale-run-123"
+    assert results.recovered[0].response.output == "Recovered successfully."
 
     recovered = repository.get("stale-run-123")
 
@@ -1202,7 +1205,7 @@ async def test_recover_stale_runs_emits_started_and_completed_events():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert len(results) == 1
+    assert len(results.recovered) == 1
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_RECOVERY_STARTED,
@@ -1257,7 +1260,8 @@ async def test_recover_stale_runs_ignores_unexpired_run():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert results == []
+    assert results.recovered == ()
+    assert results.failed_run_ids == ()
     assert runtime.calls == []
 
     run = repository.get("stale-run-123")
@@ -1293,7 +1297,8 @@ async def test_recover_stale_runs_ignores_run_without_lease_expiry():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert results == []
+    assert results.recovered == ()
+    assert results.failed_run_ids == ()
     assert runtime.calls == []
 
 
@@ -1331,7 +1336,8 @@ async def test_recover_stale_runs_ignores_cancellation_requested_run():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert results == []
+    assert results.recovered == ()
+    assert results.failed_run_ids == ()
     assert runtime.calls == []
 
     run = repository.get("stale-run-123")
@@ -1362,7 +1368,8 @@ async def test_recover_stale_runs_marks_run_failed_when_checkpoint_is_missing():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert results == []
+    assert results.recovered == ()
+    assert results.failed_run_ids == ("stale-run-123",)
 
     run = repository.get("stale-run-123")
 
@@ -1433,8 +1440,9 @@ async def test_recover_stale_runs_continues_after_one_run_fails():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert len(results) == 1
-    assert results[0].run_id == "stale-success"
+    assert len(results.recovered) == 1
+    assert results.recovered[0].run_id == "stale-success"
+    assert results.failed_run_ids == ("stale-failing",)
 
     failed = repository.get("stale-failing")
     succeeded = repository.get("stale-success")
@@ -1479,7 +1487,7 @@ async def test_recover_stale_runs_resumes_with_new_lease_ownership():
         stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert len(results) == 1
+    assert len(results.recovered) == 1
 
     assert repository.stale_recovery_claim is not None
     new_lease_id = repository.stale_recovery_claim["lease_id"]
