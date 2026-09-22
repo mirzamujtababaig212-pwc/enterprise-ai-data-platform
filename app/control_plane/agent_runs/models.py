@@ -57,6 +57,7 @@ class AgentRun(BaseModel):
 
     session_id: str | None = None
     user_id: str | None = None
+    idempotency_key: str | None = None
 
     status: AgentRunStatus = AgentRunStatus.PENDING
 

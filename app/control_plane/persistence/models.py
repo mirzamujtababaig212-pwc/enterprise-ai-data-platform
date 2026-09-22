@@ -3,15 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     JSON,
-    Boolean,
     PrimaryKeyConstraint,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -102,6 +103,13 @@ class RetrievalEvaluationReleaseDecisionRecord(Base):
 
 class AgentRunRecord(Base):
     __tablename__ = "agent_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_agent_runs_user_id_idempotency_key",
+        ),
+    )
 
     run_id: Mapped[str] = mapped_column(
         String(36),
@@ -121,6 +129,12 @@ class AgentRunRecord(Base):
     )
 
     user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    idempotency_key: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         index=True,

@@ -26,7 +26,7 @@ from app.control_plane.routes.agents import router
 
 class FakeAgentRunApplicationService:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, AgentRequest]] = []
+        self.calls: list[tuple[str, AgentRequest, str | None]] = []
         self.runs = {}
         self.list_calls = []
         self.events = {}
@@ -79,11 +79,13 @@ class FakeAgentRunApplicationService:
         *,
         agent_name: str,
         request: AgentRequest,
+        idempotency_key: str | None = None,
     ) -> AgentRunExecutionResult:
         self.calls.append(
             (
                 agent_name,
                 request,
+                idempotency_key,
             )
         )
 
@@ -151,14 +153,129 @@ def test_run_agent_returns_runtime_response() -> None:
 
     assert len(service.calls) == 1
 
-    agent_name, request = service.calls[0]
+    agent_name, request, idempotency_key = service.calls[0]
+
+    assert agent_name == "enterprise-analyst"
+    assert request.input == "Explain RAG."
+    assert idempotency_key is None
+    assert request.user_id == "user-123"
+    assert request.session_id == "session-123"
+    assert request.metadata == {
+        "source": "test",
+    }
+
+
+def test_run_agent_forwards_idempotency_key_header() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        headers={
+            "Idempotency-Key": "request-123",
+        },
+        json={
+            "input": "Explain RAG.",
+            "user_id": "user-123",
+            "session_id": "session-123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+
+    agent_name, request, idempotency_key = service.calls[0]
 
     assert agent_name == "enterprise-analyst"
     assert request.input == "Explain RAG."
     assert request.user_id == "user-123"
     assert request.session_id == "session-123"
-    assert request.metadata == {
-        "source": "test",
+    assert idempotency_key == "request-123"
+
+
+def test_run_agent_without_idempotency_key_preserves_current_behavior() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        json={
+            "input": "Explain RAG.",
+            "user_id": "user-123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+
+    _, _, idempotency_key = service.calls[0]
+
+    assert idempotency_key is None
+
+
+def test_run_agent_maps_idempotency_validation_error_to_422() -> None:
+    service = FakeAgentRunApplicationService()
+
+    async def execute_with_error(
+        *,
+        agent_name: str,
+        request: AgentRequest,
+        idempotency_key: str | None = None,
+    ) -> AgentRunExecutionResult:
+        raise ValueError(
+            "Idempotency key must not be empty when provided.",
+        )
+
+    service.execute = execute_with_error
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        headers={
+            "Idempotency-Key": "   ",
+        },
+        json={
+            "input": "Explain RAG.",
+            "user_id": "user-123",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Idempotency key must not be empty when provided.",
+    }
+
+
+def test_run_agent_maps_idempotency_conflict_to_409() -> None:
+    service = FakeAgentRunApplicationService()
+
+    async def execute_with_conflict(
+        *,
+        agent_name: str,
+        request: AgentRequest,
+        idempotency_key: str | None = None,
+    ) -> AgentRunExecutionResult:
+        raise RuntimeError(
+            "Idempotency key is already associated with a different request.",
+        )
+
+    service.execute = execute_with_conflict
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        headers={
+            "Idempotency-Key": "request-123",
+        },
+        json={
+            "input": "Different request.",
+            "user_id": "user-123",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": ("Idempotency key is already associated with a different request."),
     }
 
 

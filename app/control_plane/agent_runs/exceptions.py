@@ -6,6 +6,10 @@ class AgentRunNotFoundError(LookupError):
     """Raised when an agent run cannot be found for an update."""
 
 
+class AgentRunIdempotencyConflictError(ValueError):
+    """Raised when an idempotency key is reused for a different request."""
+
+
 class InvalidAgentRunTransitionError(ValueError):
     """Raised when an agent run lifecycle transition is not allowed."""
 

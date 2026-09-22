@@ -17,6 +17,7 @@ def make_run(
     agent_name: str = "enterprise-analyst",
     session_id: str | None = None,
     user_id: str | None = None,
+    idempotency_key: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
     lease_id: str | None = None,
@@ -28,6 +29,7 @@ def make_run(
         agent_name=agent_name,
         session_id=session_id,
         user_id=user_id,
+        idempotency_key=idempotency_key,
         status=status,
         started_at=started_at,
         lease_id=lease_id,
@@ -56,6 +58,77 @@ def test_get_missing_run_returns_none() -> None:
     repository = InMemoryAgentRunRepository()
 
     assert repository.get("missing") is None
+
+
+def test_get_by_idempotency_key_returns_matching_user_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    run = make_run(
+        "run-1",
+        user_id="user-a",
+        idempotency_key="request-123",
+    )
+
+    repository.create(run)
+
+    assert (
+        repository.get_by_idempotency_key(
+            "user-a",
+            "request-123",
+        )
+        == run
+    )
+
+
+def test_get_by_idempotency_key_is_scoped_to_user() -> None:
+    repository = InMemoryAgentRunRepository()
+    run = make_run(
+        "run-1",
+        user_id="user-a",
+        idempotency_key="request-123",
+    )
+
+    repository.create(run)
+
+    assert (
+        repository.get_by_idempotency_key(
+            "user-b",
+            "request-123",
+        )
+        is None
+    )
+
+
+def test_get_by_idempotency_key_returns_none_for_missing_key() -> None:
+    repository = InMemoryAgentRunRepository()
+    repository.create(
+        make_run(
+            "run-1",
+            user_id="user-a",
+            idempotency_key="request-123",
+        )
+    )
+
+    assert (
+        repository.get_by_idempotency_key(
+            "user-a",
+            "missing-key",
+        )
+        is None
+    )
+
+
+def test_multiple_null_idempotency_keys_are_allowed() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    first = make_run("run-1", user_id="user-a")
+    second = make_run("run-2", user_id="user-a")
+
+    repository.create(first)
+    repository.create(second)
+
+    assert repository.get_by_idempotency_key("user-a", "request-123") is None
+    assert repository.get("run-1") == first
+    assert repository.get("run-2") == second
 
 
 def test_duplicate_create_raises() -> None:

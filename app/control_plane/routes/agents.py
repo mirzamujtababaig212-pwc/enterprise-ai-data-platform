@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from ai_platform.agents.models import AgentRequest
 
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
+)
+from app.control_plane.agent_runs.exceptions import (
+    AgentRunIdempotencyConflictError,
 )
 from app.control_plane.agent_runs.models import AgentRunStatus
 from app.control_plane.dependencies import (
@@ -38,6 +41,10 @@ router = APIRouter(
 async def run_agent(
     agent_name: str,
     payload: AgentRunRequest,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+    ),
     service: AgentRunApplicationService = Depends(
         get_agent_run_application_service,
     ),
@@ -53,11 +60,18 @@ async def run_agent(
         response = await service.execute(
             agent_name=agent_name,
             request=request,
+            idempotency_key=idempotency_key,
         )
 
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except AgentRunIdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
 

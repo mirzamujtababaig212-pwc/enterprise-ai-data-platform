@@ -17,6 +17,12 @@ class AgentRunRepository(Protocol):
 
     def get(self, run_id: str) -> AgentRun | None: ...
 
+    def get_by_idempotency_key(
+        self,
+        user_id: str,
+        idempotency_key: str,
+    ) -> AgentRun | None: ...
+
     def update(
         self,
         run: AgentRun,

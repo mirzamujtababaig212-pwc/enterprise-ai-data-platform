@@ -17,6 +17,7 @@ def test_agent_run_record_columns() -> None:
         "agent_name",
         "session_id",
         "user_id",
+        "idempotency_key",
         "status",
         "started_at",
         "completed_at",

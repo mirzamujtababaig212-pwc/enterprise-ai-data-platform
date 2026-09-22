@@ -49,6 +49,7 @@ def make_run(
     agent_name: str = "vehicle-agent",
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
+    idempotency_key: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
@@ -66,6 +67,7 @@ def make_run(
         agent_name=agent_name,
         session_id=session_id,
         user_id=user_id,
+        idempotency_key=idempotency_key,
         status=status,
         started_at=started_at,
         completed_at=completed_at,
@@ -2086,3 +2088,133 @@ def test_concurrent_claim_for_recovery_is_atomic() -> None:
         finally:
             cleanup_session.close()
             engine.dispose()
+
+
+def test_create_and_get_round_trip_preserves_idempotency_key(repository) -> None:
+    run = make_run(
+        run_id="idempotency-round-trip",
+        idempotency_key="request-key-1",
+    )
+
+    repository.create(run)
+
+    restored = repository.get(run.run_id)
+
+    assert restored is not None
+    assert restored.idempotency_key == "request-key-1"
+    assert restored == run
+
+
+def test_get_by_idempotency_key_returns_matching_user_run(repository) -> None:
+    run = make_run(
+        run_id="idempotency-lookup",
+        user_id="user-42",
+        idempotency_key="request-key-42",
+    )
+    repository.create(run)
+
+    restored = repository.get_by_idempotency_key(
+        "user-42",
+        "request-key-42",
+    )
+
+    assert restored == run
+
+
+def test_get_by_idempotency_key_is_scoped_to_user(repository) -> None:
+    run = make_run(
+        run_id="idempotency-user-scope",
+        user_id="user-1",
+        idempotency_key="shared-key",
+    )
+    repository.create(run)
+
+    assert repository.get_by_idempotency_key("user-2", "shared-key") is None
+
+
+def test_get_by_idempotency_key_returns_none_for_missing_key(repository) -> None:
+    assert (
+        repository.get_by_idempotency_key(
+            "user-1",
+            "does-not-exist",
+        )
+        is None
+    )
+
+
+def test_update_round_trip_preserves_idempotency_key(repository) -> None:
+    repository.create(
+        make_run(
+            run_id="idempotency-update",
+            idempotency_key="old-key",
+        )
+    )
+
+    updated = make_run(
+        run_id="idempotency-update",
+        idempotency_key="new-key",
+        status=AgentRunStatus.COMPLETED,
+        output={"answer": "updated"},
+    )
+
+    result = repository.update(updated)
+    restored = repository.get(updated.run_id)
+
+    assert result == updated
+    assert restored is not None
+    assert restored.idempotency_key == "new-key"
+
+
+def test_duplicate_user_and_idempotency_key_is_rejected(repository) -> None:
+    repository.create(
+        make_run(
+            run_id="idempotency-duplicate-1",
+            user_id="user-1",
+            idempotency_key="duplicate-key",
+        )
+    )
+
+    with pytest.raises(DuplicateAgentRunError):
+        repository.create(
+            make_run(
+                run_id="idempotency-duplicate-2",
+                user_id="user-1",
+                idempotency_key="duplicate-key",
+            )
+        )
+
+
+def test_same_idempotency_key_is_allowed_for_different_users(repository) -> None:
+    first = make_run(
+        run_id="idempotency-user-1",
+        user_id="user-1",
+        idempotency_key="same-key",
+    )
+    second = make_run(
+        run_id="idempotency-user-2",
+        user_id="user-2",
+        idempotency_key="same-key",
+    )
+
+    repository.create(first)
+    repository.create(second)
+
+    assert repository.get_by_idempotency_key("user-1", "same-key") == first
+    assert repository.get_by_idempotency_key("user-2", "same-key") == second
+
+
+def test_multiple_null_idempotency_keys_are_allowed(repository) -> None:
+    first = make_run(
+        run_id="non-idempotent-1",
+        idempotency_key=None,
+    )
+    second = make_run(
+        run_id="non-idempotent-2",
+        idempotency_key=None,
+    )
+
+    repository.create(first)
+    repository.create(second)
+
+    assert repository.get(first.run_id) == first
+    assert repository.get(second.run_id) == second

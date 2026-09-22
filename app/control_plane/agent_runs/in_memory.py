@@ -36,6 +36,18 @@ class InMemoryAgentRunRepository:
         with self._lock:
             return self._runs.get(run_id)
 
+    def get_by_idempotency_key(
+        self,
+        user_id: str,
+        idempotency_key: str,
+    ) -> AgentRun | None:
+        with self._lock:
+            for run in self._runs.values():
+                if run.user_id == user_id and run.idempotency_key == idempotency_key:
+                    return run
+
+        return None
+
     def update(
         self,
         run: AgentRun,

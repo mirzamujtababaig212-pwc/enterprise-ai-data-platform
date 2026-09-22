@@ -192,6 +192,208 @@ def test_production_control_plane_persists_agent_run_events() -> None:
             assert remaining_events == []
 
 
+def test_production_control_plane_enforces_http_idempotency() -> None:
+    """Exercise HTTP idempotency through the real PostgreSQL control plane."""
+
+    client = TestClient(app)
+
+    user_id = "integration-idempotency-user"
+    other_user_id = "integration-idempotency-other-user"
+    session_id = "production-idempotency-integration-session"
+    other_session_id = "production-idempotency-other-session"
+    idempotency_key = "production-idempotency-key"
+
+    run_ids: set[str] = set()
+
+    request_payload = {
+        "input": "Verify production idempotency behavior.",
+        "session_id": session_id,
+        "user_id": user_id,
+        "metadata": {
+            "test": "production-control-plane-idempotency",
+        },
+    }
+
+    try:
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(return_value=_deterministic_chat_response()),
+        ) as mock_route_chat:
+            first_response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                    "Idempotency-Key": idempotency_key,
+                },
+                json=request_payload,
+            )
+
+            assert first_response.status_code == 200, first_response.text
+
+            first_payload = first_response.json()
+            first_run_id = first_payload["run_id"]
+            run_ids.add(first_run_id)
+
+            assert first_payload["agent_name"] == "enterprise-analyst"
+            assert first_payload["output"] == ("Deterministic integration-test response.")
+            assert first_payload["session_id"] == session_id
+            assert mock_route_chat.await_count == 1
+
+            replay_response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                    "Idempotency-Key": idempotency_key,
+                },
+                json=request_payload,
+            )
+
+            assert replay_response.status_code == 200, replay_response.text
+
+            replay_payload = replay_response.json()
+
+            assert replay_payload["run_id"] == first_run_id
+            assert replay_payload["agent_name"] == "enterprise-analyst"
+            assert replay_payload["output"] == ("Deterministic integration-test response.")
+            assert replay_payload["session_id"] == session_id
+            assert mock_route_chat.await_count == 1
+
+            conflicting_input_response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                    "Idempotency-Key": idempotency_key,
+                },
+                json={
+                    **request_payload,
+                    "input": "A different request must conflict.",
+                },
+            )
+
+            assert conflicting_input_response.status_code == 409
+            assert conflicting_input_response.json() == {
+                "detail": "Idempotency key is already associated with a different request."
+            }
+            assert mock_route_chat.await_count == 1
+
+            conflicting_session_response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                    "Idempotency-Key": idempotency_key,
+                },
+                json={
+                    **request_payload,
+                    "session_id": other_session_id,
+                },
+            )
+
+            assert conflicting_session_response.status_code == 409
+            assert conflicting_session_response.json() == {
+                "detail": "Idempotency key is already associated with a different request."
+            }
+            assert mock_route_chat.await_count == 1
+
+            different_user_response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                    "Idempotency-Key": idempotency_key,
+                },
+                json={
+                    **request_payload,
+                    "user_id": other_user_id,
+                },
+            )
+
+            assert different_user_response.status_code == 200, different_user_response.text
+
+            different_user_payload = different_user_response.json()
+            second_run_id = different_user_payload["run_id"]
+            run_ids.add(second_run_id)
+
+            assert second_run_id != first_run_id
+            assert different_user_payload["agent_name"] == "enterprise-analyst"
+            assert different_user_payload["output"] == ("Deterministic integration-test response.")
+            assert different_user_payload["session_id"] == session_id
+            assert mock_route_chat.await_count == 2
+
+        with SessionLocal() as session:
+            persisted_runs = list(
+                session.scalars(
+                    select(AgentRunRecord)
+                    .where(AgentRunRecord.run_id.in_(run_ids))
+                    .order_by(AgentRunRecord.run_id.asc())
+                )
+            )
+
+        assert len(persisted_runs) == 2
+
+        persisted_by_user = {run.user_id: run for run in persisted_runs}
+
+        first_run = persisted_by_user[user_id]
+        second_run = persisted_by_user[other_user_id]
+
+        assert first_run.run_id == first_run_id
+        assert first_run.user_id == user_id
+        assert first_run.idempotency_key == idempotency_key
+        assert first_run.status == AgentRunStatus.COMPLETED
+        assert first_run.output == "Deterministic integration-test response."
+
+        assert second_run.run_id == second_run_id
+        assert second_run.user_id == other_user_id
+        assert second_run.idempotency_key == idempotency_key
+        assert second_run.status == AgentRunStatus.COMPLETED
+        assert second_run.output == "Deterministic integration-test response."
+
+        with SessionLocal() as session:
+            repository = PostgreSQLAgentRunRepository(session)
+
+            assert (
+                repository.get_by_idempotency_key(
+                    user_id,
+                    idempotency_key,
+                ).run_id
+                == first_run_id
+            )
+
+            assert (
+                repository.get_by_idempotency_key(
+                    other_user_id,
+                    idempotency_key,
+                ).run_id
+                == second_run_id
+            )
+
+    finally:
+        if run_ids:
+            with SessionLocal() as session:
+                session.query(AgentRunEventRecord).filter(
+                    AgentRunEventRecord.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id.in_(run_ids)).delete(
+                    synchronize_session=False
+                )
+
+                session.commit()
+
+            with SessionLocal() as session:
+                remaining_runs = list(
+                    session.scalars(
+                        select(AgentRunRecord).where(AgentRunRecord.run_id.in_(run_ids))
+                    )
+                )
+                remaining_events = list(
+                    session.scalars(
+                        select(AgentRunEventRecord).where(AgentRunEventRecord.run_id.in_(run_ids))
+                    )
+                )
+
+            assert remaining_runs == []
+            assert remaining_events == []
+
+
 def test_production_control_plane_persists_failed_agent_run() -> None:
     """Exercise the real control-plane failure path through PostgreSQL."""
 
@@ -386,6 +588,12 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         import asyncio
 
         asyncio.run(dependencies._initialize_agents())
+        asyncio.run(
+            dependencies._tool_authorizer.allow(
+                "integration-test-user",
+                "rag.search",
+            )
+        )
 
         rag_tool = asyncio.run(dependencies._tool_registry.get("rag.search"))
 
@@ -419,6 +627,21 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
                         },
                     )
                 ],
+            },
+            {
+                "reply": (
+                    "The retrieved evidence describes DELDAI as an "
+                    "enterprise AI operating layer governing agents, "
+                    "models, tools, and workflows."
+                ),
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 28,
+                    "completion_tokens": 18,
+                    "total_tokens": 46,
+                },
+                "tool_calls": [],
             },
             {
                 "reply": (
@@ -459,7 +682,7 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             )
 
         assert response.status_code == 200, response.text
-        assert mock_route_chat.await_count == 2
+        assert mock_route_chat.await_count == 3
         assert responses == []
 
         payload = response.json()
@@ -522,7 +745,11 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             "llm.requested",
             "llm.completed",
             "tool.call.requested",
+            "tool.authorization.decision",
             "tool.call.completed",
+            "llm.requested",
+            "llm.completed",
+            "agent.completed",
             "llm.requested",
             "llm.completed",
             "agent.completed",
@@ -675,6 +902,13 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         run_id = None
 
     finally:
+        asyncio.run(
+            dependencies._tool_authorizer.deny(
+                "integration-test-user",
+                "rag.search",
+            )
+        )
+
         if rag_tool is not None:
             rag_tool._retriever = original_retriever
 
@@ -714,6 +948,12 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
 
     try:
         asyncio.run(dependencies._initialize_agents())
+        asyncio.run(
+            dependencies._tool_authorizer.allow(
+                "integration-test-user",
+                "rag.search",
+            )
+        )
 
         rag_tool = asyncio.run(dependencies._tool_registry.get("rag.search"))
 
@@ -769,7 +1009,23 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
         async def _deterministic_route_chat(request: dict) -> dict:
             return responses.pop(0)
 
-        def _failing_checkpoint_save(self, checkpoint, *, commit=True):
+        original_checkpoint_handler_save = dependencies._agent_checkpoint_handler.save
+        checkpoint_save_calls = 0
+
+        async def _failing_checkpoint_handler_save(
+            checkpoint,
+            *,
+            lease_id=None,
+        ):
+            nonlocal checkpoint_save_calls
+            checkpoint_save_calls += 1
+
+            if checkpoint_save_calls == 1:
+                return await original_checkpoint_handler_save(
+                    checkpoint,
+                    lease_id=lease_id,
+                )
+
             raise RuntimeError("deterministic checkpoint persistence failure")
 
         with (
@@ -777,10 +1033,10 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
                 "app.control_plane.dependencies._llm_router.route_chat",
                 new=AsyncMock(side_effect=_deterministic_route_chat),
             ) as mock_route_chat,
-            patch(
-                "app.control_plane.agent_checkpoints.postgres_handler."
-                "PostgreSQLAgentCheckpointsRepository.save",
-                new=_failing_checkpoint_save,
+            patch.object(
+                dependencies._agent_checkpoint_handler,
+                "save",
+                new=_failing_checkpoint_handler_save,
             ),
         ):
             response = client.post(
@@ -798,21 +1054,24 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
                 },
             )
 
-        assert response.status_code == 200, response.text
-        assert mock_route_chat.await_count == 2
-        assert responses == []
-
-        payload = response.json()
-        run_id = payload["run_id"]
-
-        assert payload["output"] == (
-            "DELDAI provides an enterprise AI operating layer "
-            "for governing agents, models, tools, and workflows."
-        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "deterministic checkpoint persistence failure"
+        assert mock_route_chat.await_count == 1
+        assert len(responses) == 1
 
         assert len(deterministic_retriever.calls) == 1
 
         with SessionLocal() as session:
+            run_record = session.scalar(
+                select(AgentRunRecord).where(
+                    AgentRunRecord.session_id == session_id,
+                    AgentRunRecord.user_id == "integration-test-user",
+                )
+            )
+
+            assert run_record is not None
+            run_id = run_record.run_id
+
             run_repository = PostgreSQLAgentRunRepository(session)
             run = run_repository.get(run_id)
 
@@ -835,13 +1094,16 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
             )
 
         assert run is not None
-        assert run.status is AgentRunStatus.COMPLETED
-        assert run.output == payload["output"]
+        assert run.status is AgentRunStatus.FAILED
+        assert run.error_type == "RuntimeError", (
+            f"error_type={run.error_type!r}, " f"error_message={run.error_message!r}"
+        )
+        assert run.error_message == "deterministic checkpoint persistence failure"
 
-        # The checkpoint failure is intentionally swallowed by the production
-        # PostgreSQL checkpoint handler contract. Therefore no checkpoint
-        # should have been persisted.
-        assert checkpoints == []
+        # The first checkpoint was persisted before the tool execution.
+        # The second checkpoint failed after the tool result was durably stored.
+        assert len(checkpoints) == 1
+        assert checkpoints[0].position == "before_tool_execution"
 
         # The tool result must nevertheless be durable.
         assert len(idempotency_records) == 1
@@ -891,7 +1153,8 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
         assert replay.output == idempotency_record.output
 
         # The original tool execution happened exactly once. The replay was
-        # served entirely from PostgreSQL idempotency state.
+        # served entirely from PostgreSQL idempotency state despite the
+        # post-tool checkpoint persistence failure.
         assert len(deterministic_retriever.calls) == 1
 
     finally:

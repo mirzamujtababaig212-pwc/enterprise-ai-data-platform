@@ -19,6 +19,8 @@ from app.control_plane.agent_run_events.repository import (
 from app.control_plane.agent_runs.admission import AgentRunAdmissionResult
 from app.control_plane.agent_runs.exceptions import (
     AgentRunAdmissionRejectedError,
+    AgentRunIdempotencyConflictError,
+    DuplicateAgentRunError,
 )
 from app.control_plane.agent_runs.models import (
     AgentRun,
@@ -26,6 +28,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunStatus,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
@@ -1386,3 +1389,432 @@ def test_cancel_does_not_require_local_registry_when_intent_is_persisted() -> No
 
     assert result is requested_run
     repository.request_cancellation.assert_called_once()
+
+
+def _idempotent_run(
+    *,
+    status: AgentRunStatus = AgentRunStatus.COMPLETED,
+    run_id: str = "existing-run",
+    agent_name: str = "enterprise-analyst",
+    output="completed",
+    user_id: str = "user-1",
+    idempotency_key: str = "request-123",
+) -> AgentRun:
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-1",
+        user_id=user_id,
+        metadata={"request": "same"},
+    )
+
+    return AgentRun(
+        run_id=run_id,
+        agent_name=agent_name,
+        session_id=request.session_id,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
+        status=status,
+        output=output,
+        metadata={"source": "persisted"},
+        request_snapshot=AgentRunRequestSnapshot.from_request(request),
+        error_message=("persisted failure" if status is AgentRunStatus.FAILED else None),
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_without_idempotency_key_creates_new_run() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            user_id="user-1",
+        ),
+    )
+
+    repository.get_by_idempotency_key.assert_not_called()
+    repository.create.assert_called_once()
+    runtime.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_new_idempotency_key_creates_run() -> None:
+    repository = _repository()
+    repository.get_by_idempotency_key.return_value = None
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            user_id="user-1",
+        ),
+        idempotency_key="request-123",
+    )
+
+    repository.get_by_idempotency_key.assert_called_once_with(
+        "user-1",
+        "request-123",
+    )
+
+    created = repository.create.call_args.args[0]
+    assert created.idempotency_key == "request-123"
+    runtime.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_replays_completed_idempotent_run() -> None:
+    repository = _repository()
+
+    existing = _idempotent_run(
+        output={"answer": "persisted"},
+    )
+    repository.get_by_idempotency_key.return_value = existing
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            session_id="session-1",
+            user_id="user-1",
+            metadata={"request": "same"},
+        ),
+        idempotency_key="request-123",
+    )
+
+    assert result.run_id == "existing-run"
+    assert result.response == AgentResponse(
+        agent_name="enterprise-analyst",
+        output={"answer": "persisted"},
+        session_id="session-1",
+        metadata={"source": "persisted"},
+    )
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_reuses_running_idempotent_run_reference() -> None:
+    repository = _repository()
+
+    existing = _idempotent_run(
+        status=AgentRunStatus.RUNNING,
+        output=None,
+    )
+    repository.get_by_idempotency_key.return_value = existing
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            session_id="session-1",
+            user_id="user-1",
+            metadata={"request": "same"},
+        ),
+        idempotency_key="request-123",
+    )
+
+    assert result.run_id == "existing-run"
+    assert result.response.agent_name == "enterprise-analyst"
+    assert result.response.output is None
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_reuses_pending_idempotent_run_reference() -> None:
+    repository = _repository()
+
+    existing = _idempotent_run(
+        status=AgentRunStatus.PENDING,
+        output=None,
+    )
+    repository.get_by_idempotency_key.return_value = existing
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            session_id="session-1",
+            user_id="user-1",
+            metadata={"request": "same"},
+        ),
+        idempotency_key="request-123",
+    )
+
+    assert result.run_id == "existing-run"
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_idempotency_key_for_different_request() -> None:
+    repository = _repository()
+
+    repository.get_by_idempotency_key.return_value = _idempotent_run()
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentRunIdempotencyConflictError,
+        match="different request",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="A different question",
+                session_id="session-1",
+                user_id="user-1",
+                metadata={"request": "same"},
+            ),
+            idempotency_key="request-123",
+        )
+
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_idempotency_key_for_different_agent() -> None:
+    repository = _repository()
+
+    repository.get_by_idempotency_key.return_value = _idempotent_run(
+        agent_name="different-agent",
+    )
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentRunIdempotencyConflictError,
+        match="different agent",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="session-1",
+                user_id="user-1",
+                metadata={"request": "same"},
+            ),
+            idempotency_key="request-123",
+        )
+
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_surfaces_previous_failed_idempotent_run() -> None:
+    repository = _repository()
+
+    repository.get_by_idempotency_key.return_value = _idempotent_run(
+        status=AgentRunStatus.FAILED,
+    )
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="previously failed: persisted failure",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="session-1",
+                user_id="user-1",
+                metadata={"request": "same"},
+            ),
+            idempotency_key="request-123",
+        )
+
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_requires_user_for_idempotency_key() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="user_id is required",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+            ),
+            idempotency_key="request-123",
+        )
+
+    repository.get_by_idempotency_key.assert_not_called()
+    repository.create.assert_not_called()
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_blank_idempotency_key() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Idempotency key must not be empty",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                user_id="user-1",
+            ),
+            idempotency_key="   ",
+        )
+
+    repository.get_by_idempotency_key.assert_not_called()
+    repository.create.assert_not_called()
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_race_on_idempotent_create_reloads_existing_run() -> None:
+    repository = _repository()
+
+    existing = _idempotent_run()
+
+    repository.get_by_idempotency_key.side_effect = [
+        None,
+        existing,
+    ]
+    repository.create.side_effect = DuplicateAgentRunError("agent run already exists")
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="Explain the platform",
+            session_id="session-1",
+            user_id="user-1",
+            metadata={"request": "same"},
+        ),
+        idempotency_key="request-123",
+    )
+
+    assert result.run_id == "existing-run"
+    runtime.run.assert_not_awaited()
+    assert repository.get_by_idempotency_key.call_count == 2
+    repository.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_idempotency_key_for_different_session() -> None:
+    repository = _repository()
+
+    repository.get_by_idempotency_key.return_value = _idempotent_run(
+        output="persisted",
+    )
+
+    runtime = Mock()
+    runtime.run = AsyncMock()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentRunIdempotencyConflictError,
+        match="different request",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Explain the platform",
+                session_id="different-session",
+                user_id="user-1",
+                metadata={"request": "same"},
+            ),
+            idempotency_key="request-123",
+        )
+
+    runtime.run.assert_not_awaited()
+    repository.create.assert_not_called()

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
-from ai_platform.agents.models import AgentRequest
+from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -21,6 +21,8 @@ from app.control_plane.agent_runs.admission import (
 )
 from app.control_plane.agent_runs.exceptions import (
     AgentRunAdmissionRejectedError,
+    AgentRunIdempotencyConflictError,
+    DuplicateAgentRunError,
 )
 from app.control_plane.agent_runs.models import (
     AgentRun,
@@ -73,23 +75,118 @@ class AgentRunApplicationService:
             # Cancellation observability must never change cancellation semantics.
             pass
 
+    @staticmethod
+    def _build_replayed_response(
+        run: AgentRun,
+    ) -> AgentResponse:
+        return AgentResponse(
+            agent_name=run.agent_name,
+            output=run.output,
+            session_id=run.session_id,
+            metadata=dict(run.metadata),
+        )
+
+    @staticmethod
+    def _request_snapshots_match(
+        existing_run: AgentRun,
+        request: AgentRequest,
+    ) -> bool:
+        if existing_run.request_snapshot is None:
+            return False
+
+        if existing_run.session_id != request.session_id:
+            return False
+
+        return existing_run.request_snapshot == AgentRunRequestSnapshot.from_request(request)
+
+    def _resolve_existing_idempotent_run(
+        self,
+        *,
+        existing_run: AgentRun,
+        agent_name: str,
+        request: AgentRequest,
+    ) -> AgentRunExecutionResult:
+        if existing_run.agent_name != agent_name:
+            raise AgentRunIdempotencyConflictError(
+                "Idempotency key is already associated with a different agent run."
+            )
+
+        if not self._request_snapshots_match(existing_run, request):
+            raise AgentRunIdempotencyConflictError(
+                "Idempotency key is already associated with a different request."
+            )
+
+        if existing_run.status is AgentRunStatus.FAILED:
+            message = existing_run.error_message or "Agent run failed."
+            raise RuntimeError(
+                f"Idempotent agent run '{existing_run.run_id}' previously failed: {message}"
+            )
+
+        return AgentRunExecutionResult(
+            run_id=existing_run.run_id,
+            response=self._build_replayed_response(existing_run),
+        )
+
     async def execute(
         self,
         *,
         agent_name: str,
         request: AgentRequest,
+        idempotency_key: str | None = None,
     ) -> AgentRunExecutionResult:
+        if idempotency_key is not None:
+            idempotency_key = idempotency_key.strip()
+
+            if not idempotency_key:
+                raise ValueError("Idempotency key must not be empty when provided.")
+
+            if request.user_id is None:
+                raise ValueError("A user_id is required when an idempotency key is provided.")
+
+            existing_run = self._repository.get_by_idempotency_key(
+                request.user_id,
+                idempotency_key,
+            )
+
+            if existing_run is not None:
+                return self._resolve_existing_idempotent_run(
+                    existing_run=existing_run,
+                    agent_name=agent_name,
+                    request=request,
+                )
+
         run = AgentRun(
             run_id=str(uuid4()),
             agent_name=agent_name,
             session_id=request.session_id,
             user_id=request.user_id,
+            idempotency_key=idempotency_key,
             status=AgentRunStatus.PENDING,
             metadata=dict(request.metadata),
             request_snapshot=AgentRunRequestSnapshot.from_request(request),
         )
 
-        self._repository.create(run)
+        try:
+            self._repository.create(run)
+        except DuplicateAgentRunError:
+            if idempotency_key is None or request.user_id is None:
+                raise
+
+            existing_run = self._repository.get_by_idempotency_key(
+                request.user_id,
+                idempotency_key,
+            )
+
+            if existing_run is None:
+                raise RuntimeError(
+                    "Agent run creation conflicted, but the idempotent run " "could not be loaded."
+                )
+
+            return self._resolve_existing_idempotent_run(
+                existing_run=existing_run,
+                agent_name=agent_name,
+                request=request,
+            )
 
         admission = await self._admission_policy.evaluate(
             agent_name=agent_name,

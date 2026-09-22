@@ -30,6 +30,7 @@ class PostgreSQLAgentRunRepository:
             agent_name=run.agent_name,
             session_id=run.session_id,
             user_id=run.user_id,
+            idempotency_key=run.idempotency_key,
             status=run.status.value,
             started_at=run.started_at,
             completed_at=run.completed_at,
@@ -85,6 +86,23 @@ class PostgreSQLAgentRunRepository:
 
         return self._to_domain(record)
 
+    def get_by_idempotency_key(
+        self,
+        user_id: str,
+        idempotency_key: str,
+    ) -> AgentRun | None:
+        record = self._session.scalar(
+            select(AgentRunRecord).where(
+                AgentRunRecord.user_id == user_id,
+                AgentRunRecord.idempotency_key == idempotency_key,
+            )
+        )
+
+        if record is None:
+            return None
+
+        return self._to_domain(record)
+
     def update(
         self,
         run: AgentRun,
@@ -101,6 +119,7 @@ class PostgreSQLAgentRunRepository:
         record.agent_name = run.agent_name
         record.session_id = run.session_id
         record.user_id = run.user_id
+        record.idempotency_key = run.idempotency_key
         record.status = run.status.value
         record.started_at = run.started_at
         record.completed_at = run.completed_at
@@ -511,6 +530,7 @@ class PostgreSQLAgentRunRepository:
             agent_name=record.agent_name,
             session_id=record.session_id,
             user_id=record.user_id,
+            idempotency_key=record.idempotency_key,
             status=AgentRunStatus(record.status),
             started_at=(
                 _ensure_aware(record.started_at) if record.started_at is not None else None
