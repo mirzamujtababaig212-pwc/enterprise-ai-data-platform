@@ -747,17 +747,46 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
 
         assert [event.event_type for event in events] == [
             "agent.started",
+            "orchestration.step.started",
             "llm.requested",
             "llm.completed",
             "tool.call.requested",
             "tool.authorization.decision",
             "tool.call.completed",
+            "orchestration.step.completed",
+            "orchestration.step.started",
             "llm.requested",
             "llm.completed",
-            "agent.completed",
+            "orchestration.step.completed",
+            "orchestration.step.started",
             "llm.requested",
             "llm.completed",
+            "orchestration.step.completed",
             "agent.completed",
+        ]
+
+        orchestration_events = [
+            event for event in events if event.event_type.startswith("orchestration.step.")
+        ]
+
+        assert [event.event_type for event in orchestration_events] == [
+            "orchestration.step.started",
+            "orchestration.step.completed",
+            "orchestration.step.started",
+            "orchestration.step.completed",
+            "orchestration.step.started",
+            "orchestration.step.completed",
+        ]
+
+        assert [
+            (event.step_id, event.step_index, event.step_name) for event in orchestration_events
+        ] == [
+            ("retrieve_evidence", 0, "Retrieve enterprise evidence"),
+            ("retrieve_evidence", 0, "Retrieve enterprise evidence"),
+            ("analyze_evidence", 1, "Analyze retrieved evidence"),
+            ("analyze_evidence", 1, "Analyze retrieved evidence"),
+            ("produce_answer", 2, "Produce grounded answer"),
+            ("produce_answer", 2, "Produce grounded answer"),
         ]
 
         assert all(event.run_id == run_id for event in events)

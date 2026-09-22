@@ -189,13 +189,6 @@ class LLMAgent:
             tool_results,
         ):
             if tool_result.success:
-                self._record_orchestration_tool_result(
-                    context,
-                    tool_call,
-                    tool_result,
-                    tool_round=tool_round,
-                )
-
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
@@ -211,6 +204,13 @@ class LLMAgent:
                             tool_result.output,
                         ),
                     )
+                )
+
+                await self._record_orchestration_tool_result(
+                    context,
+                    tool_call,
+                    tool_result,
+                    tool_round=tool_round,
                 )
             else:
                 await self._emit(
@@ -507,7 +507,71 @@ class LLMAgent:
             checkpoint.position,
         )
 
-    def _start_orchestration_step(
+    async def _emit_orchestration_step_event(
+        self,
+        context: AgentExecutionContext,
+        event_type: AgentExecutionEventType,
+        step_index: int,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        step = context.orchestration_state.steps[step_index]
+
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=event_type,
+                agent_name=self.definition.name,
+                run_id=context.run_id,
+                session_id=context.session_id,
+                user_id=context.user_id,
+                step_id=step.step_id,
+                step_index=step.step_index,
+                step_name=step.name,
+                metadata={} if metadata is None else metadata,
+            )
+        )
+
+    async def _emit_orchestration_step_started(
+        self,
+        context: AgentExecutionContext,
+        step_index: int,
+    ) -> None:
+        await self._emit_orchestration_step_event(
+            context,
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            step_index,
+        )
+
+    async def _emit_orchestration_step_completed(
+        self,
+        context: AgentExecutionContext,
+        step_index: int,
+    ) -> None:
+        await self._emit_orchestration_step_event(
+            context,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+            step_index,
+        )
+
+    async def _emit_orchestration_step_failed(
+        self,
+        context: AgentExecutionContext,
+        step_index: int,
+        *,
+        error_type: str | None = None,
+    ) -> None:
+        metadata = {}
+        if error_type is not None:
+            metadata["error_type"] = error_type
+
+        await self._emit_orchestration_step_event(
+            context,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            step_index,
+            metadata=metadata,
+        )
+
+    async def _start_orchestration_step(
         self,
         context: AgentExecutionContext,
     ) -> int | None:
@@ -519,6 +583,11 @@ class LLMAgent:
         step = state.current_step
         if step is None:
             step = state.start_step(0)
+
+        await self._emit_orchestration_step_started(
+            context,
+            step.step_index,
+        )
 
         return step.step_index
 
@@ -543,7 +612,7 @@ class LLMAgent:
             metadata=dict(response.metadata),
         )
 
-    def _complete_orchestration_step(
+    async def _complete_orchestration_step(
         self,
         context: AgentExecutionContext,
         step_index: int | None,
@@ -564,7 +633,12 @@ class LLMAgent:
             tool_round=tool_round,
         )
 
-    def _record_orchestration_tool_result(
+        await self._emit_orchestration_step_completed(
+            context,
+            step_index,
+        )
+
+    async def _record_orchestration_tool_result(
         self,
         context: AgentExecutionContext,
         tool_call,
@@ -613,6 +687,11 @@ class LLMAgent:
         state.complete_step(
             step.step_index,
             tool_round=tool_round,
+        )
+
+        await self._emit_orchestration_step_completed(
+            context,
+            step.step_index,
         )
 
     def _restore_orchestration_tool_result_from_messages(
@@ -790,18 +869,19 @@ class LLMAgent:
                 if not result.tool_calls:
                     context.raise_if_execution_ownership_lost()
 
-                    await self._emit(
-                        AgentExecutionEvent(
-                            event_type=AgentExecutionEventType.AGENT_COMPLETED,
-                            agent_name=self.definition.name,
-                            run_id=context.run_id,
-                            session_id=context.session_id,
-                            user_id=context.user_id,
-                            tool_round=tool_rounds,
-                            provider=result.provider,
-                            model=result.model,
+                    if context.orchestration_plan is None:
+                        await self._emit(
+                            AgentExecutionEvent(
+                                event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                                agent_name=self.definition.name,
+                                run_id=context.run_id,
+                                session_id=context.session_id,
+                                user_id=context.user_id,
+                                tool_round=tool_rounds,
+                                provider=result.provider,
+                                model=result.model,
+                            )
                         )
-                    )
 
                     response = AgentResponse(
                         agent_name=self.definition.name,
@@ -876,6 +956,27 @@ class LLMAgent:
                     )
 
         except Exception as exc:
+            if context.orchestration_plan is not None:
+                current_step = context.orchestration_state.current_step
+
+                if (
+                    current_step is not None
+                    and current_step.status is OrchestrationStepStatus.RUNNING
+                ):
+                    failed_step_index = current_step.step_index
+                    context.orchestration_state.fail_step(
+                        failed_step_index,
+                        metadata={
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+
+                    await self._emit_orchestration_step_failed(
+                        context,
+                        failed_step_index,
+                        error_type=type(exc).__name__,
+                    )
+
             await self._emit(
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.AGENT_FAILED,
@@ -917,7 +1018,7 @@ class LLMAgent:
             )
         )
 
-        orchestration_step_index = self._start_orchestration_step(context)
+        orchestration_step_index = await self._start_orchestration_step(context)
 
         try:
             messages = list(context.build_llm_messages())
@@ -967,7 +1068,7 @@ class LLMAgent:
                     continuation.response,
                 )
 
-                self._complete_orchestration_step(
+                await self._complete_orchestration_step(
                     context,
                     orchestration_step_index,
                     tool_round=continuation.tool_rounds,
@@ -992,9 +1093,23 @@ class LLMAgent:
             if next_step_index is None:
                 if continuation.response is None:
                     raise RuntimeError("Final orchestration step completed without a response.")
+
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                        agent_name=self.definition.name,
+                        run_id=context.run_id,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                        tool_round=continuation.tool_rounds,
+                        provider=continuation.response.metadata.get("provider"),
+                        model=continuation.response.metadata.get("model"),
+                    )
+                )
+
                 return continuation.response
 
-            orchestration_step_index = next_step_index
+            orchestration_step_index = await self._start_orchestration_step(context)
 
     async def resume(
         self,
@@ -1093,7 +1208,7 @@ class LLMAgent:
         # A checkpoint without an orchestration snapshot represents a
         # pre-orchestration checkpoint. Start from the first logical step.
         if state.current_step is None:
-            orchestration_step_index = self._start_orchestration_step(context)
+            orchestration_step_index = await self._start_orchestration_step(context)
         else:
             orchestration_step_index = state.current_step.step_index
 
@@ -1153,7 +1268,7 @@ class LLMAgent:
                     "Orchestration recovery completed without a final response step."
                 )
 
-            orchestration_step_index = next_step_index
+            orchestration_step_index = await self._start_orchestration_step(context)
 
         elif current_step is not None and current_step.status is OrchestrationStepStatus.COMPLETED:
             next_step_index = self._advance_orchestration_step(context)
@@ -1198,7 +1313,7 @@ class LLMAgent:
                     response,
                 )
 
-            self._complete_orchestration_step(
+            await self._complete_orchestration_step(
                 context,
                 orchestration_step_index,
                 tool_round=continuation.tool_rounds,
@@ -1219,5 +1334,5 @@ class LLMAgent:
 
                 return response
 
-            orchestration_step_index = next_step_index
+            orchestration_step_index = await self._start_orchestration_step(context)
             tool_rounds = continuation.tool_rounds

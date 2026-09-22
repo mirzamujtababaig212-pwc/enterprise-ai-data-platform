@@ -596,6 +596,130 @@ def test_agent_spans_form_parent_child_trace_hierarchy() -> None:
     assert tool_span.context.trace_id == agent_span.context.trace_id
 
 
+def test_orchestration_step_creates_completed_span_with_safe_attributes() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="retrieve-evidence",
+                step_index=0,
+                step_name="retrieve_evidence",
+                metadata={
+                    "secret": "must-not-be-recorded",
+                },
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="retrieve-evidence",
+                step_index=0,
+                step_name="retrieve_evidence",
+                metadata={
+                    "secret": "must-not-be-recorded",
+                },
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.orchestration.step")
+
+    assert span.status.status_code is trace.StatusCode.OK
+    assert span.attributes["agent.name"] == "test-agent"
+    assert span.attributes["orchestration.step.id"] == "retrieve-evidence"
+    assert span.attributes["orchestration.step.index"] == 0
+    assert span.attributes["orchestration.step.name"] == "retrieve_evidence"
+    assert span.attributes["orchestration.step.status"] == "completed"
+
+    for forbidden in (
+        "agent.run_id",
+        "session.id",
+        "user.id",
+        "secret",
+    ):
+        assert forbidden not in span.attributes
+
+
+def test_orchestration_step_failure_creates_error_span() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                step_id="analyze-evidence",
+                step_index=1,
+                step_name="analyze_evidence",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+                agent_name="test-agent",
+                step_id="analyze-evidence",
+                step_index=1,
+                step_name="analyze_evidence",
+                metadata={"error_type": "RuntimeError"},
+            )
+        )
+
+    run(scenario())
+
+    span = span_by_name(exporter, "agent.orchestration.step")
+
+    assert span.status.status_code is trace.StatusCode.ERROR
+    assert span.attributes["orchestration.step.status"] == "failed"
+    assert span.attributes["orchestration.step.id"] == "analyze-evidence"
+
+
+def test_agent_failure_closes_active_orchestration_step_span() -> None:
+    observer, exporter = make_observer()
+
+    async def scenario() -> None:
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="test-agent",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                step_id="retrieve-evidence",
+                step_index=0,
+                step_name="retrieve_evidence",
+            )
+        )
+        await observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_FAILED,
+                agent_name="test-agent",
+            )
+        )
+
+    run(scenario())
+
+    step_span = span_by_name(exporter, "agent.orchestration.step")
+    agent_span = span_by_name(exporter, "agent.run")
+
+    assert step_span.status.status_code is trace.StatusCode.ERROR
+    assert step_span.attributes["orchestration.step.status"] == "failed"
+    assert agent_span.status.status_code is trace.StatusCode.ERROR
+
+
 def test_irrelevant_agent_events_do_not_create_spans() -> None:
     observer, exporter = make_observer()
 

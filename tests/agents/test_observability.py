@@ -204,3 +204,57 @@ def test_agent_recovery_event_types_have_stable_values(
     expected_value: str,
 ) -> None:
     assert event_type.value == expected_value
+
+
+def test_agent_execution_event_accepts_orchestration_fields() -> None:
+    event = AgentExecutionEvent(
+        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+        agent_name="enterprise-rag-analyst",
+        run_id="run-123",
+        step_id="retrieve_evidence",
+        step_index=0,
+        step_name="Retrieve evidence",
+    )
+
+    assert event.step_id == "retrieve_evidence"
+    assert event.step_index == 0
+    assert event.step_name == "Retrieve evidence"
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("step_id", ""),
+        ("step_name", ""),
+    ],
+)
+def test_agent_execution_event_rejects_empty_orchestration_strings(
+    field_name,
+    value,
+) -> None:
+    kwargs = {
+        "event_type": AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+        "agent_name": "agent",
+        field_name: value,
+    }
+
+    with pytest.raises(ValueError):
+        AgentExecutionEvent(**kwargs)
+
+
+def test_agent_execution_event_rejects_negative_orchestration_step_index() -> None:
+    with pytest.raises(ValueError, match="step_index"):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            agent_name="agent",
+            step_index=-1,
+        )
+
+
+def test_agent_execution_event_rejects_invalid_orchestration_step_index_type() -> None:
+    with pytest.raises(TypeError, match="step_index"):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            agent_name="agent",
+            step_index="0",
+        )

@@ -379,7 +379,8 @@ async def test_llm_agent_run_completes_current_agent_response_orchestration_step
     assert result.output == "Generated answer."
 
 
-def test_llm_agent_starts_first_orchestration_step() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_starts_first_orchestration_step() -> None:
     from ai_platform.agents.orchestration import (
         OrchestrationPlan,
         OrchestrationStep,
@@ -409,7 +410,7 @@ def test_llm_agent_starts_first_orchestration_step() -> None:
         )
     )
 
-    step_index = agent._start_orchestration_step(context)
+    step_index = await agent._start_orchestration_step(context)
 
     assert step_index == 0
     assert context.orchestration_state.current_step_index == 0
@@ -417,7 +418,8 @@ def test_llm_agent_starts_first_orchestration_step() -> None:
     assert context.orchestration_state.current_step.status is OrchestrationStepStatus.RUNNING
 
 
-def test_llm_agent_does_not_start_step_without_orchestration_plan() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_does_not_start_step_without_orchestration_plan() -> None:
     context, _ = make_context()
 
     agent = LLMAgent(
@@ -429,14 +431,15 @@ def test_llm_agent_does_not_start_step_without_orchestration_plan() -> None:
         )
     )
 
-    step_index = agent._start_orchestration_step(context)
+    step_index = await agent._start_orchestration_step(context)
 
     assert step_index is None
     assert context.orchestration_state.current_step_index is None
     assert context.orchestration_state.current_step is None
 
 
-def test_llm_agent_reuses_current_orchestration_step() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_reuses_current_orchestration_step() -> None:
     from ai_platform.agents.orchestration import (
         OrchestrationPlan,
         OrchestrationStep,
@@ -473,13 +476,14 @@ def test_llm_agent_reuses_current_orchestration_step() -> None:
         )
     )
 
-    step_index = agent._start_orchestration_step(context)
+    step_index = await agent._start_orchestration_step(context)
 
     assert step_index == 0
     assert context.orchestration_state.current_step_index == 0
 
 
-def test_llm_agent_completes_orchestration_step() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_completes_orchestration_step() -> None:
     from ai_platform.agents.orchestration import (
         OrchestrationPlan,
         OrchestrationStep,
@@ -509,9 +513,9 @@ def test_llm_agent_completes_orchestration_step() -> None:
         )
     )
 
-    step_index = agent._start_orchestration_step(context)
+    step_index = await agent._start_orchestration_step(context)
 
-    agent._complete_orchestration_step(
+    await agent._complete_orchestration_step(
         context,
         step_index,
         tool_round=2,
@@ -524,7 +528,8 @@ def test_llm_agent_completes_orchestration_step() -> None:
     assert context.orchestration_state.current_step_index == 0
 
 
-def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
     context, _ = make_context()
 
     agent = LLMAgent(
@@ -536,7 +541,7 @@ def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
         )
     )
 
-    agent._complete_orchestration_step(
+    await agent._complete_orchestration_step(
         context,
         None,
         tool_round=2,
@@ -708,7 +713,8 @@ async def test_llm_agent_returns_agent_response() -> None:
     )
 
 
-def test_llm_agent_publishes_orchestration_step_result() -> None:
+@pytest.mark.asyncio
+async def test_llm_agent_publishes_orchestration_step_result() -> None:
     definition = AgentDefinition(
         name="production-llm-agent",
         description="Production LLM agent.",
@@ -734,7 +740,7 @@ def test_llm_agent_publishes_orchestration_step_result() -> None:
 
     agent = LLMAgent(definition)
 
-    step_index = agent._start_orchestration_step(context)
+    step_index = await agent._start_orchestration_step(context)
 
     response = AgentResponse(
         agent_name="production-llm-agent",

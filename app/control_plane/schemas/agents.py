@@ -73,6 +73,10 @@ class AgentRunEventResponse(BaseModel):
     tool_name: str | None = None
     call_id: str | None = None
 
+    step_id: str | None = None
+    step_index: int | None = None
+    step_name: str | None = None
+
     provider: str | None = None
     model: str | None = None
 

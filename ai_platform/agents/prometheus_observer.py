@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
 from prometheus_client import Counter, Histogram
 
 from ai_platform.agents.observability import (
@@ -108,6 +111,26 @@ AGENT_MEMORY_WRITE_DURATION_SECONDS = Histogram(
     ],
 )
 
+AGENT_ORCHESTRATION_STEPS_TOTAL = Counter(
+    "deldai_agent_orchestration_steps_total",
+    "Total orchestration steps by agent, step, and terminal status.",
+    [
+        "agent_name",
+        "step_name",
+        "status",
+    ],
+)
+
+AGENT_ORCHESTRATION_STEP_DURATION_SECONDS = Histogram(
+    "deldai_agent_orchestration_step_duration_seconds",
+    "Orchestration step duration in seconds.",
+    [
+        "agent_name",
+        "step_name",
+        "status",
+    ],
+)
+
 
 class PrometheusAgentExecutionObserver(AgentExecutionObserver):
     """
@@ -118,15 +141,78 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
     metadata are intentionally excluded from Prometheus labels.
     """
 
+    def __init__(self) -> None:
+        self._orchestration_step_started_at: dict[
+            asyncio.Task[object],
+            float,
+        ] = {}
+
     async def record(
         self,
         event: AgentExecutionEvent,
     ) -> None:
+        if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_STARTED:
+            if event.step_name is None:
+                return
+
+            task = asyncio.current_task()
+            if task is not None:
+                self._orchestration_step_started_at[task] = time.perf_counter()
+
+            return
+
+        if event.event_type in (
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+        ):
+            if event.step_name is None:
+                return
+
+            status = (
+                "completed"
+                if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED
+                else "failed"
+            )
+
+            labels = {
+                "agent_name": event.agent_name,
+                "step_name": event.step_name,
+                "status": status,
+            }
+
+            AGENT_ORCHESTRATION_STEPS_TOTAL.labels(
+                **labels,
+            ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                started_at = self._orchestration_step_started_at.pop(
+                    task,
+                    None,
+                )
+
+                if started_at is not None:
+                    AGENT_ORCHESTRATION_STEP_DURATION_SECONDS.labels(
+                        **labels,
+                    ).observe(
+                        max(
+                            0.0,
+                            time.perf_counter() - started_at,
+                        ),
+                    )
+
+            return
+
         if event.event_type is AgentExecutionEventType.AGENT_COMPLETED:
             AGENT_EXECUTIONS_TOTAL.labels(
                 agent_name=event.agent_name,
                 status="completed",
             ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                self._orchestration_step_started_at.pop(task, None)
+
             return
 
         if event.event_type is AgentExecutionEventType.AGENT_FAILED:
@@ -134,6 +220,11 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
                 agent_name=event.agent_name,
                 status="failed",
             ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                self._orchestration_step_started_at.pop(task, None)
+
             return
 
         if event.event_type is AgentExecutionEventType.AGENT_CANCELLED:
@@ -141,6 +232,11 @@ class PrometheusAgentExecutionObserver(AgentExecutionObserver):
                 agent_name=event.agent_name,
                 status="cancelled",
             ).inc()
+
+            task = asyncio.current_task()
+            if task is not None:
+                self._orchestration_step_started_at.pop(task, None)
+
             return
 
         if event.event_type is AgentExecutionEventType.MEMORY_RETRIEVAL_STARTED:

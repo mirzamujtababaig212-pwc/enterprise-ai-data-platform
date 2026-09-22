@@ -47,6 +47,7 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             tuple[asyncio.Task[object], str],
             _ActiveSpan,
         ] = {}
+        self._step_spans: dict[asyncio.Task[object], _ActiveSpan] = {}
 
     async def record(
         self,
@@ -155,6 +156,26 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
                 event,
                 status=trace.StatusCode.ERROR,
             )
+            return
+
+        if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_STARTED:
+            self._start_orchestration_step_span(task, event)
+            return
+
+        if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED:
+            self._finish_orchestration_step_span(
+                task,
+                event,
+                status=trace.StatusCode.OK,
+            )
+            return
+
+        if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_FAILED:
+            self._finish_orchestration_step_span(
+                task,
+                event,
+                status=trace.StatusCode.ERROR,
+            )
 
     def _start_agent_span(
         self,
@@ -213,6 +234,16 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
                 active_memory_write.span.set_status(status)
                 active_memory_write.span.end()
                 context.detach(active_memory_write.token)
+
+            active_step = self._step_spans.pop(task, None)
+            if active_step is not None:
+                active_step.span.set_attribute(
+                    "orchestration.step.status",
+                    "failed",
+                )
+                active_step.span.set_status(status)
+                active_step.span.end()
+                context.detach(active_step.token)
 
             active_tools = [key for key in self._tool_spans if key[0] is task]
 
@@ -546,6 +577,75 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
 
         if active is None:
             return
+
+        active.span.set_status(status)
+        active.span.end()
+
+        context.detach(active.token)
+
+    def _start_orchestration_step_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+    ) -> None:
+        if event.step_id is None or event.step_index is None or event.step_name is None:
+            return
+
+        if task in self._step_spans:
+            return
+
+        span = self._tracer.start_span(
+            "agent.orchestration.step",
+        )
+
+        span.set_attribute(
+            "agent.name",
+            event.agent_name,
+        )
+        span.set_attribute(
+            "orchestration.step.id",
+            event.step_id,
+        )
+        span.set_attribute(
+            "orchestration.step.index",
+            event.step_index,
+        )
+        span.set_attribute(
+            "orchestration.step.name",
+            event.step_name,
+        )
+        span.set_attribute(
+            "orchestration.step.status",
+            "running",
+        )
+
+        token = context.attach(
+            trace.set_span_in_context(span),
+        )
+
+        self._step_spans[task] = _ActiveSpan(
+            span=span,
+            token=token,
+        )
+
+    def _finish_orchestration_step_span(
+        self,
+        task: asyncio.Task[object],
+        event: AgentExecutionEvent,
+        *,
+        status: trace.StatusCode,
+    ) -> None:
+        active = self._step_spans.pop(task, None)
+
+        if active is None:
+            return
+
+        status_name = "completed" if status is trace.StatusCode.OK else "failed"
+
+        active.span.set_attribute(
+            "orchestration.step.status",
+            status_name,
+        )
 
         active.span.set_status(status)
         active.span.end()

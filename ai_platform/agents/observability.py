@@ -24,6 +24,10 @@ class AgentExecutionEventType(StrEnum):
 
     TOOL_AUTHORIZATION_DECISION = "tool.authorization.decision"
 
+    ORCHESTRATION_STEP_STARTED = "orchestration.step.started"
+    ORCHESTRATION_STEP_COMPLETED = "orchestration.step.completed"
+    ORCHESTRATION_STEP_FAILED = "orchestration.step.failed"
+
     MEMORY_RETRIEVAL_STARTED = "memory.retrieval.started"
     MEMORY_RETRIEVAL_COMPLETED = "memory.retrieval.completed"
     MEMORY_RETRIEVAL_FAILED = "memory.retrieval.failed"
@@ -52,6 +56,9 @@ class AgentExecutionEvent:
     call_id: str | None = None
     provider: str | None = None
     model: str | None = None
+    step_id: str | None = None
+    step_index: int | None = None
+    step_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -119,6 +126,27 @@ class AgentExecutionEvent:
 
             if not self.model.strip():
                 raise ValueError("Agent execution event model must not be empty.")
+
+        if self.step_id is not None:
+            if not isinstance(self.step_id, str):
+                raise TypeError("Agent execution event step_id must be a string or None.")
+
+            if not self.step_id.strip():
+                raise ValueError("Agent execution event step_id must not be empty.")
+
+        if self.step_index is not None:
+            if not isinstance(self.step_index, int):
+                raise TypeError("Agent execution event step_index must be an integer or None.")
+
+            if self.step_index < 0:
+                raise ValueError("Agent execution event step_index must be >= 0.")
+
+        if self.step_name is not None:
+            if not isinstance(self.step_name, str):
+                raise TypeError("Agent execution event step_name must be a string or None.")
+
+            if not self.step_name.strip():
+                raise ValueError("Agent execution event step_name must not be empty.")
 
         if not isinstance(self.metadata, dict):
             raise TypeError("Agent execution event metadata must be a dictionary.")

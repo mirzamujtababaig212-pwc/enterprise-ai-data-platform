@@ -351,6 +351,21 @@ class AgentRunEventRecord(Base):
         nullable=True,
     )
 
+    step_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    step_index: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    step_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     provider: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,

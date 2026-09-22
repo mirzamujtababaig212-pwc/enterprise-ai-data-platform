@@ -14,6 +14,8 @@ from ai_platform.agents.prometheus_observer import (
     AGENT_MEMORY_WRITES_TOTAL,
     AGENT_MEMORY_WRITE_FAILURES_TOTAL,
     AGENT_MEMORY_WRITE_DURATION_SECONDS,
+    AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
+    AGENT_ORCHESTRATION_STEPS_TOTAL,
     AGENT_TOOL_CALLS_TOTAL,
     AGENT_TOOL_FAILURES_TOTAL,
     PrometheusAgentExecutionObserver,
@@ -29,6 +31,192 @@ def _sample_value(metric, labels):
         if sample.labels == labels:
             return sample.value
     return 0.0
+
+
+def test_orchestration_step_completed_records_counter_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "step_name": "retrieve_evidence",
+        "status": "completed",
+    }
+
+    before_steps = _sample_value(
+        AGENT_ORCHESTRATION_STEPS_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="step-secret",
+                step_index=0,
+                step_name="retrieve_evidence",
+                metadata={"secret": "must-not-be-a-label"},
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="step-secret",
+                step_index=0,
+                step_name="retrieve_evidence",
+                metadata={"secret": "must-not-be-a-label"},
+            )
+        )
+    )
+
+    after_steps = _sample_value(
+        AGENT_ORCHESTRATION_STEPS_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_steps == before_steps + 1
+    assert after_duration >= before_duration
+
+
+def test_orchestration_step_failure_records_failure_counter_and_duration():
+    observer = PrometheusAgentExecutionObserver()
+
+    labels = {
+        "agent_name": "test-agent",
+        "step_name": "analyze_evidence",
+        "status": "failed",
+    }
+
+    before_steps = _sample_value(
+        AGENT_ORCHESTRATION_STEPS_TOTAL,
+        labels,
+    )
+    before_duration = _sample_value(
+        AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                step_id="step-secret",
+                step_index=1,
+                step_name="analyze_evidence",
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+                agent_name="test-agent",
+                step_id="step-secret",
+                step_index=1,
+                step_name="analyze_evidence",
+                metadata={"error_type": "RuntimeError"},
+            )
+        )
+    )
+
+    after_steps = _sample_value(
+        AGENT_ORCHESTRATION_STEPS_TOTAL,
+        labels,
+    )
+    after_duration = _sample_value(
+        AGENT_ORCHESTRATION_STEP_DURATION_SECONDS,
+        {
+            **labels,
+            "le": "+Inf",
+        },
+    )
+
+    assert after_steps == before_steps + 1
+    assert after_duration >= before_duration
+
+
+def test_orchestration_metrics_use_only_low_cardinality_labels():
+    observer = PrometheusAgentExecutionObserver()
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="step-secret",
+                step_index=0,
+                step_name="retrieve_evidence",
+                metadata={
+                    "secret": "secret",
+                    "request_id": "secret-request-id",
+                },
+            )
+        )
+    )
+
+    _run(
+        observer.record(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+                agent_name="test-agent",
+                run_id="run-secret",
+                session_id="session-secret",
+                user_id="user-secret",
+                step_id="step-secret",
+                step_index=0,
+                step_name="retrieve_evidence",
+            )
+        )
+    )
+
+    samples = AGENT_ORCHESTRATION_STEPS_TOTAL.collect()[0].samples
+
+    matching = [
+        sample
+        for sample in samples
+        if sample.labels.get("agent_name") == "test-agent"
+        and sample.labels.get("step_name") == "retrieve_evidence"
+        and sample.labels.get("status") == "completed"
+    ]
+
+    assert matching
+    assert set(matching[0].labels) == {
+        "agent_name",
+        "step_name",
+        "status",
+    }
 
 
 def test_completed_agent_execution_increments_completed_counter():

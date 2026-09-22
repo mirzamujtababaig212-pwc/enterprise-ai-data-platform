@@ -20,6 +20,9 @@ def make_event(
     tool_round: int | None = None,
     tool_name: str | None = None,
     call_id: str | None = None,
+    step_id: str | None = None,
+    step_index: int | None = None,
+    step_name: str | None = None,
     provider: str | None = None,
     model: str | None = None,
     metadata: dict | None = None,
@@ -33,6 +36,9 @@ def make_event(
         tool_round=tool_round,
         tool_name=tool_name,
         call_id=call_id,
+        step_id=step_id,
+        step_index=step_index,
+        step_name=step_name,
         provider=provider,
         model=model,
         metadata={} if metadata is None else metadata,
@@ -115,6 +121,31 @@ def test_record_preserves_tool_event_fields() -> None:
         assert restored[0].tool_round == 2
         assert restored[0].tool_name == "vehicle_lookup"
         assert restored[0].call_id == "call-123"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_record_preserves_orchestration_event_fields() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        event = make_event(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+            step_id="retrieve_evidence",
+            step_index=0,
+            step_name="Retrieve enterprise evidence",
+            metadata={"phase": "evidence_retrieval"},
+        )
+
+        repository.record(event)
+
+        restored = repository.list("run-1")
+
+        assert restored == [event]
+        assert restored[0].step_id == "retrieve_evidence"
+        assert restored[0].step_index == 0
+        assert restored[0].step_name == "Retrieve enterprise evidence"
     finally:
         session.close()
         engine.dispose()
