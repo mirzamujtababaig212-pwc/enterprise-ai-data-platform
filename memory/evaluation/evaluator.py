@@ -93,7 +93,7 @@ class MemoryRetrievalEvaluator:
 
             latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-            retrieved_ids = tuple(item.id for item in retrieved[: self.k])
+            retrieved_ids = tuple(result.item.id for result in retrieved[: self.k])
 
             if case.relevance_grades is None:
                 relevance_grades = {memory_id: 1.0 for memory_id in case.relevant_memory_ids}

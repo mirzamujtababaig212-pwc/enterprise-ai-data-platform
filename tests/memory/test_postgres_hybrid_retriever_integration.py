@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete
@@ -113,7 +113,7 @@ def _memory(
         memory_type=memory_type,  # type: ignore[arg-type]
         content=content,
         namespace=namespace,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
         metadata={"source": "postgres-hybrid-retrieval-test"},
     )
 
@@ -182,25 +182,25 @@ def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results()
                 "hybrid-shared",
                 "Deployment configuration requires production approval.",
                 namespace=namespace,
-                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
             ),
             _memory(
                 "hybrid-semantic",
                 "Production release monitoring tracks deployment health.",
                 namespace=namespace,
-                created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+                created_at=datetime(2026, 1, 2, tzinfo=UTC),
             ),
             _memory(
                 "hybrid-lexical",
                 "Deployment configuration procedures require validation.",
                 namespace=namespace,
-                created_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+                created_at=datetime(2026, 1, 3, tzinfo=UTC),
             ),
             _memory(
                 "hybrid-unrelated",
                 "Invoice validation requires a purchase order.",
                 namespace=namespace,
-                created_at=datetime(2026, 1, 4, tzinfo=timezone.utc),
+                created_at=datetime(2026, 1, 4, tzinfo=UTC),
             ),
         ]
 
@@ -245,7 +245,7 @@ def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results()
                 top_k=3,
             )
 
-            result_ids = [item.id for item in results]
+            result_ids = [result.item.id for result in results]
 
             assert "hybrid-shared" in result_ids
             assert "hybrid-unrelated" not in result_ids

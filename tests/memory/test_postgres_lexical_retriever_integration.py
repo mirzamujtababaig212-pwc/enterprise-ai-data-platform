@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, delete, text
@@ -91,7 +91,7 @@ def test_postgresql_lexical_memory_retriever_returns_ranked_matches() -> None:
     retriever = PostgreSQLLexicalMemoryRetriever(session_factory=session_factory)
 
     namespace = "postgres-lexical-memory-ranked"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ids = [
         "postgres-lexical-memory-ranked-exact",
         "postgres-lexical-memory-ranked-partial",
@@ -131,7 +131,7 @@ def test_postgresql_lexical_memory_retriever_returns_ranked_matches() -> None:
             )
         )
 
-        assert [item.id for item in results] == [
+        assert [result.item.id for result in results] == [
             ids[0],
             ids[1],
         ]
@@ -146,7 +146,7 @@ def test_postgresql_lexical_memory_retriever_returns_older_relevant_memory() -> 
     retriever = PostgreSQLLexicalMemoryRetriever(session_factory=session_factory)
 
     namespace = "postgres-lexical-memory-older-relevant"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ids = [
         "postgres-lexical-memory-older-relevant-new",
         "postgres-lexical-memory-older-relevant-old",
@@ -179,7 +179,7 @@ def test_postgresql_lexical_memory_retriever_returns_older_relevant_memory() -> 
             )
         )
 
-        assert [item.id for item in results] == [ids[1]]
+        assert [result.item.id for result in results] == [ids[1]]
     finally:
         _cleanup(session_factory, ids)
         engine.dispose()
@@ -191,7 +191,7 @@ def test_postgresql_lexical_memory_retriever_applies_namespace_and_type_filters(
     retriever = PostgreSQLLexicalMemoryRetriever(session_factory=session_factory)
 
     namespace = "postgres-lexical-memory-filter"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ids = [
         "postgres-lexical-memory-filter-episodic",
         "postgres-lexical-memory-filter-semantic",
@@ -235,7 +235,7 @@ def test_postgresql_lexical_memory_retriever_applies_namespace_and_type_filters(
             )
         )
 
-        assert [item.id for item in episodic] == [ids[0]]
+        assert [result.item.id for result in episodic] == [ids[0]]
     finally:
         _cleanup(session_factory, ids)
         engine.dispose()
@@ -247,7 +247,7 @@ def test_postgresql_lexical_memory_retriever_excludes_expired_memories() -> None
     retriever = PostgreSQLLexicalMemoryRetriever(session_factory=session_factory)
 
     namespace = "postgres-lexical-memory-expiry"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ids = [
         "postgres-lexical-memory-expiry-expired",
         "postgres-lexical-memory-expiry-live",
@@ -281,7 +281,7 @@ def test_postgresql_lexical_memory_retriever_excludes_expired_memories() -> None
             )
         )
 
-        assert [item.id for item in results] == [ids[1]]
+        assert [result.item.id for result in results] == [ids[1]]
     finally:
         _cleanup(session_factory, ids)
         engine.dispose()
@@ -345,7 +345,7 @@ def test_postgresql_lexical_memory_retriever_preserves_metadata() -> None:
 
     namespace = "postgres-lexical-memory-metadata"
     memory_id = "postgres-lexical-memory-metadata-item"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     item = _item(
         memory_id=memory_id,
@@ -370,7 +370,7 @@ def test_postgresql_lexical_memory_retriever_preserves_metadata() -> None:
         )
 
         assert len(results) == 1
-        assert results[0].metadata == item.metadata
+        assert results[0].item.metadata == item.metadata
     finally:
         _cleanup(session_factory, [memory_id])
         engine.dispose()

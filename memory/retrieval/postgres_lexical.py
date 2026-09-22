@@ -4,13 +4,14 @@ import asyncio
 from collections.abc import Callable, Sequence
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import column
-from sqlalchemy.dialects.postgresql import TSVECTOR
 
 from app.control_plane.persistence.database import SessionLocal
 from app.control_plane.persistence.models import MemoryItemRecord
 from memory.models import MemoryItem, MemoryType
+from memory.retrieval.contracts import MemoryRetrievalResult
 
 
 class PostgreSQLLexicalMemoryRetriever:
@@ -35,7 +36,7 @@ class PostgreSQLLexicalMemoryRetriever:
         namespace: str,
         memory_type: MemoryType | None = None,
         top_k: int = 5,
-    ) -> Sequence[MemoryItem]:
+    ) -> Sequence[MemoryRetrievalResult]:
         if not query.strip():
             raise ValueError("Query must not be empty.")
 
@@ -59,7 +60,7 @@ class PostgreSQLLexicalMemoryRetriever:
         namespace: str,
         memory_type: MemoryType | None,
         top_k: int,
-    ) -> tuple[MemoryItem, ...]:
+    ) -> tuple[MemoryRetrievalResult, ...]:
         session = self._session_factory()
 
         try:
@@ -88,7 +89,15 @@ class PostgreSQLLexicalMemoryRetriever:
 
             rows = session.execute(statement).all()
 
-            return tuple(self._to_memory_item(record) for record, _rank in rows)
+            return tuple(
+                MemoryRetrievalResult(
+                    item=self._to_memory_item(record),
+                    retrieval_method="postgresql.lexical",
+                    rank=rank,
+                    retrieval_score=float(score),
+                )
+                for rank, (record, score) in enumerate(rows, start=1)
+            )
         finally:
             session.close()
 

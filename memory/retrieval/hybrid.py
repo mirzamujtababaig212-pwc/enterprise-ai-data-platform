@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from memory.models import MemoryItem, MemoryType
-from memory.retrieval.contracts import MemoryRetriever
+from memory.retrieval.contracts import MemoryRetrievalResult, MemoryRetriever
 
 DEFAULT_RRF_K = 60
 DEFAULT_SEMANTIC_WEIGHT = 1.0
@@ -75,7 +75,7 @@ class HybridMemoryRetriever:
         namespace: str,
         memory_type: MemoryType | None = None,
         top_k: int = 5,
-    ) -> Sequence[MemoryItem]:
+    ) -> Sequence[MemoryRetrievalResult]:
         if not query.strip():
             raise ValueError("Query must not be empty.")
 
@@ -102,24 +102,51 @@ class HybridMemoryRetriever:
 
         fused_scores: defaultdict[str, float] = defaultdict(float)
         item_by_id: dict[str, MemoryItem] = {}
+        semantic_ranks: dict[str, int] = {}
+        lexical_ranks: dict[str, int] = {}
 
-        for rank, item in enumerate(semantic_results, start=1):
-            fused_scores[item.id] += self.semantic_weight / (self.rrf_k + rank)
-            item_by_id.setdefault(item.id, item)
+        for rank, result in enumerate(semantic_results, start=1):
+            memory_id = result.item.id
+            semantic_ranks[memory_id] = rank
+            fused_scores[memory_id] += self.semantic_weight / (self.rrf_k + rank)
+            item_by_id.setdefault(memory_id, result.item)
 
-        for rank, item in enumerate(lexical_results, start=1):
-            fused_scores[item.id] += self.lexical_weight / (self.rrf_k + rank)
-            item_by_id.setdefault(item.id, item)
+        for rank, result in enumerate(lexical_results, start=1):
+            memory_id = result.item.id
+            lexical_ranks[memory_id] = rank
+            fused_scores[memory_id] += self.lexical_weight / (self.rrf_k + rank)
+            item_by_id.setdefault(memory_id, result.item)
+
+        ranked_ids = sorted(
+            fused_scores,
+            key=lambda memory_id: (
+                -fused_scores[memory_id],
+                memory_id,
+            ),
+        )[:top_k]
 
         return tuple(
-            item_by_id[memory_id]
-            for memory_id in sorted(
-                fused_scores,
-                key=lambda memory_id: (
-                    -fused_scores[memory_id],
-                    memory_id,
-                ),
-            )[:top_k]
+            MemoryRetrievalResult(
+                item=item_by_id[memory_id],
+                retrieval_method="hybrid.rrf",
+                rank=rank,
+                retrieval_score=fused_scores[memory_id],
+                provenance={
+                    "semantic_rank": semantic_ranks.get(memory_id),
+                    "lexical_rank": lexical_ranks.get(memory_id),
+                    "semantic_contribution": (
+                        self.semantic_weight / (self.rrf_k + semantic_ranks[memory_id])
+                        if memory_id in semantic_ranks
+                        else 0.0
+                    ),
+                    "lexical_contribution": (
+                        self.lexical_weight / (self.rrf_k + lexical_ranks[memory_id])
+                        if memory_id in lexical_ranks
+                        else 0.0
+                    ),
+                },
+            )
+            for rank, memory_id in enumerate(ranked_ids, start=1)
         )
 
     async def diagnose(
@@ -154,8 +181,12 @@ class HybridMemoryRetriever:
             ),
         )
 
-        semantic_ranks = {item.id: rank for rank, item in enumerate(semantic_results, start=1)}
-        lexical_ranks = {item.id: rank for rank, item in enumerate(lexical_results, start=1)}
+        semantic_ranks = {
+            result.item.id: rank for rank, result in enumerate(semantic_results, start=1)
+        }
+        lexical_ranks = {
+            result.item.id: rank for rank, result in enumerate(lexical_results, start=1)
+        }
 
         item_ids = set(semantic_ranks) | set(lexical_ranks)
         fused_scores: dict[str, float] = {}

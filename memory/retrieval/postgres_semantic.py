@@ -13,6 +13,7 @@ from app.control_plane.persistence.models import (
     MemoryItemRecord,
 )
 from memory.models import MemoryItem, MemoryType
+from memory.retrieval.contracts import MemoryRetrievalResult
 from rag.compatibility import EmbeddingCompatibilityPolicy
 from rag.contracts import EmbeddingService
 from rag.models import EmbeddingIdentity, EmbeddingResult
@@ -120,6 +121,8 @@ class PostgreSQLSemanticMemoryRetriever:
                     f"expected {expected_dimensions}, got {query_dimension}."
                 )
 
+            distance = MemoryEmbeddingRecord.embedding.cosine_distance(query_vector)
+
             statement = (
                 select(
                     MemoryItemRecord,
@@ -129,6 +132,7 @@ class PostgreSQLSemanticMemoryRetriever:
                     MemoryEmbeddingRecord.embedding_requested_model,
                     MemoryEmbeddingRecord.embedding_resolved_provider,
                     MemoryEmbeddingRecord.embedding_resolved_model,
+                    distance.label("distance"),
                 )
                 .join(
                     MemoryEmbeddingRecord,
@@ -156,16 +160,22 @@ class PostgreSQLSemanticMemoryRetriever:
                 rows = session.execute(statement).all()
 
                 return [
-                    self._validated_memory_item(
-                        record,
-                        embedding,
-                        stored_dimension,
-                        stored_requested_provider,
-                        stored_requested_model,
-                        stored_resolved_provider,
-                        stored_resolved_model,
+                    MemoryRetrievalResult(
+                        item=self._validated_memory_item(
+                            record,
+                            embedding,
+                            stored_dimension,
+                            stored_requested_provider,
+                            stored_requested_model,
+                            stored_resolved_provider,
+                            stored_resolved_model,
+                        ),
+                        retrieval_method="postgresql.semantic.cosine",
+                        rank=rank,
+                        retrieval_score=None,
+                        provenance={"ordering": "created_at_desc_id_asc"},
                     )
-                    for (
+                    for rank, (
                         record,
                         _,
                         stored_dimension,
@@ -173,10 +183,9 @@ class PostgreSQLSemanticMemoryRetriever:
                         stored_requested_model,
                         stored_resolved_provider,
                         stored_resolved_model,
-                    ) in rows
+                        _distance,
+                    ) in enumerate(rows, start=1)
                 ]
-
-            distance = MemoryEmbeddingRecord.embedding.cosine_distance(query_vector)
 
             statement = statement.order_by(
                 distance.asc(),
@@ -186,16 +195,21 @@ class PostgreSQLSemanticMemoryRetriever:
             rows = session.execute(statement).all()
 
             return [
-                self._validated_memory_item(
-                    record,
-                    embedding,
-                    stored_dimension,
-                    stored_requested_provider,
-                    stored_requested_model,
-                    stored_resolved_provider,
-                    stored_resolved_model,
+                MemoryRetrievalResult(
+                    item=self._validated_memory_item(
+                        record,
+                        embedding,
+                        stored_dimension,
+                        stored_requested_provider,
+                        stored_requested_model,
+                        stored_resolved_provider,
+                        stored_resolved_model,
+                    ),
+                    retrieval_method="postgresql.semantic.cosine",
+                    rank=rank,
+                    retrieval_score=float(1.0 - distance_value),
                 )
-                for (
+                for rank, (
                     record,
                     _,
                     stored_dimension,
@@ -203,7 +217,8 @@ class PostgreSQLSemanticMemoryRetriever:
                     stored_requested_model,
                     stored_resolved_provider,
                     stored_resolved_model,
-                ) in rows
+                    distance_value,
+                ) in enumerate(rows, start=1)
             ]
 
         finally:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from memory.models import MemoryItem
+from memory.retrieval.contracts import MemoryRetrievalResult
 from memory.retrieval.hybrid import HybridMemoryRetriever
+from memory.retrieval.reranker import MemoryRerankResult
 from memory.retrieval.reranking import RerankingMemoryRetriever
 
 
@@ -21,7 +23,7 @@ def _item(
         memory_type=memory_type,  # type: ignore[arg-type]
         content=content,
         namespace=namespace,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -37,7 +39,7 @@ class FakeMemoryRetriever:
         namespace: str,
         memory_type: str | None = None,
         top_k: int = 5,
-    ) -> list[MemoryItem]:
+    ) -> list[MemoryRetrievalResult]:
         self.calls.append(
             {
                 "query": query,
@@ -46,7 +48,15 @@ class FakeMemoryRetriever:
                 "top_k": top_k,
             }
         )
-        return self.results[:top_k]
+        return [
+            MemoryRetrievalResult(
+                item=item,
+                retrieval_method="fake",
+                rank=rank,
+                retrieval_score=float(top_k - rank + 1),
+            )
+            for rank, item in enumerate(self.results[:top_k], start=1)
+        ]
 
 
 class FakeMemoryReranker:
@@ -68,6 +78,25 @@ class FakeMemoryReranker:
             }
         )
         return list(reversed(candidates))[:top_k]
+
+
+class FakeScoredMemoryReranker:
+    async def rerank_with_scores(
+        self,
+        query: str,
+        candidates: tuple[MemoryItem, ...],
+        *,
+        top_k: int,
+    ) -> tuple[MemoryRerankResult, ...]:
+        ordered = tuple(reversed(candidates))[:top_k]
+        return tuple(
+            MemoryRerankResult(
+                item=item,
+                score=0.9 - (index * 0.1),
+                original_rank=candidates.index(item) + 1,
+            )
+            for index, item in enumerate(ordered)
+        )
 
 
 @pytest.mark.asyncio
@@ -93,11 +122,66 @@ async def test_reranking_memory_retriever_composes_retriever_and_reranker():
         top_k=2,
     )
 
-    assert [item.id for item in results] == ["c", "b"]
+    assert [result.item.id for result in results] == ["c", "b"]
 
     assert retriever.calls[0]["top_k"] == 3
     assert reranker.calls[0]["top_k"] == 2
     assert reranker.calls[0]["query"] == "vehicle battery"
+
+
+@pytest.mark.asyncio
+async def test_reranking_memory_retriever_preserves_and_enriches_retrieval_metadata():
+    retriever = FakeMemoryRetriever(
+        [
+            _item("first", "vehicle"),
+            _item("second", "battery"),
+            _item("third", "motor"),
+        ]
+    )
+    reranker = FakeScoredMemoryReranker()
+
+    service = RerankingMemoryRetriever(
+        retriever,
+        reranker,
+        candidate_k=3,
+    )
+
+    results = await service.retrieve(
+        "vehicle battery",
+        namespace="project-a",
+        top_k=2,
+    )
+
+    assert [result.item.id for result in results] == [
+        "third",
+        "second",
+    ]
+
+    assert [result.rank for result in results] == [1, 2]
+
+    assert [result.retrieval_method for result in results] == [
+        "fake+rerank",
+        "fake+rerank",
+    ]
+
+    assert [result.retrieval_score for result in results] == [
+        1.0,
+        2.0,
+    ]
+
+    assert [result.reranker_score for result in results] == [
+        pytest.approx(0.9),
+        pytest.approx(0.8),
+    ]
+
+    assert results[0].provenance == {
+        "original_retrieval_rank": 3,
+        "reranker_original_rank": 3,
+    }
+    assert results[1].provenance == {
+        "original_retrieval_rank": 2,
+        "reranker_original_rank": 2,
+    }
 
 
 @pytest.mark.asyncio

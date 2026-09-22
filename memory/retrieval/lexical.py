@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from memory.models import MemoryItem, MemoryType
+from memory.retrieval.contracts import MemoryRetrievalResult
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 LEXICAL_CANDIDATE_LIMIT = 10_000
@@ -47,7 +48,7 @@ class LexicalMemoryRetriever:
         namespace: str,
         memory_type: MemoryType | None = None,
         top_k: int = 5,
-    ) -> Sequence[MemoryItem]:
+    ) -> Sequence[MemoryRetrievalResult]:
         if not query.strip():
             raise ValueError("Query must not be empty.")
 
@@ -135,4 +136,12 @@ class LexicalMemoryRetriever:
             ),
         )
 
-        return tuple(item for item, _ in ordered[:top_k])
+        return tuple(
+            MemoryRetrievalResult(
+                item=item,
+                retrieval_method="lexical.bm25",
+                rank=rank,
+                retrieval_score=score,
+            )
+            for rank, (item, score) in enumerate(ordered[:top_k], start=1)
+        )

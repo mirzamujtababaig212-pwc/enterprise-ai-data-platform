@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete
@@ -15,8 +15,8 @@ from app.control_plane.persistence.models import (
 )
 from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
 from memory.models import MemoryItem
-from rag.models import EmbeddingIdentity, EmbeddingResult
 from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
+from rag.models import EmbeddingIdentity, EmbeddingResult
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",
@@ -58,7 +58,7 @@ def _memory(
         memory_type=memory_type,  # type: ignore[arg-type]
         content=content,
         namespace=namespace,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
         expires_at=expires_at,
         metadata={"source": "semantic-retrieval-test"},
     )
@@ -145,7 +145,7 @@ def test_postgresql_semantic_memory_retriever_returns_ranked_matches():
         ]
 
         try:
-            for memory, embedding in zip(memories, embeddings):
+            for memory, embedding in zip(memories, embeddings, strict=True):
                 await _put_memory(memory, embedding)
 
             service = FakeEmbeddingService(
@@ -166,12 +166,17 @@ def test_postgresql_semantic_memory_retriever_returns_ranked_matches():
                 top_k=3,
             )
 
-            assert [item.id for item in results] == [
+            assert [result.item.id for result in results] == [
                 "semantic-memory-1",
                 "semantic-memory-2",
                 "semantic-memory-3",
             ]
-            assert all(isinstance(item, MemoryItem) for item in results)
+            assert [result.rank for result in results] == [1, 2, 3]
+            assert results[0].retrieval_method == "postgresql.semantic.cosine"
+            assert results[0].retrieval_score == pytest.approx(1.0)
+            assert results[1].retrieval_score == pytest.approx(0.8)
+            assert results[2].retrieval_score == pytest.approx(0.0)
+            assert all(isinstance(result.item, MemoryItem) for result in results)
         finally:
             await _cleanup([memory.id for memory in memories])
 
@@ -220,7 +225,7 @@ def test_postgresql_semantic_memory_retriever_filters_namespace_and_type():
                 top_k=10,
             )
 
-            assert [item.id for item in results] == ["semantic-filter-namespace"]
+            assert [result.item.id for result in results] == ["semantic-filter-namespace"]
         finally:
             await _cleanup([memory.id for memory in memories])
 
@@ -229,7 +234,7 @@ def test_postgresql_semantic_memory_retriever_filters_namespace_and_type():
 
 def test_postgresql_semantic_memory_retriever_excludes_expired_memory():
     async def run():
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         active = _memory(
             "semantic-active",
@@ -265,7 +270,7 @@ def test_postgresql_semantic_memory_retriever_excludes_expired_memory():
                 top_k=10,
             )
 
-            assert [item.id for item in results] == ["semantic-active"]
+            assert [result.item.id for result in results] == ["semantic-active"]
         finally:
             await _cleanup([active.id, expired.id])
 

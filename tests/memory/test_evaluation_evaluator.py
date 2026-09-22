@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from memory.evaluation.evaluator import MemoryRetrievalEvaluator
 from memory.evaluation.models import MemoryRetrievalEvaluationCase
 from memory.models import MemoryItem
+from memory.retrieval.contracts import MemoryRetrievalResult
 
 
 def make_item(memory_id: str, content: str) -> MemoryItem:
@@ -13,7 +14,7 @@ def make_item(memory_id: str, content: str) -> MemoryItem:
         memory_type="semantic",
         content=content,
         namespace="project-a",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -28,8 +29,18 @@ class FakeMemoryRetriever:
         namespace,
         memory_type=None,
         top_k=5,
-    ):
-        return tuple(self.results_by_query[query][:top_k])
+    ) -> tuple[MemoryRetrievalResult, ...]:
+        return tuple(
+            MemoryRetrievalResult(
+                item=item,
+                retrieval_method="test.fake",
+                rank=rank,
+            )
+            for rank, item in enumerate(
+                self.results_by_query[query][:top_k],
+                start=1,
+            )
+        )
 
 
 @pytest.mark.asyncio

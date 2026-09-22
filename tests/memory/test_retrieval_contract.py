@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import get_type_hints
+from collections.abc import Sequence
+from typing import get_args, get_origin, get_type_hints
 
-from memory.retrieval.contracts import MemoryRetriever
+from memory.retrieval.contracts import MemoryRetrievalResult, MemoryRetriever
 from memory.retrieval.lexical import LexicalMemoryRetriever
 from memory.retrieval.postgres_lexical import PostgreSQLLexicalMemoryRetriever
 from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
@@ -19,6 +20,8 @@ def test_memory_retriever_contract_exposes_query_aware_retrieve():
     assert hints["query"] is str
     assert hints["namespace"] is str
     assert hints["top_k"] is int
+    assert get_origin(hints["return"]) is Sequence
+    assert get_args(hints["return"])[0] is MemoryRetrievalResult
 
 
 def test_memory_retrievers_match_contract_signature():

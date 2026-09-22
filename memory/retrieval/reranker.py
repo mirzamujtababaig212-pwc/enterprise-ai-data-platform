@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from memory.models import MemoryItem
@@ -12,6 +13,25 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 
 def _tokenize(text: str) -> frozenset[str]:
     return frozenset(token.lower() for token in _TOKEN_PATTERN.findall(text))
+
+
+@dataclass(frozen=True)
+class MemoryRerankResult:
+    """
+    Transient evidence produced by a memory reranker.
+
+    The memory item remains the durable domain object. The reranker score
+    and original candidate position belong to this single reranking
+    operation and are therefore not persisted on MemoryItem.
+    """
+
+    item: MemoryItem
+    score: float
+    original_rank: int
+
+    def __post_init__(self) -> None:
+        if self.original_rank <= 0:
+            raise ValueError("Reranker original rank must be greater than zero.")
 
 
 class MemoryReranker(Protocol):
@@ -29,6 +49,23 @@ class MemoryReranker(Protocol):
         *,
         top_k: int,
     ) -> Sequence[MemoryItem]: ...
+
+
+class ScoredMemoryReranker(Protocol):
+    """
+    Optional extension for rerankers that expose their computed scores.
+
+    RerankingMemoryRetriever uses this contract when available so model
+    inference is not repeated merely to expose reranker_score.
+    """
+
+    async def rerank_with_scores(
+        self,
+        query: str,
+        candidates: Sequence[MemoryItem],
+        *,
+        top_k: int,
+    ) -> Sequence[MemoryRerankResult]: ...
 
 
 class TokenOverlapMemoryReranker:
@@ -52,11 +89,32 @@ class TokenOverlapMemoryReranker:
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
 
+        scored = await self.rerank_with_scores(
+            query,
+            candidates,
+            top_k=top_k,
+        )
+
+        return tuple(result.item for result in scored)
+
+    async def rerank_with_scores(
+        self,
+        query: str,
+        candidates: Sequence[MemoryItem],
+        *,
+        top_k: int,
+    ) -> Sequence[MemoryRerankResult]:
+        if not query.strip():
+            raise ValueError("Query must not be empty.")
+
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero.")
+
         query_tokens = _tokenize(query)
 
-        scored: list[tuple[MemoryItem, float, int]] = []
+        scored: list[MemoryRerankResult] = []
 
-        for original_rank, item in enumerate(candidates):
+        for original_rank, item in enumerate(candidates, start=1):
             memory_tokens = _tokenize(item.content)
 
             if not query_tokens or not memory_tokens:
@@ -64,18 +122,24 @@ class TokenOverlapMemoryReranker:
             else:
                 overlap_score = len(query_tokens & memory_tokens) / len(query_tokens)
 
-            scored.append((item, overlap_score, original_rank))
+            scored.append(
+                MemoryRerankResult(
+                    item=item,
+                    score=overlap_score,
+                    original_rank=original_rank,
+                )
+            )
 
         ordered = sorted(
             scored,
-            key=lambda item: (
-                -item[1],
-                item[2],
-                item[0].id,
+            key=lambda result: (
+                -result.score,
+                result.original_rank,
+                result.item.id,
             ),
         )
 
-        return tuple(item[0] for item in ordered[:top_k])
+        return tuple(ordered[:top_k])
 
 
 class CrossEncoderMemoryReranker:
@@ -176,6 +240,27 @@ class CrossEncoderMemoryReranker:
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
 
+        scored = await self.rerank_with_scores(
+            query,
+            candidates,
+            top_k=top_k,
+        )
+
+        return tuple(result.item for result in scored)
+
+    async def rerank_with_scores(
+        self,
+        query: str,
+        candidates: Sequence[MemoryItem],
+        *,
+        top_k: int,
+    ) -> Sequence[MemoryRerankResult]:
+        if not query.strip():
+            raise ValueError("Query must not be empty.")
+
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero.")
+
         if not candidates:
             return ()
 
@@ -195,7 +280,14 @@ class CrossEncoderMemoryReranker:
             ),
         )
 
-        return tuple(item[0] for item in ordered[:limit])
+        return tuple(
+            MemoryRerankResult(
+                item=item,
+                score=float(score),
+                original_rank=original_rank + 1,
+            )
+            for item, score, original_rank in ordered[:limit]
+        )
 
     def _score_candidates(
         self,

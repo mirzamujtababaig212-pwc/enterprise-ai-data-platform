@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,7 +21,7 @@ def make_item(
         memory_type=memory_type,
         content=content,
         namespace=namespace,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
         expires_at=expires_at,
     )
 
@@ -51,7 +51,7 @@ async def test_retrieves_memories_by_lexical_relevance():
         top_k=5,
     )
 
-    assert [item.id for item in results] == ["memory-databricks"]
+    assert [result.item.id for result in results] == ["memory-databricks"]
 
 
 @pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def test_namespace_isolation_is_enforced():
         namespace="project-a",
     )
 
-    assert [item.id for item in results] == ["memory-project-a"]
+    assert [result.item.id for result in results] == ["memory-project-a"]
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ async def test_memory_type_filter_is_respected():
         memory_type="semantic",
     )
 
-    assert [item.id for item in results] == ["memory-semantic"]
+    assert [result.item.id for result in results] == ["memory-semantic"]
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,7 @@ async def test_expired_memories_are_not_returned():
         make_item(
             "memory-expired",
             "Databricks Spark platform",
-            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            expires_at=datetime.now(UTC) - timedelta(minutes=1),
         )
     )
     await store.put(
@@ -157,14 +157,14 @@ async def test_expired_memories_are_not_returned():
         namespace="project-a",
     )
 
-    assert [item.id for item in results] == ["memory-active"]
+    assert [result.item.id for result in results] == ["memory-active"]
 
 
 @pytest.mark.asyncio
 async def test_results_are_deterministic_for_equal_relevance():
     store = InMemoryMemoryStore()
 
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
 
     await store.put(
         make_item(
@@ -188,7 +188,7 @@ async def test_results_are_deterministic_for_equal_relevance():
         namespace="project-a",
     )
 
-    assert [item.id for item in results] == [
+    assert [result.item.id for result in results] == [
         "memory-a",
         "memory-b",
     ]
@@ -265,7 +265,7 @@ async def test_invalid_top_k_is_rejected():
 async def test_older_relevant_memory_is_retrieved_past_newer_irrelevant_memories():
     store = InMemoryMemoryStore()
 
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     await store.put(
         make_item(
@@ -292,7 +292,7 @@ async def test_older_relevant_memory_is_retrieved_past_newer_irrelevant_memories
         top_k=1,
     )
 
-    assert [item.id for item in results] == ["memory-relevant"]
+    assert [result.item.id for result in results] == ["memory-relevant"]
 
 
 @pytest.mark.asyncio
@@ -326,13 +326,13 @@ async def test_lexical_retriever_prefers_rare_terms_over_generic_terms():
         top_k=3,
     )
 
-    assert results[0].id == "memory-rare"
+    assert results[0].item.id == "memory-rare"
 
 
 @pytest.mark.asyncio
 async def test_lexical_retriever_uses_term_frequency_for_equal_length_documents():
     store = InMemoryMemoryStore()
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     await store.put(
         make_item(
@@ -357,13 +357,13 @@ async def test_lexical_retriever_uses_term_frequency_for_equal_length_documents(
         top_k=1,
     )
 
-    assert [item.id for item in results] == ["memory-repeated"]
+    assert [result.item.id for result in results] == ["memory-repeated"]
 
 
 @pytest.mark.asyncio
 async def test_lexical_retriever_uses_idf_for_rare_query_terms():
     store = InMemoryMemoryStore()
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     await store.put(
         make_item(
@@ -402,4 +402,4 @@ async def test_lexical_retriever_uses_idf_for_rare_query_terms():
         top_k=1,
     )
 
-    assert [item.id for item in results] == ["memory-rare"]
+    assert [result.item.id for result in results] == ["memory-rare"]

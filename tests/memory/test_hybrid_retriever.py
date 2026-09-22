@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from memory.models import MemoryItem
+from memory.retrieval.contracts import MemoryRetrievalResult
 from memory.retrieval.hybrid import HybridMemoryRetriever
 
 
@@ -19,7 +20,7 @@ def _item(
         memory_type=memory_type,  # type: ignore[arg-type]
         content=f"content for {memory_id}",
         namespace=namespace,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -35,7 +36,7 @@ class FakeMemoryRetriever:
         namespace: str,
         memory_type: str | None = None,
         top_k: int = 5,
-    ) -> list[MemoryItem]:
+    ) -> list[MemoryRetrievalResult]:
         self.calls.append(
             {
                 "query": query,
@@ -44,7 +45,15 @@ class FakeMemoryRetriever:
                 "top_k": top_k,
             }
         )
-        return self.results[:top_k]
+        return [
+            MemoryRetrievalResult(
+                item=item,
+                retrieval_method="fake",
+                rank=rank,
+                retrieval_score=float(top_k - rank + 1),
+            )
+            for rank, item in enumerate(self.results[:top_k], start=1)
+        ]
 
 
 @pytest.mark.asyncio
@@ -77,12 +86,70 @@ async def test_hybrid_memory_retriever_fuses_overlapping_results_with_rrf():
         top_k=4,
     )
 
-    assert [item.id for item in results] == [
+    assert [result.item.id for result in results] == [
         "shared",
         "semantic-only",
         "semantic-third",
         "lexical-only",
     ]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_memory_retriever_exposes_rrf_score_and_provenance():
+    semantic = FakeMemoryRetriever(
+        [
+            _item("shared"),
+            _item("semantic-only"),
+        ]
+    )
+    lexical = FakeMemoryRetriever(
+        [
+            _item("lexical-only"),
+            _item("shared"),
+        ]
+    )
+
+    retriever = HybridMemoryRetriever(
+        semantic,
+        lexical,
+        candidate_k=2,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    results = await retriever.retrieve(
+        "deployment",
+        namespace="project-a",
+        top_k=3,
+    )
+
+    assert [result.item.id for result in results] == [
+        "shared",
+        "semantic-only",
+        "lexical-only",
+    ]
+
+    shared = results[0]
+    assert shared.retrieval_method == "hybrid.rrf"
+    assert shared.rank == 1
+    assert shared.retrieval_score == pytest.approx(1.0 / 61.0 + 0.5 / 62.0)
+    assert shared.provenance == {
+        "semantic_rank": 1,
+        "lexical_rank": 2,
+        "semantic_contribution": pytest.approx(1.0 / 61.0),
+        "lexical_contribution": pytest.approx(0.5 / 62.0),
+    }
+
+    semantic_only = results[1]
+    assert semantic_only.rank == 2
+    assert semantic_only.provenance["semantic_rank"] == 2
+    assert semantic_only.provenance["lexical_rank"] is None
+
+    lexical_only = results[2]
+    assert lexical_only.rank == 3
+    assert lexical_only.provenance["semantic_rank"] is None
+    assert lexical_only.provenance["lexical_rank"] == 1
 
 
 @pytest.mark.asyncio
@@ -104,7 +171,7 @@ async def test_hybrid_memory_retriever_applies_custom_weights():
         top_k=2,
     )
 
-    assert [item.id for item in results] == [
+    assert [result.item.id for result in results] == [
         "semantic",
         "lexical",
     ]
@@ -163,7 +230,7 @@ async def test_hybrid_memory_retriever_deduplicates_same_memory():
     )
 
     assert len(results) == 1
-    assert results[0].id == "shared"
+    assert results[0].item.id == "shared"
 
 
 @pytest.mark.asyncio
@@ -195,7 +262,7 @@ async def test_hybrid_memory_retriever_is_deterministic_for_equal_fused_scores()
         top_k=2,
     )
 
-    assert [item.id for item in results] == [
+    assert [result.item.id for result in results] == [
         "a",
         "b",
     ]
@@ -337,4 +404,6 @@ async def test_hybrid_memory_retriever_diagnosis_matches_retrieve_order():
         top_k=2,
     )
 
-    assert [item.id for item in results] == [diagnostic.memory_id for diagnostic in diagnostics]
+    assert [result.item.id for result in results] == [
+        diagnostic.memory_id for diagnostic in diagnostics
+    ]

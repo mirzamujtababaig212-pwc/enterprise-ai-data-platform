@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -24,7 +24,7 @@ def _item(
         memory_type=memory_type,  # type: ignore[arg-type]
         content=content,
         namespace=namespace,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

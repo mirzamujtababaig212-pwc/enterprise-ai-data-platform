@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -88,7 +89,7 @@ async def main() -> None:
         }
         assert result.expires_at is None
         assert result.created_at.tzinfo is not None
-        assert [result.id for result in retrieved] == [item.id]
+        assert [result.item.id for result in retrieved] == [item.id]
     finally:
         await _memory_service.forget(item.id)
 
