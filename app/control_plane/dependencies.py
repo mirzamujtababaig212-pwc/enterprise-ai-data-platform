@@ -14,71 +14,70 @@ from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
-from ml.inference import VehicleRiskPredictor
-from memory import MemoryService
-from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
-from memory.context import MemoryContextBuilder
-from memory.retrieval.factory import MemoryRetrieverFactory
-from memory.stores.factory import MemoryStoreFactory
-from rag.embeddings.gateway import GatewayEmbeddingService
-from rag.generation.gateway import GatewayChatService
-from rag.indexing import RAGIndexer
-from rag.chunking.recursive import RecursiveChunker
-from rag.query import RAGQueryService
-from rag.retrieval.factory import RAGRetrieverFactory
-from rag.retrieval.lexical import PostgreSQLLexicalRetriever
-from rag.retrieval.retriever import SemanticRetriever
-from rag.contracts import Retriever, VectorStore
-from tools.registry.in_memory import InMemoryToolRegistry
-from tools.rag.search import RAGSearchTool
-from tools.authorization.in_memory import InMemoryToolAuthorizer
-from tools.authorization.service import ToolAuthorizationService
-from data_platform.vehicle.service import VehicleDataService
-from tools.vehicle.data_query import VehicleDataQueryTool
-
 from app.config.settings import Settings
-from common.config.settings import Settings as CommonSettings
-from rag.evaluation.external.dispatcher import (
-    ExternalEvaluationDispatcher,
-    RagasExternalEvaluationDispatcher,
+from app.control_plane.agent_checkpoints.postgres_handler import (
+    PostgreSQLAgentCheckpointHandler,
 )
-from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
-from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
-from app.control_plane.persistence.database import SessionLocal, get_db
+from app.control_plane.agent_checkpoints.postgres_repository import (
+    PostgreSQLAgentCheckpointsRepository,
+)
 from app.control_plane.agent_run_events.postgres_observer import (
     PostgreSQLAgentRunEventObserver,
 )
 from app.control_plane.agent_run_events.postgres_repository import (
     PostgreSQLAgentRunEventsRepository,
 )
-from app.control_plane.agent_checkpoints.postgres_handler import (
-    PostgreSQLAgentCheckpointHandler,
-)
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
-from app.control_plane.tool_execution.postgres_idempotency import (
-    PostgreSQLToolExecutionIdempotencyStore,
-)
-from tools.execution.service import ToolExecutionService
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
+from app.control_plane.agent_runs.recovery_service import (
+    AgentRunRecoveryService,
+)
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
+from app.control_plane.persistence.database import SessionLocal, get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
+from app.control_plane.tool_execution.postgres_idempotency import (
+    PostgreSQLToolExecutionIdempotencyStore,
+)
+from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
+from common.config.settings import Settings as CommonSettings
+from data_platform.vehicle.service import VehicleDataService
+from memory import MemoryService
+from memory.context import MemoryContextBuilder
+from memory.embeddings.postgres import PostgreSQLMemoryEmbeddingStore
+from memory.retrieval.factory import MemoryRetrieverFactory
+from memory.stores.factory import MemoryStoreFactory
+from ml.inference import VehicleRiskPredictor
+from rag.chunking.recursive import RecursiveChunker
+from rag.contracts import Retriever, VectorStore
+from rag.embeddings.gateway import GatewayEmbeddingService
+from rag.evaluation.external.dispatcher import (
+    ExternalEvaluationDispatcher,
+    RagasExternalEvaluationDispatcher,
+)
+from rag.evaluation.external.release import ExternalEvaluationReleasePolicy
+from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
 from rag.evaluation.stores.postgres import PostgreSQLRetrievalEvaluationRunStore
 from rag.evaluation.stores.release_decision import (
     PostgreSQLRetrievalEvaluationReleaseDecisionStore,
 )
-from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
+from rag.generation.gateway import GatewayChatService
+from rag.indexing import RAGIndexer
+from rag.query import RAGQueryService
+from rag.retrieval.factory import RAGRetrieverFactory
+from rag.retrieval.lexical import PostgreSQLLexicalRetriever
+from rag.retrieval.retriever import SemanticRetriever
 from rag.stores.factory import VectorStoreFactory
-from app.control_plane.agent_checkpoints.postgres_repository import (
-    PostgreSQLAgentCheckpointsRepository,
-)
-from app.control_plane.agent_runs.recovery_service import (
-    AgentRunRecoveryService,
-)
+from tools.authorization.in_memory import InMemoryToolAuthorizer
+from tools.authorization.service import ToolAuthorizationService
+from tools.execution.service import ToolExecutionService
+from tools.rag.search import RAGSearchTool
+from tools.registry.in_memory import InMemoryToolRegistry
+from tools.vehicle.data_query import VehicleDataQueryTool
 
 _llm_router = Router()
 
@@ -147,6 +146,7 @@ _memory_retriever = MemoryRetrieverFactory.create(
 _memory_context_builder = MemoryContextBuilder(
     _memory_service,
     memory_retriever=_memory_retriever,
+    observer=_agent_observer,
 )
 
 _agent_runtime = AgentRuntime(
@@ -156,6 +156,7 @@ _agent_runtime = AgentRuntime(
     llm_gateway=_llm_router,
     memory_context_builder=_memory_context_builder,
     memory_service=_memory_service,
+    observer=_agent_observer,
 )
 
 _agent_initialization_lock = asyncio.Lock()
