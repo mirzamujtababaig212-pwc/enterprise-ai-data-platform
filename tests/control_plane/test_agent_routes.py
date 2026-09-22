@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -20,11 +22,34 @@ from app.control_plane.dependencies import (
 class FakeAgentRunApplicationService:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.requests = []
         self.error: Exception | None = None
         self.run = AgentRun(
             run_id="run-cancel-123",
             agent_name="enterprise-analyst",
             status=AgentRunStatus.RUNNING,
+        )
+
+    async def execute(
+        self,
+        *,
+        agent_name: str,
+        request,
+        idempotency_key: str | None = None,
+    ) -> AgentRunExecutionResult:
+        self.requests.append(request)
+
+        if self.error is not None:
+            raise self.error
+
+        return AgentRunExecutionResult(
+            run_id="run-execute-123",
+            response=AgentResponse(
+                agent_name=agent_name,
+                output="Executed agent response.",
+                session_id=request.session_id,
+                metadata={},
+            ),
         )
 
     def cancel(self, run_id: str) -> AgentRun:
@@ -68,6 +93,8 @@ class FakeAgentRunRecoveryService:
 def build_client(
     service: FakeAgentRunRecoveryService,
     application_service: FakeAgentRunApplicationService | None = None,
+    *,
+    principal: str | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(router)
@@ -77,7 +104,58 @@ def build_client(
     if application_service is not None:
         app.dependency_overrides[get_agent_run_application_service] = lambda: application_service
 
+    if principal is not None:
+
+        class PrincipalMiddleware:
+            def __init__(self, inner_app):
+                self.inner_app = inner_app
+
+            async def __call__(self, scope, receive, send):
+                scope.setdefault("state", {})["principal"] = principal
+                await self.inner_app(scope, receive, send)
+
+        app.add_middleware(PrincipalMiddleware)
+
     return TestClient(app)
+
+
+def test_run_agent_propagates_authenticated_principal() -> None:
+    recovery_service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+    expected_digest = hashlib.sha256(
+        b"super-secret-key",
+    ).hexdigest()
+
+    client = build_client(
+        recovery_service,
+        application_service,
+        principal=f"api_key:{expected_digest}",
+    )
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        json={
+            "input": "Analyze the vehicle data.",
+            "session_id": "session-123",
+            "user_id": "user-456",
+            "metadata": {
+                "classification": "internal",
+            },
+        },
+        headers={
+            "x-api-key": "super-secret-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(application_service.requests) == 1
+
+    agent_request = application_service.requests[0]
+
+    assert agent_request.principal == f"api_key:{expected_digest}"
+    assert agent_request.principal != "super-secret-key"
+    assert agent_request.user_id == "user-456"
+    assert agent_request.session_id == "session-123"
 
 
 def test_recover_agent_run_returns_recovered_response() -> None:

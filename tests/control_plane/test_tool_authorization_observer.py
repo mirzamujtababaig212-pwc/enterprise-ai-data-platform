@@ -33,6 +33,8 @@ async def test_authorization_record_is_translated_to_agent_event() -> None:
         tool_name="rag.search",
         allowed=True,
         reason="Tool is authorized.",
+        policy_id="metadata_policy",
+        policy_version="1.0",
         run_id="run-123",
         call_id="call-456",
         agent_name="enterprise-rag-analyst",
@@ -53,6 +55,8 @@ async def test_authorization_record_is_translated_to_agent_event() -> None:
             metadata={
                 "allowed": True,
                 "reason": "Tool is authorized.",
+                "policy_id": "metadata_policy",
+                "policy_version": "1.0",
             },
         )
     ]

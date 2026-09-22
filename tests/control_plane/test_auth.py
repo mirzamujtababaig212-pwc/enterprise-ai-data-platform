@@ -1,12 +1,36 @@
+import hashlib
+
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
+from app.control_plane.auth import principal_from_api_key
 
 client = TestClient(app)
 
 
 def auth_headers():
     return {"x-api-key": "super-secret-key"}
+
+
+def test_principal_from_api_key_returns_deterministic_fingerprint() -> None:
+    api_key = "super-secret-key"
+
+    principal = principal_from_api_key(api_key)
+
+    expected_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+    assert principal == f"api_key:{expected_digest}"
+    assert api_key not in principal
+
+
+def test_authenticated_request_does_not_expose_raw_api_key_as_principal() -> None:
+    response = client.get(
+        "/api/v1/platform/capabilities",
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert "super-secret-key" not in response.text
 
 
 def test_health_is_public():

@@ -10,6 +10,8 @@ class ToolAuthorizationAuditRecord:
     tool_name: str
     allowed: bool
     reason: str | None = None
+    policy_id: str | None = None
+    policy_version: str | None = None
     run_id: str | None = None
     call_id: str | None = None
     agent_name: str | None = None
@@ -23,6 +25,8 @@ class ToolAuthorizationAuditRecord:
 
         for field_name, value in (
             ("reason", self.reason),
+            ("policy_id", self.policy_id),
+            ("policy_version", self.policy_version),
             ("run_id", self.run_id),
             ("call_id", self.call_id),
             ("agent_name", self.agent_name),

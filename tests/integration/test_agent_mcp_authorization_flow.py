@@ -142,6 +142,7 @@ async def test_agent_runtime_authorizes_real_mcp_tool_before_execution() -> None
                 input="Find enterprise AI architecture information.",
                 session_id="session-mcp-123",
                 user_id="user-mcp-456",
+                principal="user-mcp-456",
                 governance_policy=make_governance_policy(),
                 metadata={
                     "source": "agent-mcp-authorization-test",
@@ -232,6 +233,7 @@ async def test_agent_runtime_denies_real_mcp_tool_before_server_execution() -> N
                 input="Find enterprise AI architecture information.",
                 session_id="session-mcp-denied",
                 user_id="user-mcp-456",
+                principal="user-mcp-456",
                 governance_policy=make_governance_policy(),
                 metadata={
                     "source": "agent-mcp-authorization-test",

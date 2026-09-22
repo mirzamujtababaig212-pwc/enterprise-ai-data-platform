@@ -218,6 +218,69 @@ def test_execution_context_rejects_non_string_run_id() -> None:
         )
 
 
+def test_execution_context_exposes_principal() -> None:
+    request = AgentRequest(
+        input="Hello.",
+        principal="api_key:abc123",
+    )
+
+    context = make_context(request)
+
+    assert context.principal == "api_key:abc123"
+
+
+@pytest.mark.asyncio
+async def test_execution_context_forwards_principal_to_tool_execution() -> None:
+    class RecordingToolContext:
+        def __init__(self) -> None:
+            self.principal = None
+            self.execution_context = None
+
+        async def execute(
+            self,
+            name,
+            arguments,
+            *,
+            principal=None,
+            timeout_seconds=None,
+            execution_context=None,
+        ):
+            self.principal = principal
+            self.execution_context = execution_context
+            return AgentToolResult(
+                call_id="call-123",
+                tool_name=name,
+                output={"status": "ok"},
+            )
+
+    request = AgentRequest(
+        input="Use the tool.",
+        principal="api_key:abc123",
+    )
+
+    context = make_context(
+        request,
+        tool_names=("search",),
+    )
+
+    recording_tools = RecordingToolContext()
+    context.tools.execute = recording_tools.execute  # type: ignore[method-assign]
+
+    await context.execute_tool_calls(
+        [
+            AgentToolCall(
+                call_id="call-123",
+                name="search",
+                arguments={"query": "hello"},
+            )
+        ]
+    )
+
+    assert recording_tools.principal == "api_key:abc123"
+    assert recording_tools.execution_context is not None
+    assert recording_tools.execution_context.principal == "api_key:abc123"
+
+
 @pytest.mark.asyncio
 async def test_execution_context_defaults_to_no_memory() -> None:
     context = make_context()
@@ -730,7 +793,7 @@ async def test_execution_context_maps_tool_call_to_tool_result() -> None:
             "arguments": {
                 "query": "pipeline status",
             },
-            "principal": "user-123",
+            "principal": None,
             "timeout_seconds": None,
             "execution_context": ToolExecutionContext(
                 run_id=None,
@@ -739,6 +802,7 @@ async def test_execution_context_maps_tool_call_to_tool_result() -> None:
                 agent_name="test-agent",
                 session_id=None,
                 user_id="user-123",
+                principal=None,
                 request_metadata={},
             ),
         }
@@ -791,7 +855,7 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
             "arguments": {
                 "query": "pipeline status",
             },
-            "principal": "user-456",
+            "principal": None,
             "timeout_seconds": None,
             "execution_context": ToolExecutionContext(
                 run_id="run-789",
@@ -800,6 +864,7 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
                 agent_name="test-agent",
                 session_id="session-123",
                 user_id="user-456",
+                principal=None,
                 request_metadata={},
             ),
         }
@@ -936,7 +1001,7 @@ async def test_execution_context_propagates_governance_policy_to_tools() -> None
             "arguments": {
                 "query": "internal documentation",
             },
-            "principal": "user-456",
+            "principal": None,
             "timeout_seconds": None,
             "execution_context": ToolExecutionContext(
                 run_id=None,
@@ -945,6 +1010,7 @@ async def test_execution_context_propagates_governance_policy_to_tools() -> None
                 agent_name="test-agent",
                 session_id="session-123",
                 user_id="user-456",
+                principal=None,
                 request_metadata={
                     "source": "agent-api",
                 },

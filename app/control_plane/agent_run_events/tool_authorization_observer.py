@@ -32,6 +32,17 @@ class ToolAuthorizationAuditObserver(ToolAuthorizationAuditSink):
         if record.agent_name is None:
             return
 
+        metadata = {
+            "allowed": record.allowed,
+            "reason": record.reason,
+        }
+
+        if record.policy_id is not None:
+            metadata["policy_id"] = record.policy_id
+
+        if record.policy_version is not None:
+            metadata["policy_version"] = record.policy_version
+
         event = AgentExecutionEvent(
             event_type=AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION,
             agent_name=record.agent_name,
@@ -40,10 +51,7 @@ class ToolAuthorizationAuditObserver(ToolAuthorizationAuditSink):
             user_id=record.principal,
             tool_name=record.tool_name,
             call_id=record.call_id,
-            metadata={
-                "allowed": record.allowed,
-                "reason": record.reason,
-            },
+            metadata=metadata,
         )
 
         await self._observer.record(event)

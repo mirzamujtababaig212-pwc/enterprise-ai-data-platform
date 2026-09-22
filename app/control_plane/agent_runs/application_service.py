@@ -160,6 +160,7 @@ class AgentRunApplicationService:
             agent_name=agent_name,
             session_id=request.session_id,
             user_id=request.user_id,
+            principal=request.principal,
             idempotency_key=idempotency_key,
             status=AgentRunStatus.PENDING,
             metadata=dict(request.metadata),

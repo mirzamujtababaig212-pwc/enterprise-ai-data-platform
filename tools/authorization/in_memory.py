@@ -83,6 +83,8 @@ class InMemoryToolAuthorizer:
                     reason=(
                         policy_result.reason or "Tool authorization policy denied the request."
                     ),
+                    policy_id=policy_result.policy_id,
+                    policy_version=policy_result.policy_version,
                 )
 
         return ToolAuthorizationResult(
@@ -90,4 +92,6 @@ class InMemoryToolAuthorizer:
             tool_name=request.tool_name,
             allowed=True,
             reason="Tool is authorized.",
+            policy_id=policy_result.policy_id if self._policy is not None else None,
+            policy_version=(policy_result.policy_version if self._policy is not None else None),
         )

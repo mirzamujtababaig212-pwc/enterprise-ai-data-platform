@@ -253,6 +253,8 @@ async def test_authorizer_allows_tool_when_permission_and_policy_match():
 
     assert result.allowed is True
     assert result.reason == "Tool is authorized."
+    assert result.policy_id == "metadata_policy"
+    assert result.policy_version == "1.0"
 
 
 @pytest.mark.asyncio
@@ -283,6 +285,8 @@ async def test_authorizer_denies_tool_when_metadata_policy_fails():
 
     assert result.allowed is False
     assert "mcp_server='document-server'" in result.reason
+    assert result.policy_id == "metadata_policy"
+    assert result.policy_version == "1.0"
 
 
 @pytest.mark.asyncio
@@ -308,6 +312,8 @@ async def test_authorizer_denies_without_tool_permission_even_when_policy_matche
 
     assert result.allowed is False
     assert result.reason == "Tool is not authorized for this principal."
+    assert result.policy_id is None
+    assert result.policy_version is None
 
 
 @pytest.mark.asyncio

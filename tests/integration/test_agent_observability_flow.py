@@ -210,6 +210,7 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
                 input="Find enterprise AI architecture information.",
                 session_id="session-observe-123",
                 user_id="user-observe-123",
+                principal="user-observe-123",
                 metadata={
                     "source": "agent-observability-test",
                 },
@@ -265,6 +266,8 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         assert authorization.metadata == {
             "allowed": True,
             "reason": "Tool is authorized.",
+            "policy_id": "metadata_policy",
+            "policy_version": "1.0",
         }
         assert "principal" not in authorization.metadata
         assert "user-observe-123" not in authorization.metadata
@@ -692,6 +695,7 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
                 input="Find enterprise AI architecture information.",
                 session_id="session-observe-denied",
                 user_id="user-observe-denied",
+                principal="user-observe-denied",
             ),
         )
 
@@ -746,6 +750,8 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
         assert authorization.metadata == {
             "allowed": False,
             "reason": "Authorization metadata requirement failed: mcp_server='finance-server'.",
+            "policy_id": "metadata_policy",
+            "policy_version": "1.0",
         }
         assert "principal" not in authorization.metadata
         assert "user-observe-denied" not in authorization.metadata

@@ -184,6 +184,10 @@ class AgentExecutionContext:
         return self.request.user_id
 
     @property
+    def principal(self) -> str | None:
+        return self.request.principal
+
+    @property
     def metadata(self) -> dict[str, object]:
         """Return request metadata available during agent execution."""
         return dict(self.request.metadata)
@@ -218,7 +222,7 @@ class AgentExecutionContext:
                 result = await self.tools.execute(
                     tool_call.name,
                     tool_call.arguments,
-                    principal=self.user_id,
+                    principal=self.principal,
                     execution_context=ToolExecutionContext(
                         run_id=self.run_id,
                         call_id=tool_call.call_id,
@@ -226,6 +230,7 @@ class AgentExecutionContext:
                         agent_name=self.agent_name,
                         session_id=self.session_id,
                         user_id=self.user_id,
+                        principal=self.principal,
                         request_metadata=self.metadata,
                         execution_ownership_lost=self.execution_ownership_lost,
                     ),

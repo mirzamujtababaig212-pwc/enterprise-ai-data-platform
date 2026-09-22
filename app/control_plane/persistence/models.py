@@ -134,6 +134,8 @@ class AgentRunRecord(Base):
         index=True,
     )
 
+    principal: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+
     idempotency_key: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -331,6 +333,8 @@ class AgentRunEventRecord(Base):
         nullable=True,
         index=True,
     )
+
+    principal: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     tool_round: Mapped[int | None] = mapped_column(
         Integer,
@@ -713,6 +717,8 @@ class AgentRunCheckpointRecord(Base):
         nullable=True,
         index=True,
     )
+
+    principal: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     schema_version: Mapped[int] = mapped_column(
         Integer,

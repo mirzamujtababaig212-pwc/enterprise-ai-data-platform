@@ -125,6 +125,7 @@ def make_request_snapshot() -> AgentRunRequestSnapshot:
             input="Find vehicle incidents for fleet-42",
             session_id="session-postgres",
             user_id="user-postgres",
+            principal="api_key:postgres-recovery-principal",
             memory_namespace="fleet-memory",
             metadata={
                 "request_id": "postgres-recovery-request",
@@ -754,6 +755,7 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
                 agent_name="recoverable-agent",
                 session_id="session-postgres",
                 user_id="user-postgres",
+                principal="api_key:postgres-recovery-principal",
                 status=AgentRunStatus.RUNNING,
                 started_at=expired_at - timedelta(minutes=1),
                 lease_id="expired-lease",
@@ -823,6 +825,7 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
         assert request.input == "Find vehicle incidents for fleet-42"
         assert request.session_id == "session-postgres"
         assert request.user_id == "user-postgres"
+        assert request.principal == "api_key:postgres-recovery-principal"
         assert request.memory_namespace == "fleet-memory"
         assert request.metadata == {
             "request_id": "postgres-recovery-request",
@@ -836,6 +839,7 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
         assert restored is not None
         assert restored.status is AgentRunStatus.COMPLETED
         assert restored.output == "Recovered from PostgreSQL checkpoint."
+        assert restored.principal == "api_key:postgres-recovery-principal"
         assert restored.lease_id is None
         assert restored.lease_expires_at is None
         assert restored.error_type is None

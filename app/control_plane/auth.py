@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
@@ -20,6 +22,11 @@ PUBLIC_PATHS = {
 
 def get_valid_api_keys() -> set[str]:
     return {key.strip() for key in settings.API_KEY.split(",") if key.strip()}
+
+
+def principal_from_api_key(api_key: str) -> str:
+    digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    return f"api_key:{digest}"
 
 
 class ControlPlaneAPIKeyMiddleware:
@@ -53,6 +60,8 @@ class ControlPlaneAPIKeyMiddleware:
             )
             await response(scope, receive, send)
             return
+
+        scope.setdefault("state", {})["principal"] = principal_from_api_key(api_key)
 
         with tracer.start_as_current_span("control_plane.authentication"):
             await self.app(scope, receive, send)

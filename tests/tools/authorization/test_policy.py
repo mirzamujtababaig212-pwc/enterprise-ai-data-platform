@@ -26,6 +26,8 @@ async def test_metadata_policy_allows_matching_metadata():
 
     assert result.allowed is True
     assert result.reason == "Authorization metadata requirements satisfied."
+    assert result.policy_id == "metadata_policy"
+    assert result.policy_version == "1.0"
 
 
 @pytest.mark.asyncio
@@ -45,6 +47,8 @@ async def test_metadata_policy_denies_missing_metadata():
 
     assert result.allowed is False
     assert "mcp_server='document-server'" in result.reason
+    assert result.policy_id == "metadata_policy"
+    assert result.policy_version == "1.0"
 
 
 @pytest.mark.asyncio

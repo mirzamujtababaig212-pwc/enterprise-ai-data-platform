@@ -15,8 +15,9 @@ class ToolExecutionContext:
     The context carries execution identity and governed request metadata
     across the centralized tool execution boundary.
 
-    Authorization identity remains a separate `principal` parameter on
-    ToolExecutionService.
+    Authorization identity is carried explicitly as `principal` and is
+    forwarded to ToolExecutionService at the centralized authorization
+    boundary.
     """
 
     run_id: str | None = None
@@ -24,6 +25,7 @@ class ToolExecutionContext:
     agent_name: str | None = None
     session_id: str | None = None
     user_id: str | None = None
+    principal: str | None = None
     governance_policy: GovernancePolicy | None = None
     request_metadata: dict[str, Any] = field(default_factory=dict)
     execution_ownership_lost: asyncio.Event | None = None
@@ -58,6 +60,12 @@ class ToolExecutionContext:
                 raise TypeError("user_id must be a string or None.")
             if not self.user_id.strip():
                 raise ValueError("user_id must not be empty.")
+
+        if self.principal is not None:
+            if not isinstance(self.principal, str):
+                raise TypeError("principal must be a string or None.")
+            if not self.principal.strip():
+                raise ValueError("principal must not be empty.")
 
         if self.governance_policy is not None and not isinstance(
             self.governance_policy,

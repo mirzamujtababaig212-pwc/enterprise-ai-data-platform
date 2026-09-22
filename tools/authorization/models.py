@@ -17,3 +17,5 @@ class ToolAuthorizationResult:
     tool_name: str
     allowed: bool
     reason: str | None = None
+    policy_id: str | None = None
+    policy_version: str | None = None

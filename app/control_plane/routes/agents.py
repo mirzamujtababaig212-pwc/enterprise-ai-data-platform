@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from ai_platform.agents.models import AgentRequest
 
@@ -39,6 +39,7 @@ router = APIRouter(
     response_model=AgentRunResponse,
 )
 async def run_agent(
+    request: Request,
     agent_name: str,
     payload: AgentRunRequest,
     idempotency_key: str | None = Header(
@@ -50,16 +51,17 @@ async def run_agent(
     ),
 ) -> AgentRunResponse:
     try:
-        request = AgentRequest(
+        agent_request = AgentRequest(
             input=payload.input,
             session_id=payload.session_id,
             user_id=payload.user_id,
+            principal=getattr(request.state, "principal", None),
             metadata=payload.metadata,
         )
 
         response = await service.execute(
             agent_name=agent_name,
-            request=request,
+            request=agent_request,
             idempotency_key=idempotency_key,
         )
 

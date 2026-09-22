@@ -214,6 +214,7 @@ async def test_runtime_authorized_principal_can_execute_declared_tool() -> None:
         AgentRequest(
             input="Use the test tool.",
             user_id="user-authorized",
+            principal="user-authorized",
         ),
     )
 
@@ -254,6 +255,7 @@ async def test_runtime_unauthorized_principal_cannot_execute_declared_tool() -> 
         AgentRequest(
             input="Use the test tool.",
             user_id="user-unauthorized",
+            principal="user-unauthorized",
         ),
     )
 

@@ -226,6 +226,7 @@ async def test_agent_runtime_executes_vehicle_tool_with_authorization_and_idempo
         input="Show vehicle veh-123 telemetry evidence.",
         session_id="vehicle-session-1",
         user_id="enterprise-demo-user",
+        principal="enterprise-demo-user",
         metadata={
             "classification": "internal",
             "tenant": "deldai",
@@ -372,6 +373,7 @@ async def test_agent_runtime_marks_vehicle_tool_outcome_ambiguous_when_ownership
         input="Show vehicle veh-123 telemetry evidence.",
         session_id="vehicle-session-ownership-loss",
         user_id="enterprise-demo-user",
+        principal="enterprise-demo-user",
         metadata={
             "classification": "internal",
             "tenant": "deldai",
@@ -478,6 +480,7 @@ async def test_agent_runtime_denies_vehicle_tool_when_principal_is_not_authorize
             input="Show vehicle telemetry.",
             session_id="vehicle-denied-session",
             user_id="unauthorized-user",
+            principal="unauthorized-user",
         ),
         run_id="vehicle-denied-run",
     )

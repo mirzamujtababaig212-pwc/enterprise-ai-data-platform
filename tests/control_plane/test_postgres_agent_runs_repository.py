@@ -49,6 +49,7 @@ def make_run(
     agent_name: str = "vehicle-agent",
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
+    principal: str | None = None,
     idempotency_key: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
@@ -67,6 +68,7 @@ def make_run(
         agent_name=agent_name,
         session_id=session_id,
         user_id=user_id,
+        principal=principal,
         idempotency_key=idempotency_key,
         status=status,
         started_at=started_at,
@@ -94,6 +96,7 @@ def test_create_and_get_round_trip(repository) -> None:
         status=AgentRunStatus.RUNNING,
         output={"step": "started"},
         metadata={"source": "test", "attempt": 1},
+        principal="api_key:test-principal",
     )
 
     result = repository.create(run)
@@ -105,6 +108,7 @@ def test_create_and_get_round_trip(repository) -> None:
     assert restored.agent_name == run.agent_name
     assert restored.session_id == run.session_id
     assert restored.user_id == run.user_id
+    assert restored.principal == run.principal
     assert restored.status == AgentRunStatus.RUNNING
     assert restored.started_at == started_at
     assert restored.output == {"step": "started"}
@@ -116,6 +120,7 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
         input="Find vehicle incidents for fleet-42",
         session_id="session-123",
         user_id="user-456",
+        principal="api_key:snapshot-principal",
         memory_namespace="fleet-memory",
         governance_policy=GovernancePolicy(
             required_metadata={
@@ -141,6 +146,7 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
         run_id="snapshot-round-trip",
         session_id=request.session_id,
         user_id=request.user_id,
+        principal=request.principal,
         request_snapshot=snapshot,
     )
 
@@ -155,11 +161,13 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
     reconstructed = restored.request_snapshot.to_request(
         session_id=restored.session_id,
         user_id=restored.user_id,
+        principal=restored.principal,
     )
 
     assert reconstructed.input == request.input
     assert reconstructed.session_id == request.session_id
     assert reconstructed.user_id == request.user_id
+    assert reconstructed.principal == request.principal
     assert reconstructed.memory_namespace == request.memory_namespace
     assert reconstructed.governance_policy is not None
     assert reconstructed.governance_policy.required_metadata == (

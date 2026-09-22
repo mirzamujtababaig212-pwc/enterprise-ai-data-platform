@@ -300,6 +300,7 @@ class AgentRunRecoveryService:
             request = run.request_snapshot.to_request(
                 session_id=run.session_id,
                 user_id=run.user_id,
+                principal=run.principal,
             )
 
             response = await self._runtime.resume(

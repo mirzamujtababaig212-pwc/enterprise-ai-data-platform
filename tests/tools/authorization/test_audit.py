@@ -20,6 +20,8 @@ def test_authorization_audit_record_is_constructed() -> None:
         tool_name="rag.search",
         allowed=True,
         reason="Tool is authorized.",
+        policy_id="metadata_policy",
+        policy_version="1.0",
         run_id="run-123",
         call_id="call-456",
         agent_name="enterprise-rag-analyst",
@@ -30,6 +32,8 @@ def test_authorization_audit_record_is_constructed() -> None:
     assert record.tool_name == "rag.search"
     assert record.allowed is True
     assert record.reason == "Tool is authorized."
+    assert record.policy_id == "metadata_policy"
+    assert record.policy_version == "1.0"
     assert record.run_id == "run-123"
     assert record.call_id == "call-456"
     assert record.agent_name == "enterprise-rag-analyst"
@@ -62,6 +66,8 @@ async def test_authorization_audit_sink_records_decision() -> None:
         ("principal", "   ", "Principal must not be empty."),
         ("tool_name", "   ", "Tool name must not be empty."),
         ("reason", "   ", "reason must not be empty when provided."),
+        ("policy_id", "   ", "policy_id must not be empty when provided."),
+        ("policy_version", "   ", "policy_version must not be empty when provided."),
         ("run_id", "   ", "run_id must not be empty when provided."),
         ("call_id", "   ", "call_id must not be empty when provided."),
         ("agent_name", "   ", "agent_name must not be empty when provided."),

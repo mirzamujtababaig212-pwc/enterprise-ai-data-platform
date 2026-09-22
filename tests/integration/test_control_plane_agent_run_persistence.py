@@ -588,9 +588,14 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         import asyncio
 
         asyncio.run(dependencies._initialize_agents())
+
+        from app.control_plane.auth import principal_from_api_key
+
+        authenticated_principal = principal_from_api_key(API_KEY)
+
         asyncio.run(
             dependencies._tool_authorizer.allow(
-                "integration-test-user",
+                authenticated_principal,
                 "rag.search",
             )
         )

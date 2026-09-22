@@ -20,6 +20,7 @@ class AgentRunRequestSnapshot(BaseModel):
 
     schema_version: int = Field(default=1, ge=1)
     input: str = Field(min_length=1)
+    principal: str | None = None
     memory_namespace: str | None = None
     governance_policy: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -31,6 +32,7 @@ class AgentRunRequestSnapshot(BaseModel):
 
         return cls(
             input=request.input,
+            principal=request.principal,
             memory_namespace=request.memory_namespace,
             governance_policy=(
                 {"required_metadata": dict(policy.required_metadata)}
@@ -55,6 +57,7 @@ class AgentRunRequestSnapshot(BaseModel):
         *,
         session_id: str | None,
         user_id: str | None,
+        principal: str | None,
     ) -> AgentRequest:
         policy = self.governance_policy
 
@@ -72,6 +75,7 @@ class AgentRunRequestSnapshot(BaseModel):
             input=self.input,
             session_id=session_id,
             user_id=user_id,
+            principal=principal,
             memory_namespace=self.memory_namespace,
             governance_policy=governance_policy,
             metadata=dict(self.metadata),

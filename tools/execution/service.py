@@ -130,6 +130,8 @@ class ToolExecutionService:
                 tool_name=tool_name,
                 allowed=authorization.allowed,
                 reason=authorization.reason,
+                policy_id=authorization.policy_id,
+                policy_version=authorization.policy_version,
                 execution_context=execution_context,
             )
 
@@ -321,6 +323,8 @@ class ToolExecutionService:
         tool_name: str,
         allowed: bool,
         reason: str | None,
+        policy_id: str | None,
+        policy_version: str | None,
         execution_context: ToolExecutionContext | None = None,
     ) -> None:
         if self.audit_sink is None:
@@ -331,6 +335,8 @@ class ToolExecutionService:
             tool_name=tool_name,
             allowed=allowed,
             reason=reason,
+            policy_id=policy_id,
+            policy_version=policy_version,
             run_id=execution_context.run_id if execution_context else None,
             call_id=execution_context.call_id if execution_context else None,
             agent_name=execution_context.agent_name if execution_context else None,
