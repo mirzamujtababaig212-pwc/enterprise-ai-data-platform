@@ -18,6 +18,7 @@ from app.control_plane.persistence.database import SessionLocal
 from app.control_plane.persistence.models import (
     AgentRunEventRecord,
     AgentRunRecord,
+    AgentRunStepRecord,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -739,11 +740,58 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
                 )
             )
 
+            steps = list(
+                session.scalars(
+                    select(AgentRunStepRecord)
+                    .where(AgentRunStepRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunStepRecord.step_index.asc(),
+                        AgentRunStepRecord.created_at.asc(),
+                        AgentRunStepRecord.step_id.asc(),
+                    )
+                )
+            )
+
         assert run_record is not None
         assert run_record.status == AgentRunStatus.COMPLETED
         assert run_record.agent_name == "enterprise-rag-analyst"
         assert run_record.session_id == session_id
         assert run_record.user_id == "integration-test-user"
+
+        assert len(steps) == 3
+
+        assert [(step.step_id, step.step_index, step.status) for step in steps] == [
+            ("retrieve_evidence", 0, "completed"),
+            ("analyze_evidence", 1, "completed"),
+            ("produce_answer", 2, "completed"),
+        ]
+
+        assert all(step.run_id == run_id for step in steps)
+        # Agent identity is asserted on the parent AgentRunRecord above.
+        assert all(step.attempt == 1 for step in steps)
+        assert all(step.completed_at is not None for step in steps)
+
+        retrieve_step = steps[0]
+
+        assert retrieve_step.step_type == "tool"
+        assert retrieve_step.tool_name == "rag.search"
+        assert retrieve_step.call_id == "call-rag-checkpoint-1"
+        assert retrieve_step.status == "completed"
+        assert retrieve_step.output is not None
+
+        analyze_step = steps[1]
+
+        assert analyze_step.step_type == "model"
+        assert analyze_step.tool_name is None
+        assert analyze_step.call_id is None
+        assert analyze_step.status == "completed"
+
+        produce_step = steps[2]
+
+        assert produce_step.step_type == "model"
+        assert produce_step.tool_name is None
+        assert produce_step.call_id is None
+        assert produce_step.status == "completed"
 
         assert [event.event_type for event in events] == [
             "agent.started",
