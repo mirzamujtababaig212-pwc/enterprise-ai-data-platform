@@ -18,6 +18,7 @@ from app.control_plane.agent_run_events.repository import (
 )
 from app.control_plane.agent_runs.admission import AgentRunAdmissionResult
 from app.control_plane.agent_runs.exceptions import (
+    AgentRunAccessDeniedError,
     AgentRunAdmissionRejectedError,
     AgentRunIdempotencyConflictError,
     DuplicateAgentRunError,
@@ -661,6 +662,70 @@ def test_get_run_returns_none_for_missing_run() -> None:
     repository.get.assert_called_once_with("missing-run")
 
 
+def test_get_run_rejects_partial_identity_context() -> None:
+    repository = _repository()
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentRunAccessDeniedError,
+        match="Both tenant_id and principal are required",
+    ):
+        service.get_run(
+            "run-123",
+            tenant_id="tenant-acme",
+        )
+
+    repository.get.assert_not_called()
+    repository.get_for_tenant.assert_not_called()
+
+
+def test_cancel_rejects_partial_identity_context() -> None:
+    repository = _repository()
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentRunAccessDeniedError,
+        match="Both tenant_id and principal are required",
+    ):
+        service.cancel(
+            "run-123",
+            principal="api_key:test-owner",
+        )
+
+    repository.get.assert_not_called()
+    repository.get_for_tenant.assert_not_called()
+
+
+def test_list_events_rejects_partial_identity_context() -> None:
+    repository = _repository()
+    events_repository = Mock(spec=AgentRunEventsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+    )
+
+    with pytest.raises(
+        AgentRunAccessDeniedError,
+        match="Both tenant_id and principal are required",
+    ):
+        service.list_events(
+            "run-123",
+            tenant_id="tenant-acme",
+        )
+
+    repository.get.assert_not_called()
+    repository.get_for_tenant.assert_not_called()
+    events_repository.list.assert_not_called()
+
+
 def test_list_runs_delegates_filters_and_limit() -> None:
     repository = _repository()
 
@@ -695,6 +760,7 @@ def test_list_runs_delegates_filters_and_limit() -> None:
 
     assert result == runs
     repository.list.assert_called_once_with(
+        tenant_id=None,
         agent_name="enterprise-analyst",
         session_id="session-1",
         user_id="user-1",
@@ -1517,6 +1583,7 @@ async def test_execute_with_new_idempotency_key_creates_run() -> None:
     )
 
     repository.get_by_idempotency_key.assert_called_once_with(
+        None,
         "user-1",
         "request-123",
     )
@@ -1892,10 +1959,11 @@ def _step(
 
 def test_list_steps_delegates_to_step_repository() -> None:
     repository = _repository()
-    repository.get.return_value = AgentRun(
+    repository.get_for_tenant.return_value = AgentRun(
         run_id="run-123",
         agent_name="enterprise-analyst",
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
         status=AgentRunStatus.COMPLETED,
     )
 
@@ -1914,13 +1982,17 @@ def test_list_steps_delegates_to_step_repository() -> None:
 
     result = service.list_steps(
         "run-123",
+        tenant_id="tenant-acme",
         principal="api_key:test-owner",
         status=AgentRunStepStatus.COMPLETED,
         limit=25,
     )
 
     assert result == steps
-    repository.get.assert_called_once_with("run-123")
+    repository.get_for_tenant.assert_called_once_with(
+        "run-123",
+        "tenant-acme",
+    )
     steps_repository.list.assert_called_once_with(
         "run-123",
         status=AgentRunStepStatus.COMPLETED,
@@ -1930,7 +2002,7 @@ def test_list_steps_delegates_to_step_repository() -> None:
 
 def test_list_steps_raises_for_missing_run() -> None:
     repository = _repository()
-    repository.get.return_value = None
+    repository.get_for_tenant.return_value = None
 
     steps_repository = Mock(spec=AgentRunStepsRepository)
 
@@ -1946,19 +2018,24 @@ def test_list_steps_raises_for_missing_run() -> None:
     ):
         service.list_steps(
             "missing-run",
+            tenant_id="tenant-acme",
             principal="api_key:test-owner",
         )
 
-    repository.get.assert_called_once_with("missing-run")
+    repository.get_for_tenant.assert_called_once_with(
+        "missing-run",
+        "tenant-acme",
+    )
     steps_repository.list.assert_not_called()
 
 
 def test_list_steps_requires_step_repository() -> None:
     repository = _repository()
-    repository.get.return_value = AgentRun(
+    repository.get_for_tenant.return_value = AgentRun(
         run_id="run-123",
         agent_name="enterprise-analyst",
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
         status=AgentRunStatus.COMPLETED,
     )
 
@@ -1973,16 +2050,18 @@ def test_list_steps_requires_step_repository() -> None:
     ):
         service.list_steps(
             "run-123",
+            tenant_id="tenant-acme",
             principal="api_key:test-owner",
         )
 
 
 def test_get_step_delegates_to_step_repository() -> None:
     repository = _repository()
-    repository.get.return_value = AgentRun(
+    repository.get_for_tenant.return_value = AgentRun(
         run_id="run-123",
         agent_name="enterprise-analyst",
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
         status=AgentRunStatus.COMPLETED,
     )
 
@@ -1999,11 +2078,15 @@ def test_get_step_delegates_to_step_repository() -> None:
     result = service.get_step(
         "run-123",
         "step-1",
+        tenant_id="tenant-acme",
         principal="api_key:test-owner",
     )
 
     assert result is step
-    repository.get.assert_called_once_with("run-123")
+    repository.get_for_tenant.assert_called_once_with(
+        "run-123",
+        "tenant-acme",
+    )
     steps_repository.get.assert_called_once_with(
         "run-123",
         "step-1",
@@ -2012,10 +2095,11 @@ def test_get_step_delegates_to_step_repository() -> None:
 
 def test_get_step_returns_none_for_missing_step() -> None:
     repository = _repository()
-    repository.get.return_value = AgentRun(
+    repository.get_for_tenant.return_value = AgentRun(
         run_id="run-123",
         agent_name="enterprise-analyst",
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
         status=AgentRunStatus.COMPLETED,
     )
 
@@ -2031,6 +2115,7 @@ def test_get_step_returns_none_for_missing_step() -> None:
     result = service.get_step(
         "run-123",
         "missing-step",
+        tenant_id="tenant-acme",
         principal="api_key:test-owner",
     )
 
@@ -2043,7 +2128,7 @@ def test_get_step_returns_none_for_missing_step() -> None:
 
 def test_get_step_raises_for_missing_run() -> None:
     repository = _repository()
-    repository.get.return_value = None
+    repository.get_for_tenant.return_value = None
 
     steps_repository = Mock(spec=AgentRunStepsRepository)
 
@@ -2060,19 +2145,24 @@ def test_get_step_raises_for_missing_run() -> None:
         service.get_step(
             "missing-run",
             "step-1",
+            tenant_id="tenant-acme",
             principal="api_key:test-owner",
         )
 
-    repository.get.assert_called_once_with("missing-run")
+    repository.get_for_tenant.assert_called_once_with(
+        "missing-run",
+        "tenant-acme",
+    )
     steps_repository.get.assert_not_called()
 
 
 def test_get_step_requires_step_repository() -> None:
     repository = _repository()
-    repository.get.return_value = AgentRun(
+    repository.get_for_tenant.return_value = AgentRun(
         run_id="run-123",
         agent_name="enterprise-analyst",
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
         status=AgentRunStatus.COMPLETED,
     )
 
@@ -2088,5 +2178,6 @@ def test_get_step_requires_step_repository() -> None:
         service.get_step(
             "run-123",
             "step-1",
+            tenant_id="tenant-acme",
             principal="api_key:test-owner",
         )

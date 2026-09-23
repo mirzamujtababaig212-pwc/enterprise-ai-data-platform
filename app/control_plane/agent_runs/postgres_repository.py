@@ -89,13 +89,32 @@ class PostgreSQLAgentRunRepository:
 
         return self._to_domain(record)
 
+    def get_for_tenant(
+        self,
+        run_id: str,
+        tenant_id: str,
+    ) -> AgentRun | None:
+        record = self._session.scalar(
+            select(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.tenant_id == tenant_id,
+            )
+        )
+
+        if record is None:
+            return None
+
+        return self._to_domain(record)
+
     def get_by_idempotency_key(
         self,
+        tenant_id: str,
         user_id: str,
         idempotency_key: str,
     ) -> AgentRun | None:
         record = self._session.scalar(
             select(AgentRunRecord).where(
+                AgentRunRecord.tenant_id == tenant_id,
                 AgentRunRecord.user_id == user_id,
                 AgentRunRecord.idempotency_key == idempotency_key,
             )
@@ -505,6 +524,7 @@ class PostgreSQLAgentRunRepository:
     def list(
         self,
         *,
+        tenant_id: str | None = None,
         agent_name: str | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
@@ -512,6 +532,9 @@ class PostgreSQLAgentRunRepository:
         limit: int = 100,
     ) -> list[AgentRun]:
         statement = select(AgentRunRecord)
+
+        if tenant_id is not None:
+            statement = statement.where(AgentRunRecord.tenant_id == tenant_id)
 
         if agent_name is not None:
             statement = statement.where(AgentRunRecord.agent_name == agent_name)

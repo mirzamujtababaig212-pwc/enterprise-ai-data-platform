@@ -38,8 +38,32 @@ class FakeAgentRunApplicationService:
             run_id="run-cancel-123",
             agent_name="enterprise-analyst",
             principal="api_key:test-owner",
+            tenant_id="tenant-acme",
             status=AgentRunStatus.RUNNING,
         )
+
+    def get_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+    ) -> AgentRun | None:
+        if self.error is not None:
+            raise self.error
+
+        if run_id == "missing-run":
+            return None
+
+        if tenant_id != self.run.tenant_id:
+            return None
+
+        if principal != self.run.principal:
+            raise AgentRunAccessDeniedError(
+                f"Principal is not authorized to access agent run '{run_id}'.",
+            )
+
+        return self.run
 
     async def execute(
         self,
@@ -67,12 +91,13 @@ class FakeAgentRunApplicationService:
         self,
         run_id: str,
         *,
+        tenant_id: str | None = None,
         principal: str | None,
         status: AgentRunStepStatus | None = None,
         limit: int = 100,
     ) -> list[AgentRunStep]:
         self.step_calls.append(
-            ("list", run_id, principal, status, limit),
+            ("list", run_id, tenant_id, principal, status, limit),
         )
 
         if self.error is not None:
@@ -88,10 +113,11 @@ class FakeAgentRunApplicationService:
         run_id: str,
         step_id: str,
         *,
+        tenant_id: str | None = None,
         principal: str | None,
     ) -> AgentRunStep | None:
         self.step_calls.append(
-            ("get", run_id, step_id, principal),
+            ("get", run_id, step_id, tenant_id, principal),
         )
 
         if self.error is not None:
@@ -103,11 +129,28 @@ class FakeAgentRunApplicationService:
 
         return None
 
-    def cancel(self, run_id: str) -> AgentRun:
+    def cancel(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+    ) -> AgentRun:
         self.calls.append(run_id)
 
         if self.error is not None:
             raise self.error
+
+        if (tenant_id is None) != (principal is None):
+            raise AgentRunAccessDeniedError(
+                "Both tenant_id and principal are required for scoped access.",
+            )
+
+        if tenant_id is not None or principal is not None:
+            if tenant_id != self.run.tenant_id or principal != self.run.principal:
+                raise AgentRunAccessDeniedError(
+                    "Agent run access denied.",
+                )
 
         return self.run
 
@@ -253,7 +296,14 @@ def test_run_agent_uses_authenticated_tenant_not_metadata_tenant() -> None:
 
 def test_recover_agent_run_returns_recovered_response() -> None:
     service = FakeAgentRunRecoveryService()
-    client = build_client(service)
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
+    )
 
     response = client.post(
         "/api/v1/agents/runs/run-recovery-123/recover",
@@ -278,10 +328,14 @@ def test_recover_agent_run_returns_recovered_response() -> None:
 
 def test_recover_agent_run_maps_missing_run_to_404() -> None:
     service = FakeAgentRunRecoveryService()
-    service.error = LookupError(
-        "Agent run 'missing-run' was not found.",
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
-    client = build_client(service)
 
     response = client.post(
         "/api/v1/agents/runs/missing-run/recover",
@@ -292,7 +346,8 @@ def test_recover_agent_run_maps_missing_run_to_404() -> None:
         "detail": "Agent run 'missing-run' was not found.",
     }
 
-    assert service.calls == ["missing-run"]
+    # Authorization happens before recovery.
+    assert service.calls == []
 
 
 def test_recover_agent_run_maps_invalid_status_to_422() -> None:
@@ -300,7 +355,14 @@ def test_recover_agent_run_maps_invalid_status_to_422() -> None:
     service.error = ValueError(
         "Agent run 'completed-run' is not eligible for recovery " "from status 'completed'.",
     )
-    client = build_client(service)
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
+    )
 
     response = client.post(
         "/api/v1/agents/runs/completed-run/recover",
@@ -321,7 +383,14 @@ def test_recover_agent_run_maps_recovery_failure_to_409() -> None:
     service.error = RuntimeError(
         "Agent run 'failed-run' has no execution checkpoint " "and cannot be recovered.",
     )
-    client = build_client(service)
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
+    )
 
     response = client.post(
         "/api/v1/agents/runs/failed-run/recover",
@@ -337,12 +406,71 @@ def test_recover_agent_run_maps_recovery_failure_to_409() -> None:
     assert service.calls == ["failed-run"]
 
 
+def test_recover_agent_run_denies_wrong_tenant() -> None:
+    service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-other",
+    )
+
+    response = client.post(
+        "/api/v1/agents/runs/run-recovery-123/recover",
+    )
+
+    assert response.status_code == 404
+    assert service.calls == []
+
+
+def test_recover_agent_run_denies_wrong_principal() -> None:
+    service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:attacker",
+        tenant_id="tenant-acme",
+    )
+
+    response = client.post(
+        "/api/v1/agents/runs/run-recovery-123/recover",
+    )
+
+    assert response.status_code == 403
+    assert service.calls == []
+
+
+def test_recover_agent_run_requires_tenant_context() -> None:
+    service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        service,
+        application_service,
+        principal="api_key:test-owner",
+    )
+
+    response = client.post(
+        "/api/v1/agents/runs/run-recovery-123/recover",
+    )
+
+    assert response.status_code == 404
+    assert service.calls == []
+
+
 def test_cancel_agent_run_returns_202() -> None:
     recovery_service = FakeAgentRunRecoveryService()
     application_service = FakeAgentRunApplicationService()
+
     client = build_client(
         recovery_service,
         application_service,
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.post(
@@ -357,6 +485,47 @@ def test_cancel_agent_run_returns_202() -> None:
     }
 
     assert application_service.calls == ["run-cancel-123"]
+
+
+def test_cancel_agent_run_rejects_wrong_principal() -> None:
+    recovery_service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        recovery_service,
+        application_service,
+        principal="api_key:attacker",
+        tenant_id="tenant-acme",
+    )
+
+    response = client.post(
+        "/api/v1/agents/runs/run-cancel-123/cancel",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Agent run access denied.",
+    }
+
+
+def test_cancel_agent_run_rejects_missing_identity_context() -> None:
+    recovery_service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        recovery_service,
+        application_service,
+        tenant_id="tenant-acme",
+    )
+
+    response = client.post(
+        "/api/v1/agents/runs/run-cancel-123/cancel",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Both tenant_id and principal are required for scoped access.",
+    }
 
 
 def test_cancel_agent_run_maps_missing_run_to_404() -> None:
@@ -474,6 +643,7 @@ def test_list_agent_run_steps_returns_steps() -> None:
         recovery_service,
         application_service,
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.get(
@@ -531,7 +701,7 @@ def test_list_agent_run_steps_returns_steps() -> None:
     }
 
     assert application_service.step_calls == [
-        ("list", "run-steps-123", "api_key:test-owner", None, 100),
+        ("list", "run-steps-123", "tenant-acme", "api_key:test-owner", None, 100),
     ]
 
 
@@ -553,6 +723,7 @@ def test_list_agent_run_steps_filters_by_status() -> None:
         recovery_service,
         application_service,
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.get(
@@ -570,6 +741,7 @@ def test_list_agent_run_steps_filters_by_status() -> None:
         (
             "list",
             "run-steps-123",
+            "tenant-acme",
             "api_key:test-owner",
             AgentRunStepStatus.RUNNING,
             25,
@@ -634,6 +806,7 @@ def test_get_agent_run_step_returns_step() -> None:
         recovery_service,
         application_service,
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.get(
@@ -665,7 +838,7 @@ def test_get_agent_run_step_returns_step() -> None:
     }
 
     assert application_service.step_calls == [
-        ("get", "run-steps-123", "step-42", "api_key:test-owner"),
+        ("get", "run-steps-123", "step-42", "tenant-acme", "api_key:test-owner"),
     ]
 
 
@@ -677,6 +850,7 @@ def test_get_agent_run_step_maps_missing_step_to_404() -> None:
         recovery_service,
         application_service,
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.get(
@@ -689,7 +863,7 @@ def test_get_agent_run_step_maps_missing_step_to_404() -> None:
     }
 
     assert application_service.step_calls == [
-        ("get", "run-steps-123", "missing-step", "api_key:test-owner"),
+        ("get", "run-steps-123", "missing-step", "tenant-acme", "api_key:test-owner"),
     ]
 
 
@@ -750,6 +924,7 @@ def test_get_agent_run_step_maps_missing_run_to_404() -> None:
         recovery_service,
         application_service,
         principal="api_key:test-owner",
+        tenant_id="tenant-acme",
     )
 
     response = client.get(

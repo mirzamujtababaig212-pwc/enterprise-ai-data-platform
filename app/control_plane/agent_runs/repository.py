@@ -17,8 +17,15 @@ class AgentRunRepository(Protocol):
 
     def get(self, run_id: str) -> AgentRun | None: ...
 
+    def get_for_tenant(
+        self,
+        run_id: str,
+        tenant_id: str,
+    ) -> AgentRun | None: ...
+
     def get_by_idempotency_key(
         self,
+        tenant_id: str,
         user_id: str,
         idempotency_key: str,
     ) -> AgentRun | None: ...
@@ -106,6 +113,7 @@ class AgentRunRepository(Protocol):
     def list(
         self,
         *,
+        tenant_id: str | None = None,
         agent_name: str | None = None,
         session_id: str | None = None,
         user_id: str | None = None,

@@ -36,14 +36,32 @@ class InMemoryAgentRunRepository:
         with self._lock:
             return self._runs.get(run_id)
 
+    def get_for_tenant(
+        self,
+        run_id: str,
+        tenant_id: str,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if run is None or run.tenant_id != tenant_id:
+                return None
+
+            return run
+
     def get_by_idempotency_key(
         self,
+        tenant_id: str,
         user_id: str,
         idempotency_key: str,
     ) -> AgentRun | None:
         with self._lock:
             for run in self._runs.values():
-                if run.user_id == user_id and run.idempotency_key == idempotency_key:
+                if (
+                    run.tenant_id == tenant_id
+                    and run.user_id == user_id
+                    and run.idempotency_key == idempotency_key
+                ):
                     return run
 
         return None
@@ -325,6 +343,7 @@ class InMemoryAgentRunRepository:
     def list(
         self,
         *,
+        tenant_id: str | None = None,
         agent_name: str | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
@@ -333,6 +352,9 @@ class InMemoryAgentRunRepository:
     ) -> list[AgentRun]:
         with self._lock:
             runs = list(self._runs.values())
+
+        if tenant_id is not None:
+            runs = [run for run in runs if run.tenant_id == tenant_id]
 
         if agent_name is not None:
             runs = [run for run in runs if run.agent_name == agent_name]

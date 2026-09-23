@@ -154,6 +154,7 @@ class AgentRunApplicationService:
                 raise ValueError("A user_id is required when an idempotency key is provided.")
 
             existing_run = self._repository.get_by_idempotency_key(
+                request.tenant_id,
                 request.user_id,
                 idempotency_key,
             )
@@ -185,6 +186,7 @@ class AgentRunApplicationService:
                 raise
 
             existing_run = self._repository.get_by_idempotency_key(
+                request.tenant_id,
                 request.user_id,
                 idempotency_key,
             )
@@ -354,11 +356,57 @@ class AgentRunApplicationService:
             response=response,
         )
 
-    def get_run(self, run_id: str) -> AgentRun | None:
-        return self._repository.get(run_id)
+    def get_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+    ) -> AgentRun | None:
+        self._validate_identity_context(
+            tenant_id=tenant_id,
+            principal=principal,
+        )
 
-    def cancel(self, run_id: str) -> AgentRun:
-        run = self._repository.get(run_id)
+        if tenant_id is None and principal is None:
+            return self._repository.get(run_id)
+
+        run = self._repository.get_for_tenant(run_id, tenant_id)
+
+        if run is None:
+            return None
+
+        self._authorize_run_access(
+            run,
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        return run
+
+    def cancel(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+    ) -> AgentRun:
+        self._validate_identity_context(
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        if tenant_id is None and principal is None:
+            run = self._repository.get(run_id)
+        else:
+            run = self._repository.get_for_tenant(run_id, tenant_id)
+
+            if run is not None:
+                self._authorize_run_access(
+                    run,
+                    tenant_id=tenant_id,
+                    principal=principal,
+                )
 
         if run is None:
             raise LookupError(
@@ -388,6 +436,7 @@ class AgentRunApplicationService:
     def list_runs(
         self,
         *,
+        tenant_id: str | None = None,
         agent_name: str | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
@@ -395,6 +444,7 @@ class AgentRunApplicationService:
         limit: int = 100,
     ) -> list[AgentRun]:
         return self._repository.list(
+            tenant_id=tenant_id,
             agent_name=agent_name,
             session_id=session_id,
             user_id=user_id,
@@ -406,9 +456,26 @@ class AgentRunApplicationService:
         self,
         run_id: str,
         *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
         limit: int = 100,
     ) -> list[AgentExecutionEvent]:
-        run = self._repository.get(run_id)
+        self._validate_identity_context(
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        if tenant_id is None and principal is None:
+            run = self._repository.get(run_id)
+        else:
+            run = self._repository.get_for_tenant(run_id, tenant_id)
+
+            if run is not None:
+                self._authorize_run_access(
+                    run,
+                    tenant_id=tenant_id,
+                    principal=principal,
+                )
 
         if run is None:
             raise LookupError(
@@ -425,13 +492,30 @@ class AgentRunApplicationService:
             limit=limit,
         )
 
+    @staticmethod
+    def _validate_identity_context(
+        *,
+        tenant_id: str | None,
+        principal: str | None,
+    ) -> None:
+        if (tenant_id is None) != (principal is None):
+            raise AgentRunAccessDeniedError(
+                "Both tenant_id and principal are required for scoped access.",
+            )
+
     def _authorize_run_access(
         self,
         run: AgentRun,
         *,
+        tenant_id: str | None,
         principal: str | None,
     ) -> None:
-        if principal is None or run.principal != principal:
+        if (
+            tenant_id is None
+            or run.tenant_id != tenant_id
+            or principal is None
+            or run.principal != principal
+        ):
             raise AgentRunAccessDeniedError(
                 f"Principal is not authorized to access agent run '{run.run_id}'.",
             )
@@ -440,11 +524,12 @@ class AgentRunApplicationService:
         self,
         run_id: str,
         *,
+        tenant_id: str | None,
         principal: str | None,
         status: AgentRunStepStatus | None = None,
         limit: int = 100,
     ) -> list[AgentRunStep]:
-        run = self._repository.get(run_id)
+        run = self._repository.get_for_tenant(run_id, tenant_id)
 
         if run is None:
             raise LookupError(
@@ -453,6 +538,7 @@ class AgentRunApplicationService:
 
         self._authorize_run_access(
             run,
+            tenant_id=tenant_id,
             principal=principal,
         )
 
@@ -472,9 +558,10 @@ class AgentRunApplicationService:
         run_id: str,
         step_id: str,
         *,
+        tenant_id: str,
         principal: str | None,
     ) -> AgentRunStep | None:
-        run = self._repository.get(run_id)
+        run = self._repository.get_for_tenant(run_id, tenant_id)
 
         if run is None:
             raise LookupError(
@@ -483,6 +570,7 @@ class AgentRunApplicationService:
 
         self._authorize_run_access(
             run,
+            tenant_id=tenant_id,
             principal=principal,
         )
 

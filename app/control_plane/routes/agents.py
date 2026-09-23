@@ -108,13 +108,44 @@ async def run_agent(
     response_model=AgentRunResponse,
 )
 async def recover_agent_run(
+    request: Request,
     run_id: str,
+    application_service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
     service: AgentRunRecoveryService = Depends(
         get_agent_run_recovery_service,
     ),
 ) -> AgentRunResponse:
     try:
+        tenant_id = getattr(request.state, "tenant_id", None)
+        principal = getattr(request.state, "principal", None)
+
+        if tenant_id is None or principal is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent run '{run_id}' was not found.",
+            )
+
+        run = application_service.get_run(
+            run_id,
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent run '{run_id}' was not found.",
+            )
+
         response = await service.recover(run_id)
+
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
 
     except LookupError as exc:
         raise HTTPException(
@@ -148,6 +179,7 @@ async def recover_agent_run(
     response_model=AgentRunListResponse,
 )
 async def list_agent_runs(
+    request: Request,
     agent_name: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
     user_id: str | None = Query(default=None),
@@ -168,7 +200,16 @@ async def list_agent_runs(
                 detail=f"Invalid agent run status: {run_status}",
             ) from exc
 
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated tenant context is required.",
+        )
+
     runs = service.list_runs(
+        tenant_id=tenant_id,
         agent_name=agent_name,
         session_id=session_id,
         user_id=user_id,
@@ -199,13 +240,24 @@ async def list_agent_runs(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def cancel_agent_run(
+    request: Request,
     run_id: str,
     service: AgentRunApplicationService = Depends(
         get_agent_run_application_service,
     ),
 ) -> AgentRunCancellationResponse:
     try:
-        run = service.cancel(run_id)
+        run = service.cancel(
+            run_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
+            principal=getattr(request.state, "principal", None),
+        )
+
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
 
     except LookupError as exc:
         raise HTTPException(
@@ -237,12 +289,23 @@ async def cancel_agent_run(
     response_model=AgentRunDetailResponse,
 )
 async def get_agent_run(
+    request: Request,
     run_id: str,
     service: AgentRunApplicationService = Depends(
         get_agent_run_application_service,
     ),
 ) -> AgentRunDetailResponse:
-    run = service.get_run(run_id)
+    try:
+        run = service.get_run(
+            run_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
+            principal=getattr(request.state, "principal", None),
+        )
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
 
     if run is None:
         raise HTTPException(
@@ -289,6 +352,7 @@ async def list_agent_run_steps(
     try:
         steps = service.list_steps(
             run_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
             principal=getattr(request.state, "principal", None),
             status=selected_status,
             limit=limit,
@@ -346,6 +410,7 @@ async def get_agent_run_step(
         step = service.get_step(
             run_id,
             step_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
             principal=getattr(request.state, "principal", None),
         )
     except AgentRunAccessDeniedError as exc:
@@ -391,6 +456,7 @@ async def get_agent_run_step(
     response_model=AgentRunEventListResponse,
 )
 async def list_agent_run_events(
+    request: Request,
     run_id: str,
     limit: int = Query(default=100, ge=1, le=100),
     service: AgentRunApplicationService = Depends(
@@ -400,8 +466,15 @@ async def list_agent_run_events(
     try:
         events = service.list_events(
             run_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
+            principal=getattr(request.state, "principal", None),
             limit=limit,
         )
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
