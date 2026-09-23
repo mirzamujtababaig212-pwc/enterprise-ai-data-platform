@@ -12,6 +12,8 @@ from app.control_plane.agent_runs.exceptions import (
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+from app.control_plane.agent_run_steps.models import AgentRunStepStatus
+from app.control_plane.persistence.models import AgentRunStepRecord
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.models import AgentRequest
 from rag.governance.policy import GovernancePolicy
@@ -1263,6 +1265,168 @@ def test_complete_if_owner_persists_completed_run_and_clears_lease(repository) -
     assert restored.output == {"answer": "done"}
     assert restored.lease_id is None
     assert restored.lease_expires_at is None
+
+
+def _add_step(
+    repository, *, run_id: str, step_id: str, status: AgentRunStepStatus, step_index: int = 0
+) -> None:
+    repository._session.add(
+        AgentRunStepRecord(
+            run_id=run_id,
+            step_id=step_id,
+            step_index=step_index,
+            step_type="tool_call",
+            status=status.value,
+            attempt=1,
+        )
+    )
+    repository._session.commit()
+
+
+def test_complete_if_owner_allows_zero_step_run(repository) -> None:
+    run = make_run(
+        run_id="run-complete-zero-steps",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-zero",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    completed_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-zero",
+        completed_at=completed_at,
+        output={"answer": "zero-step"},
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.COMPLETED
+
+
+def test_complete_if_owner_allows_all_completed_steps(repository) -> None:
+    run = make_run(
+        run_id="run-complete-all-steps",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-complete",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    _add_step(
+        repository,
+        run_id=run.run_id,
+        step_id="step-0",
+        status=AgentRunStepStatus.COMPLETED,
+        step_index=0,
+    )
+    _add_step(
+        repository,
+        run_id=run.run_id,
+        step_id="step-1",
+        status=AgentRunStepStatus.COMPLETED,
+        step_index=1,
+    )
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-complete",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        output={"answer": "all-complete"},
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "step_status",
+    [
+        AgentRunStepStatus.PLANNED,
+        AgentRunStepStatus.RUNNING,
+        AgentRunStepStatus.FAILED,
+        AgentRunStepStatus.AMBIGUOUS,
+        AgentRunStepStatus.CANCELLED,
+    ],
+)
+def test_complete_if_owner_rejects_unfinished_step_status(
+    repository,
+    step_status: AgentRunStepStatus,
+) -> None:
+    run = make_run(
+        run_id=f"run-complete-blocked-{step_status.value}",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-blocked",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    _add_step(
+        repository,
+        run_id=run.run_id,
+        step_id="blocking-step",
+        status=step_status,
+    )
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-blocked",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        output={"answer": "must-not-complete"},
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-blocked"
+    assert restored.completed_at is None
+    assert restored.output is None
+
+
+def test_complete_if_owner_rejects_mixed_completed_and_unfinished_steps(repository) -> None:
+    run = make_run(
+        run_id="run-complete-mixed-steps",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        lease_id="lease-mixed",
+        lease_expires_at=datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+    )
+    repository.create(run)
+
+    _add_step(
+        repository,
+        run_id=run.run_id,
+        step_id="completed-step",
+        status=AgentRunStepStatus.COMPLETED,
+        step_index=0,
+    )
+    _add_step(
+        repository,
+        run_id=run.run_id,
+        step_id="running-step",
+        status=AgentRunStepStatus.RUNNING,
+        step_index=1,
+    )
+
+    result = repository.complete_if_owner(
+        run.run_id,
+        lease_id="lease-mixed",
+        completed_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        output={"answer": "must-not-complete"},
+    )
+
+    assert result is None
+
+    restored = repository.get(run.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "lease-mixed"
 
 
 def test_complete_if_owner_rejects_wrong_lease(repository) -> None:

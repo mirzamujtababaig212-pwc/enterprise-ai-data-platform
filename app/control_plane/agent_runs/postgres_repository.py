@@ -11,8 +11,9 @@ from app.control_plane.agent_runs.exceptions import (
     DuplicateAgentRunError,
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_run_steps.models import AgentRunStepStatus
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
-from app.control_plane.persistence.models import AgentRunRecord
+from app.control_plane.persistence.models import AgentRunRecord, AgentRunStepRecord
 
 
 class PostgreSQLAgentRunRepository:
@@ -355,6 +356,12 @@ class PostgreSQLAgentRunRepository:
                 AgentRunRecord.status == AgentRunStatus.RUNNING.value,
                 AgentRunRecord.lease_id == lease_id,
                 AgentRunRecord.lease_expires_at > completed_at,
+                ~select(AgentRunStepRecord.run_id)
+                .where(
+                    AgentRunStepRecord.run_id == AgentRunRecord.run_id,
+                    AgentRunStepRecord.status != AgentRunStepStatus.COMPLETED.value,
+                )
+                .exists(),
             )
             .values(
                 status=AgentRunStatus.COMPLETED.value,
