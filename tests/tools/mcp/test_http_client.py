@@ -142,3 +142,18 @@ async def test_http_client_forwards_mcp_meta():
             }
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_http_client_send_ping():
+    client = MCPStreamableHTTPClient("http://localhost:8000/mcp")
+
+    session = MagicMock()
+    session.send_ping = AsyncMock()
+
+    client._session = session
+    client._connected = True
+
+    await client.send_ping()
+
+    session.send_ping.assert_awaited_once()

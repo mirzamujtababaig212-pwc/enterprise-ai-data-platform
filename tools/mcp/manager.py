@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import time
 
 from mcp import StdioServerParameters
 
@@ -8,6 +10,7 @@ from tools.contracts import ToolRegistry
 from tools.mcp.client import MCPClient
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.discovery import MCPToolDiscoveryService
+from tools.mcp.health import MCPHealthState, MCPHealthStatus
 from tools.mcp.http_client import MCPStreamableHTTPClient
 from tools.mcp.sdk_client import MCPPythonSDKClient
 from tools.models import ToolDefinition
@@ -127,6 +130,82 @@ class MCPServerManager:
         await self.connect_server(name)
 
         return await self.discover_server(name)
+
+    async def check_health(
+        self,
+        name: str,
+    ) -> MCPHealthStatus:
+        """
+        Check the liveness of a registered MCP server.
+
+        Health checking is observational only:
+        - it never reconnects the server
+        - it never performs tool discovery
+        - it never executes an MCP tool
+
+        The MCP protocol ping is used when supported by the client.
+        """
+        runtime = self._get_runtime(name)
+        checked_at = datetime.now(timezone.utc)
+
+        if not runtime.connected:
+            return MCPHealthStatus(
+                server_name=name,
+                status=MCPHealthState.UNHEALTHY,
+                latency_ms=0.0,
+                last_check=checked_at,
+                error="MCP server is not connected.",
+            )
+
+        send_ping = getattr(
+            runtime.client,
+            "send_ping",
+            None,
+        )
+
+        if send_ping is None:
+            return MCPHealthStatus(
+                server_name=name,
+                status=MCPHealthState.UNHEALTHY,
+                latency_ms=0.0,
+                last_check=checked_at,
+                error="MCP client does not support protocol ping.",
+            )
+
+        started = time.perf_counter()
+
+        try:
+            await send_ping()
+
+        except Exception as exc:
+            return MCPHealthStatus(
+                server_name=name,
+                status=MCPHealthState.UNHEALTHY,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                last_check=datetime.now(timezone.utc),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+        return MCPHealthStatus(
+            server_name=name,
+            status=MCPHealthState.HEALTHY,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            last_check=datetime.now(timezone.utc),
+        )
+
+    async def check_all_health(self) -> dict[str, MCPHealthStatus]:
+        """
+        Check the liveness of every registered MCP server.
+
+        Each server is checked independently. A failure for one server
+        does not prevent health observations for the remaining servers.
+        """
+        statuses: dict[str, MCPHealthStatus] = {}
+
+        for name in self._servers:
+            statuses[name] = await self.check_health(name)
+
+        return statuses
 
     async def disconnect_server(
         self,

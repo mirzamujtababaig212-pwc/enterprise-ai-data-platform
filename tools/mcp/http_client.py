@@ -124,6 +124,13 @@ class MCPStreamableHTTPClient(MCPClient):
             self._http_client = None
             self._connected = False
 
+    async def send_ping(self) -> None:
+        """
+        Perform a lightweight MCP protocol liveness check.
+        """
+        session = self._require_session()
+        await session.send_ping()
+
     async def list_tools(self) -> Sequence[MCPToolDefinition]:
         """
         Retrieve tools exposed by the remote MCP server.

@@ -460,3 +460,130 @@ async def test_disconnect_all_uses_reverse_registration_order():
         "server-b",
         "server-a",
     ]
+
+
+@pytest.mark.asyncio
+async def test_check_health_reports_healthy_connected_server():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.send_ping = AsyncMock()
+
+    await manager.connect_server("server-a")
+
+    result = await manager.check_health("server-a")
+
+    client.send_ping.assert_awaited_once()
+    assert result.server_name == "server-a"
+    assert result.status.value == "healthy"
+    assert result.latency_ms >= 0.0
+    assert result.last_check.tzinfo is not None
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_check_health_reports_unhealthy_when_server_is_disconnected():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    result = await manager.check_health("server-a")
+
+    assert result.server_name == "server-a"
+    assert result.status.value == "unhealthy"
+    assert result.latency_ms == 0.0
+    assert result.error == "MCP server is not connected."
+    assert result.last_check.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_check_health_reports_unhealthy_when_ping_fails():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.send_ping = AsyncMock(
+        side_effect=RuntimeError("MCP server unavailable"),
+    )
+
+    await manager.connect_server("server-a")
+
+    result = await manager.check_health("server-a")
+
+    assert result.server_name == "server-a"
+    assert result.status.value == "unhealthy"
+    assert result.latency_ms >= 0.0
+    assert result.error == "RuntimeError: MCP server unavailable"
+
+
+@pytest.mark.asyncio
+async def test_check_health_does_not_reconnect_or_discover():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.send_ping = AsyncMock()
+    client.list_tools = AsyncMock()
+
+    await manager.connect_server("server-a")
+    await manager.check_health("server-a")
+
+    client.connect.assert_awaited_once()
+    client.send_ping.assert_awaited_once()
+    client.list_tools.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_check_health_reports_unsupported_ping_as_unhealthy():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    class ConnectedClient:
+        async def connect(self):
+            return None
+
+    manager._servers["server-a"].client = ConnectedClient()
+    manager._servers["server-a"].connected = True
+
+    result = await manager.check_health("server-a")
+
+    assert result.status.value == "unhealthy"
+    assert result.latency_ms == 0.0
+    assert result.error == "MCP client does not support protocol ping."
+
+
+@pytest.mark.asyncio
+async def test_check_all_health_checks_every_registered_server():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+    await manager.register_server(make_stdio_config("server-b"))
+
+    client_a = await manager.get_client("server-a")
+    client_b = await manager.get_client("server-b")
+
+    client_a.connect = AsyncMock()
+    client_b.connect = AsyncMock()
+    client_a.send_ping = AsyncMock()
+    client_b.send_ping = AsyncMock(
+        side_effect=RuntimeError("server-b unavailable"),
+    )
+
+    await manager.connect_server("server-a")
+    await manager.connect_server("server-b")
+
+    results = await manager.check_all_health()
+
+    assert list(results) == ["server-a", "server-b"]
+    assert results["server-a"].status.value == "healthy"
+    assert results["server-b"].status.value == "unhealthy"
+    client_a.send_ping.assert_awaited_once()
+    client_b.send_ping.assert_awaited_once()
