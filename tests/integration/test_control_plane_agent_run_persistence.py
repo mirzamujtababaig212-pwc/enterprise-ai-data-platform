@@ -352,6 +352,7 @@ def test_production_control_plane_enforces_http_idempotency() -> None:
 
             assert (
                 repository.get_by_idempotency_key(
+                    "tenant-a",
                     user_id,
                     idempotency_key,
                 ).run_id
@@ -360,6 +361,7 @@ def test_production_control_plane_enforces_http_idempotency() -> None:
 
             assert (
                 repository.get_by_idempotency_key(
+                    "tenant-a",
                     other_user_id,
                     idempotency_key,
                 ).run_id
@@ -1030,9 +1032,14 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
 
     try:
         asyncio.run(dependencies._initialize_agents())
+
+        from app.control_plane.auth import principal_from_api_key
+
+        authenticated_principal = principal_from_api_key(API_KEY)
+
         asyncio.run(
             dependencies._tool_authorizer.allow(
-                "integration-test-user",
+                authenticated_principal,
                 "rag.search",
             )
         )

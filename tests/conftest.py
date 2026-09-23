@@ -6,6 +6,12 @@ from unittest.mock import Mock
 
 os.environ["API_KEY"] = "super-secret-key"
 os.environ["CONTROL_PLANE_API_KEY_TENANTS"] = "tenant-a=super-secret-key"
+os.environ["TENANT_POLICY_ENFORCEMENT_ENABLED"] = "true"
+os.environ["TENANT_POLICIES"] = (
+    '[{"tenant_id":"tenant-a",'
+    '"allowed_tools":["rag.search","vehicle.data.query"],'
+    '"blocked_tools":[],"allowed_mcp_servers":[]}]'
+)
 
 import pytest  # noqa: E402
 from delta import configure_spark_with_delta_pip  # noqa: E402
