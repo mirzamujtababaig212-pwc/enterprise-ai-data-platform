@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
 from tools.mcp.config import MCPServerConfig, MCPToolCapability
+from tools.mcp.health import MCPHealthHistory
 from tools.mcp.manager import MCPServerManager
 from tools.mcp.models import MCPToolDefinition
 from tools.models import ToolDefinition
@@ -465,6 +467,70 @@ async def test_disconnect_all_uses_reverse_registration_order():
     ]
 
 
+def test_health_history_transitions_ordinary_failures_and_recovery():
+    history = MCPHealthHistory()
+
+    checked_at = datetime.now(timezone.utc)
+
+    assert history.record_success(checked_at).value == "healthy"
+
+    assert (
+        history.record_failure(
+            checked_at,
+            error="temporary failure",
+        ).value
+        == "degraded"
+    )
+
+    assert (
+        history.record_failure(
+            checked_at,
+            error="temporary failure",
+        ).value
+        == "unhealthy"
+    )
+
+    assert history.record_success(checked_at).value == "degraded"
+    assert history.record_success(checked_at).value == "healthy"
+
+
+def test_health_history_hard_failure_is_immediately_unhealthy():
+    history = MCPHealthHistory()
+
+    checked_at = datetime.now(timezone.utc)
+
+    assert history.record_success(checked_at).value == "healthy"
+
+    assert (
+        history.record_failure(
+            checked_at,
+            error="server disconnected",
+            hard_failure=True,
+        ).value
+        == "unhealthy"
+    )
+
+
+def test_health_history_resets_opposite_consecutive_counter():
+    history = MCPHealthHistory()
+
+    checked_at = datetime.now(timezone.utc)
+
+    history.record_failure(
+        checked_at,
+        error="temporary failure",
+    )
+
+    assert history.consecutive_failures == 1
+    assert history.consecutive_successes == 0
+
+    history.record_success(checked_at)
+
+    assert history.consecutive_failures == 0
+    assert history.consecutive_successes == 1
+    assert history.last_error is None
+
+
 @pytest.mark.asyncio
 async def test_check_health_reports_healthy_connected_server():
     manager = make_manager()
@@ -503,7 +569,7 @@ async def test_check_health_reports_unhealthy_when_server_is_disconnected():
 
 
 @pytest.mark.asyncio
-async def test_check_health_reports_unhealthy_when_ping_times_out():
+async def test_check_health_reports_degraded_when_ping_times_out():
     manager = make_manager()
 
     await manager.register_server(
@@ -526,13 +592,13 @@ async def test_check_health_reports_unhealthy_when_ping_times_out():
     result = await manager.check_health("server-a")
 
     assert result.server_name == "server-a"
-    assert result.status.value == "unhealthy"
+    assert result.status.value == "degraded"
     assert result.latency_ms >= 0.0
     assert result.error == "MCP health check timed out after 0.01 seconds."
 
 
 @pytest.mark.asyncio
-async def test_check_health_reports_unhealthy_when_ping_fails():
+async def test_check_health_reports_degraded_when_ping_fails():
     manager = make_manager()
 
     await manager.register_server(make_stdio_config("server-a"))
@@ -548,9 +614,46 @@ async def test_check_health_reports_unhealthy_when_ping_fails():
     result = await manager.check_health("server-a")
 
     assert result.server_name == "server-a"
-    assert result.status.value == "unhealthy"
+    assert result.status.value == "degraded"
     assert result.latency_ms >= 0.0
     assert result.error == "RuntimeError: MCP server unavailable"
+
+
+@pytest.mark.asyncio
+async def test_check_health_tracks_consecutive_failures_and_recovery():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.send_ping = AsyncMock(
+        side_effect=RuntimeError("temporary failure"),
+    )
+
+    await manager.connect_server("server-a")
+
+    first = await manager.check_health("server-a")
+    second = await manager.check_health("server-a")
+
+    assert first.status.value == "degraded"
+    assert second.status.value == "unhealthy"
+
+    client.send_ping.side_effect = None
+
+    third = await manager.check_health("server-a")
+    fourth = await manager.check_health("server-a")
+
+    assert third.status.value == "degraded"
+    assert fourth.status.value == "healthy"
+
+    history = manager._servers["server-a"].health_history
+
+    assert history.consecutive_failures == 0
+    assert history.consecutive_successes == 2
+    assert history.last_error is None
+    assert history.last_healthy_at is not None
+    assert history.last_unhealthy_at is not None
 
 
 @pytest.mark.asyncio
@@ -616,6 +719,6 @@ async def test_check_all_health_checks_every_registered_server():
 
     assert list(results) == ["server-a", "server-b"]
     assert results["server-a"].status.value == "healthy"
-    assert results["server-b"].status.value == "unhealthy"
+    assert results["server-b"].status.value == "degraded"
     client_a.send_ping.assert_awaited_once()
     client_b.send_ping.assert_awaited_once()

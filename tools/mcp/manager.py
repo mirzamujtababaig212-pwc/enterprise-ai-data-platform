@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timezone
 import time
 
@@ -11,7 +11,7 @@ from tools.contracts import ToolRegistry
 from tools.mcp.client import MCPClient
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.discovery import MCPToolDiscoveryService
-from tools.mcp.health import MCPHealthState, MCPHealthStatus
+from tools.mcp.health import MCPHealthHistory, MCPHealthStatus
 from tools.mcp.http_client import MCPStreamableHTTPClient
 from tools.mcp.sdk_client import MCPPythonSDKClient
 from tools.models import ToolDefinition
@@ -26,6 +26,9 @@ class _MCPServerRuntime:
     config: MCPServerConfig
     client: MCPClient
     connected: bool = False
+    health_history: MCPHealthHistory = dataclass_field(
+        default_factory=MCPHealthHistory,
+    )
 
 
 class MCPServerManager:
@@ -150,9 +153,15 @@ class MCPServerManager:
         checked_at = datetime.now(timezone.utc)
 
         if not runtime.connected:
+            status = runtime.health_history.record_failure(
+                checked_at,
+                error="MCP server is not connected.",
+                hard_failure=True,
+            )
+
             return MCPHealthStatus(
                 server_name=name,
-                status=MCPHealthState.UNHEALTHY,
+                status=status,
                 latency_ms=0.0,
                 last_check=checked_at,
                 error="MCP server is not connected.",
@@ -165,9 +174,15 @@ class MCPServerManager:
         )
 
         if send_ping is None:
+            status = runtime.health_history.record_failure(
+                checked_at,
+                error="MCP client does not support protocol ping.",
+                hard_failure=True,
+            )
+
             return MCPHealthStatus(
                 server_name=name,
-                status=MCPHealthState.UNHEALTHY,
+                status=status,
                 latency_ms=0.0,
                 last_check=checked_at,
                 error="MCP client does not support protocol ping.",
@@ -182,31 +197,48 @@ class MCPServerManager:
             )
 
         except asyncio.TimeoutError:
+            checked_at = datetime.now(timezone.utc)
+            error = (
+                "MCP health check timed out after "
+                f"{runtime.config.health_check_timeout:g} seconds."
+            )
+            status = runtime.health_history.record_failure(
+                checked_at,
+                error=error,
+            )
+
             return MCPHealthStatus(
                 server_name=name,
-                status=MCPHealthState.UNHEALTHY,
+                status=status,
                 latency_ms=(time.perf_counter() - started) * 1000.0,
-                last_check=datetime.now(timezone.utc),
-                error=(
-                    "MCP health check timed out after "
-                    f"{runtime.config.health_check_timeout:g} seconds."
-                ),
+                last_check=checked_at,
+                error=error,
             )
 
         except Exception as exc:
+            checked_at = datetime.now(timezone.utc)
+            error = f"{type(exc).__name__}: {exc}"
+            status = runtime.health_history.record_failure(
+                checked_at,
+                error=error,
+            )
+
             return MCPHealthStatus(
                 server_name=name,
-                status=MCPHealthState.UNHEALTHY,
+                status=status,
                 latency_ms=(time.perf_counter() - started) * 1000.0,
-                last_check=datetime.now(timezone.utc),
-                error=f"{type(exc).__name__}: {exc}",
+                last_check=checked_at,
+                error=error,
             )
+
+        checked_at = datetime.now(timezone.utc)
+        status = runtime.health_history.record_success(checked_at)
 
         return MCPHealthStatus(
             server_name=name,
-            status=MCPHealthState.HEALTHY,
+            status=status,
             latency_ms=(time.perf_counter() - started) * 1000.0,
-            last_check=datetime.now(timezone.utc),
+            last_check=checked_at,
         )
 
     async def check_all_health(self) -> dict[str, MCPHealthStatus]:
