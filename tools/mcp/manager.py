@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import time
@@ -175,7 +176,22 @@ class MCPServerManager:
         started = time.perf_counter()
 
         try:
-            await send_ping()
+            await asyncio.wait_for(
+                send_ping(),
+                timeout=runtime.config.health_check_timeout,
+            )
+
+        except asyncio.TimeoutError:
+            return MCPHealthStatus(
+                server_name=name,
+                status=MCPHealthState.UNHEALTHY,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                last_check=datetime.now(timezone.utc),
+                error=(
+                    "MCP health check timed out after "
+                    f"{runtime.config.health_check_timeout:g} seconds."
+                ),
+            )
 
         except Exception as exc:
             return MCPHealthStatus(

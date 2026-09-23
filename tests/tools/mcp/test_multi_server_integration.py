@@ -58,6 +58,9 @@ async def test_manager_manages_multiple_real_stdio_servers():
         assert document_tools[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         assert len(policy_tools) == 1
@@ -65,6 +68,9 @@ async def test_manager_manages_multiple_real_stdio_servers():
         assert policy_tools[0].metadata == {
             "source": "mcp",
             "mcp_server": "policy-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         registered_tools = await registry.list_tools()
@@ -83,11 +89,17 @@ async def test_manager_manages_multiple_real_stdio_servers():
         assert search_tool.definition.metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         assert policy_tool.definition.metadata == {
             "source": "mcp",
             "mcp_server": "policy-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         search_result = await search_tool.execute({"query": "enterprise AI"})

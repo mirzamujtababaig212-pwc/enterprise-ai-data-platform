@@ -50,6 +50,7 @@ class MCPServerConfig:
 
     timeout: float = 30.0
     read_timeout: float = 300.0
+    health_check_timeout: float = 5.0
     verify_ssl: bool = True
 
     tool_capabilities: dict[str, MCPToolCapability] = field(default_factory=dict)
@@ -92,6 +93,9 @@ class MCPServerConfig:
 
         if self.read_timeout <= 0:
             raise ValueError("MCP HTTP read timeout must be greater than zero.")
+
+        if self.health_check_timeout <= 0:
+            raise ValueError("MCP health check timeout must be greater than zero.")
 
         for tool_name, capability in self.tool_capabilities.items():
             if not tool_name.strip():

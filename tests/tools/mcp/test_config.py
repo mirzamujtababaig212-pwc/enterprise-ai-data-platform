@@ -41,6 +41,31 @@ def test_defaults_optional_stdio_configuration():
     assert config.args == ()
     assert config.env == {}
     assert config.cwd is None
+    assert config.health_check_timeout == 5.0
+
+
+def test_accepts_custom_health_check_timeout():
+    config = MCPServerConfig(
+        name="test-server",
+        transport="stdio",
+        command="python",
+        health_check_timeout=2.5,
+    )
+
+    assert config.health_check_timeout == 2.5
+
+
+def test_rejects_invalid_health_check_timeout():
+    with pytest.raises(
+        ValueError,
+        match="MCP health check timeout must be greater than zero",
+    ):
+        MCPServerConfig(
+            name="test-server",
+            transport="stdio",
+            command="python",
+            health_check_timeout=0,
+        )
 
 
 def test_rejects_empty_server_name():

@@ -8,7 +8,6 @@ from tools.mcp.discovery import MCPToolDiscoveryService
 from tools.mcp.sdk_client import MCPPythonSDKClient
 from tools.registry.in_memory import InMemoryToolRegistry
 
-
 SERVER_PATH = Path(__file__).parent / "fixtures" / "test_server.py"
 
 
@@ -47,6 +46,9 @@ async def test_real_mcp_stdio_discovery_registers_tools():
 
         assert definition.metadata == {
             "source": "mcp",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         registered_tools = await registry.list_tools()
@@ -59,6 +61,9 @@ async def test_real_mcp_stdio_discovery_registers_tools():
 
         assert registered_definition.metadata == {
             "source": "mcp",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         tool = await registry.get("search_documents")

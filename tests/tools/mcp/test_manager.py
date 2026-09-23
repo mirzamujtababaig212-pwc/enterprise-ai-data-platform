@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,12 +14,14 @@ from tools.registry.in_memory import InMemoryToolRegistry
 
 def make_stdio_config(
     name: str = "test-server",
+    **kwargs,
 ) -> MCPServerConfig:
     return MCPServerConfig(
         name=name,
         transport="stdio",
         command="python",
         args=("server.py",),
+        **kwargs,
     )
 
 
@@ -497,6 +500,35 @@ async def test_check_health_reports_unhealthy_when_server_is_disconnected():
     assert result.latency_ms == 0.0
     assert result.error == "MCP server is not connected."
     assert result.last_check.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_check_health_reports_unhealthy_when_ping_times_out():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            health_check_timeout=0.01,
+        )
+    )
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+
+    async def hanging_ping():
+        await asyncio.Event().wait()
+
+    client.send_ping = hanging_ping
+
+    await manager.connect_server("server-a")
+
+    result = await manager.check_health("server-a")
+
+    assert result.server_name == "server-a"
+    assert result.status.value == "unhealthy"
+    assert result.latency_ms >= 0.0
+    assert result.error == "MCP health check timed out after 0.01 seconds."
 
 
 @pytest.mark.asyncio
