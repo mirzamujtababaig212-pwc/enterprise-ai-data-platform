@@ -17,6 +17,7 @@ from tools.authorization.service import ToolAuthorizationService
 from tools.execution.service import ToolExecutionService
 from tools.mcp.config import MCPServerConfig
 from tools.mcp.manager import MCPServerManager
+from tools.mcp.recovery import MCPRecoveryPolicy
 from tools.registry.in_memory import InMemoryToolRegistry
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
@@ -172,6 +173,185 @@ async def test_agent_runtime_authorizes_real_mcp_tool_before_execution() -> None
                 }
             ],
         }
+
+    finally:
+        await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_recovered_mcp_tool_remains_governed_and_executable() -> None:
+    class FailureInjectingMCPClient:
+        def __init__(self, delegate) -> None:
+            self._delegate = delegate
+            self.fail_next_call = False
+
+        async def connect(self) -> None:
+            await self._delegate.connect()
+
+        async def disconnect(self) -> None:
+            await self._delegate.disconnect()
+
+        async def send_ping(self) -> None:
+            await self._delegate.send_ping()
+
+        async def list_tools(self):
+            return await self._delegate.list_tools()
+
+        async def call_tool(
+            self,
+            name: str,
+            arguments: dict,
+            *,
+            meta: dict | None = None,
+        ):
+            if self.fail_next_call:
+                self.fail_next_call = False
+                raise RuntimeError("simulated MCP transport failure")
+
+            return await self._delegate.call_tool(
+                name,
+                arguments,
+                meta=meta,
+            )
+
+    registry = InMemoryToolRegistry()
+
+    authorization_policy = MetadataAuthorizationPolicy(
+        {
+            "source": "mcp",
+            "mcp_server": "document-server",
+        }
+    )
+
+    original_evaluate = authorization_policy.evaluate
+    authorization_calls = []
+
+    async def recording_evaluate(request):
+        authorization_calls.append(request)
+        return await original_evaluate(request)
+
+    authorization_policy.evaluate = recording_evaluate
+
+    authorizer = InMemoryToolAuthorizer(
+        policy=authorization_policy,
+    )
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    execution_service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+        recovery_policy=MCPRecoveryPolicy(
+            max_attempts=2,
+            initial_backoff=0.0,
+            max_backoff=0.0,
+            cooldown=0.0,
+        ),
+    )
+
+    await manager.register_server(config)
+
+    real_client = await manager.get_client("document-server")
+    failure_client = FailureInjectingMCPClient(real_client)
+    manager._servers["document-server"].client = failure_client
+
+    await authorizer.allow(
+        "user-mcp-recovery-789",
+        "search_documents",
+    )
+
+    try:
+        definitions = await manager.connect_and_discover("document-server")
+
+        assert definitions[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
+        }
+
+        registered_before = await registry.get("search_documents")
+        assert registered_before is not None
+
+        first_result = await execution_service.execute(
+            "search_documents",
+            {"query": "enterprise AI"},
+            principal="user-mcp-recovery-789",
+        )
+
+        assert first_result.success is True
+        assert first_result.output == {
+            "query": "enterprise AI",
+            "results": [
+                {
+                    "id": "document-1",
+                    "content": "Enterprise AI platform architecture.",
+                }
+            ],
+        }
+
+        assert len(authorization_calls) == 1
+        assert authorization_calls[0].metadata == definitions[0].metadata
+
+        failure_client.fail_next_call = True
+
+        with_failure = await execution_service.execute(
+            "search_documents",
+            {"query": "enterprise AI"},
+            principal="user-mcp-recovery-789",
+        )
+
+        assert with_failure.success is False
+        assert "simulated MCP transport failure" in with_failure.error
+
+        assert len(authorization_calls) == 2
+        assert authorization_calls[1].metadata == definitions[0].metadata
+
+        recovered_definitions = await manager.recover_server("document-server")
+
+        assert manager.is_connected("document-server") is True
+        assert recovered_definitions == [
+            definitions[0],
+        ]
+
+        registered_after = await registry.get("search_documents")
+        assert registered_after is not None
+        assert registered_after.definition.metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
+        }
+
+        recovered_result = await execution_service.execute(
+            "search_documents",
+            {"query": "enterprise AI"},
+            principal="user-mcp-recovery-789",
+        )
+
+        assert recovered_result.success is True
+        assert recovered_result.output == {
+            "query": "enterprise AI",
+            "results": [
+                {
+                    "id": "document-1",
+                    "content": "Enterprise AI platform architecture.",
+                }
+            ],
+        }
+
+        assert len(authorization_calls) == 3
+        assert authorization_calls[2].metadata == registered_after.definition.metadata
 
     finally:
         await manager.disconnect_all()
