@@ -10,6 +10,7 @@ from app.control_plane.routes.evaluation import router as evaluation_router
 from app.control_plane.routes.health import router as health_router
 from app.control_plane.routes.llm import router as llm_router
 from app.control_plane.routes.ml import router as ml_router
+from app.control_plane.routes.mcp import router as mcp_router
 from app.control_plane.routes.platform import router as platform_router
 from app.control_plane.routes.rag import router as rag_router
 from app.control_plane.dependencies import (
@@ -47,6 +48,7 @@ app.include_router(evaluation_router)
 app.include_router(platform_router)
 app.include_router(llm_router)
 app.include_router(ml_router)
+app.include_router(mcp_router)
 app.include_router(rag_router)
 
 app.mount("/", llm_gateway_app)

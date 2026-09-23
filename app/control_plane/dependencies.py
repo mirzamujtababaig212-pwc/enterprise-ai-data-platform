@@ -42,6 +42,7 @@ from app.control_plane.agent_run_steps.postgres_repository import (
 )
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
+from app.control_plane.mcp_management_service import MCPManagementService
 from app.control_plane.persistence.database import SessionLocal, get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from app.control_plane.tool_execution.postgres_idempotency import (
@@ -395,6 +396,18 @@ async def close_mcp_servers() -> None:
 
 def get_mcp_server_manager() -> MCPServerManager:
     return _mcp_server_manager
+
+
+def get_mcp_management_service() -> MCPManagementService:
+    if _tenant_policy_engine is None:
+        raise RuntimeError(
+            "Tenant policy enforcement must be enabled for MCP management.",
+        )
+
+    return MCPManagementService(
+        manager=_mcp_server_manager,
+        tenant_policy_engine=_tenant_policy_engine,
+    )
 
 
 async def initialize_agents() -> None:
