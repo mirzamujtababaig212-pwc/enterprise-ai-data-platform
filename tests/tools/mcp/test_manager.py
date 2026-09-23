@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
+from dataclasses import replace
+
 import pytest
 
 from tools.mcp.config import MCPServerConfig, MCPToolCapability
@@ -356,13 +358,9 @@ async def test_unregister_server_removes_disabled_owned_tools():
     tool = await registry.get("search")
     assert tool is not None
 
-    disabled_definition = ToolDefinition(
-        name=tool.definition.name,
-        description=tool.definition.description,
-        input_schema=tool.definition.input_schema,
-        metadata=tool.definition.metadata,
+    disabled_definition = replace(
+        tool.definition,
         enabled=False,
-        execution_policy=tool.definition.execution_policy,
     )
 
     class DisabledTool:
