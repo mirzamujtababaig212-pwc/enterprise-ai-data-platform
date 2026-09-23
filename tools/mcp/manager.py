@@ -29,6 +29,10 @@ class _MCPServerRuntime:
     health_history: MCPHealthHistory = dataclass_field(
         default_factory=MCPHealthHistory,
     )
+    recovery_lock: asyncio.Lock = dataclass_field(
+        default_factory=asyncio.Lock,
+    )
+    last_recovery_at: datetime | None = None
 
 
 class MCPServerManager:
@@ -134,6 +138,86 @@ class MCPServerManager:
         await self.connect_server(name)
 
         return await self.discover_server(name)
+
+    async def recover_server(
+        self,
+        name: str,
+    ) -> list[ToolDefinition]:
+        """
+        Explicitly recover an MCP server using its bounded recovery policy.
+
+        Recovery is serialized per server and never runs in the background.
+        Each attempt disconnects any stale connection, reconnects the server,
+        verifies protocol liveness, and re-discovers its current tools.
+        """
+        runtime = self._get_runtime(name)
+        policy = runtime.config.recovery_policy
+
+        async with runtime.recovery_lock:
+            now = datetime.now(timezone.utc)
+
+            if (
+                runtime.last_recovery_at is not None
+                and policy.cooldown > 0
+                and (now - runtime.last_recovery_at).total_seconds() < policy.cooldown
+            ):
+                remaining = policy.cooldown - (now - runtime.last_recovery_at).total_seconds()
+                raise RuntimeError(
+                    f"MCP server '{name}' recovery is in cooldown "
+                    f"for {remaining:.2f} more seconds."
+                )
+
+            runtime.last_recovery_at = now
+            last_error: Exception | None = None
+
+            for attempt in range(1, policy.max_attempts + 1):
+                if not policy.allows_attempt(attempt):
+                    break
+
+                if attempt > 1:
+                    await asyncio.sleep(policy.backoff_for_attempt(attempt - 1))
+
+                try:
+                    await self.disconnect_server(name)
+                    await self.connect_server(name)
+
+                    await self._verify_recovery_health(name)
+
+                    return await self.discover_server(name)
+
+                except Exception as exc:
+                    last_error = exc
+                    runtime.connected = False
+
+            if last_error is None:
+                raise RuntimeError(f"MCP server '{name}' recovery failed without an error.")
+
+            raise RuntimeError(
+                f"MCP server '{name}' recovery failed after " f"{policy.max_attempts} attempt(s)."
+            ) from last_error
+
+    async def _verify_recovery_health(
+        self,
+        name: str,
+    ) -> None:
+        runtime = self._get_runtime(name)
+
+        send_ping = getattr(
+            runtime.client,
+            "send_ping",
+            None,
+        )
+
+        if send_ping is None:
+            raise RuntimeError(f"MCP client for server '{name}' does not support protocol ping.")
+
+        await asyncio.wait_for(
+            send_ping(),
+            timeout=runtime.config.health_check_timeout,
+        )
+
+        checked_at = datetime.now(timezone.utc)
+        runtime.health_history.record_success(checked_at)
 
     async def check_health(
         self,

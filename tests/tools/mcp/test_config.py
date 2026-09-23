@@ -1,6 +1,7 @@
 import pytest
 
 from tools.mcp.config import MCPServerConfig
+from tools.mcp.recovery import MCPRecoveryPolicy
 
 
 def test_creates_stdio_server_config():
@@ -220,4 +221,48 @@ def test_streamable_http_config_rejects_empty_header_name():
             headers={
                 "": "value",
             },
+        )
+
+
+def test_defaults_recovery_policy():
+    config = MCPServerConfig(
+        name="test-server",
+        transport="stdio",
+        command="python",
+    )
+
+    assert config.recovery_policy.max_attempts == 3
+    assert config.recovery_policy.initial_backoff == 1.0
+    assert config.recovery_policy.max_backoff == 30.0
+    assert config.recovery_policy.cooldown == 60.0
+
+
+def test_accepts_custom_recovery_policy():
+    policy = MCPRecoveryPolicy(
+        max_attempts=5,
+        initial_backoff=2.0,
+        max_backoff=20.0,
+        cooldown=45.0,
+    )
+
+    config = MCPServerConfig(
+        name="test-server",
+        transport="stdio",
+        command="python",
+        recovery_policy=policy,
+    )
+
+    assert config.recovery_policy == policy
+
+
+def test_rejects_invalid_recovery_policy_type():
+    with pytest.raises(
+        TypeError,
+        match="MCP recovery policy must be an MCPRecoveryPolicy instance",
+    ):
+        MCPServerConfig(
+            name="test-server",
+            transport="stdio",
+            command="python",
+            recovery_policy=object(),
         )

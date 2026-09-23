@@ -10,6 +10,7 @@ from tools.mcp.config import MCPServerConfig, MCPToolCapability
 from tools.mcp.health import MCPHealthHistory
 from tools.mcp.manager import MCPServerManager
 from tools.mcp.models import MCPToolDefinition
+from tools.mcp.recovery import MCPRecoveryPolicy
 from tools.models import ToolDefinition
 from tools.registry.in_memory import InMemoryToolRegistry
 
@@ -722,3 +723,272 @@ async def test_check_all_health_checks_every_registered_server():
     assert results["server-b"].status.value == "degraded"
     client_a.send_ping.assert_awaited_once()
     client_b.send_ping.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recover_server_reconnects_verifies_and_discovers():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    config = make_stdio_config(
+        "server-a",
+        recovery_policy=MCPRecoveryPolicy(
+            max_attempts=2,
+            initial_backoff=0.0,
+            max_backoff=0.0,
+            cooldown=0.0,
+        ),
+    )
+
+    await manager.register_server(config)
+
+    client = await manager.get_client("server-a")
+
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.send_ping = AsyncMock()
+    client.list_tools = AsyncMock(
+        return_value=[
+            make_mcp_tool(name="search"),
+        ]
+    )
+
+    await manager.connect_server("server-a")
+
+    definitions = await manager.recover_server("server-a")
+
+    assert definitions == [
+        ToolDefinition(
+            name="search",
+            description="Search documents",
+            input_schema={"type": "object"},
+            metadata={
+                "source": "mcp",
+                "mcp_server": "server-a",
+                "capability": "unclassified",
+                "risk_tier": "unknown",
+                "side_effect": True,
+            },
+        )
+    ]
+
+    client.disconnect.assert_awaited_once()
+    assert client.connect.await_count == 2
+    client.send_ping.assert_awaited_once()
+    client.list_tools.assert_awaited_once()
+    assert manager.is_connected("server-a") is True
+
+
+@pytest.mark.asyncio
+async def test_recover_server_retries_after_failure():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            recovery_policy=MCPRecoveryPolicy(
+                max_attempts=2,
+                initial_backoff=0.0,
+                max_backoff=0.0,
+                cooldown=0.0,
+            ),
+        )
+    )
+
+    client = await manager.get_client("server-a")
+
+    client.connect = AsyncMock(
+        side_effect=[
+            RuntimeError("first connection failed"),
+            None,
+        ]
+    )
+    client.disconnect = AsyncMock()
+    client.send_ping = AsyncMock()
+    client.list_tools = AsyncMock(return_value=[])
+
+    definitions = await manager.recover_server("server-a")
+
+    assert definitions == []
+    assert client.connect.await_count == 2
+    assert client.send_ping.await_count == 1
+    assert manager.is_connected("server-a") is True
+
+
+@pytest.mark.asyncio
+async def test_recover_server_exhausts_attempt_budget():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            recovery_policy=MCPRecoveryPolicy(
+                max_attempts=2,
+                initial_backoff=0.0,
+                max_backoff=0.0,
+                cooldown=0.0,
+            ),
+        )
+    )
+
+    client = await manager.get_client("server-a")
+
+    client.connect = AsyncMock(side_effect=RuntimeError("connection failed"))
+    client.disconnect = AsyncMock()
+
+    with pytest.raises(
+        RuntimeError,
+        match="recovery failed after 2 attempt",
+    ):
+        await manager.recover_server("server-a")
+
+    assert client.connect.await_count == 2
+    assert manager.is_connected("server-a") is False
+
+
+@pytest.mark.asyncio
+async def test_recover_server_enforces_cooldown():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            recovery_policy=MCPRecoveryPolicy(
+                max_attempts=1,
+                initial_backoff=0.0,
+                max_backoff=0.0,
+                cooldown=60.0,
+            ),
+        )
+    )
+
+    client = await manager.get_client("server-a")
+
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.send_ping = AsyncMock()
+    client.list_tools = AsyncMock(return_value=[])
+
+    await manager.recover_server("server-a")
+
+    with pytest.raises(
+        RuntimeError,
+        match="recovery is in cooldown",
+    ):
+        await manager.recover_server("server-a")
+
+    assert client.connect.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_server_serializes_concurrent_recovery_calls():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            recovery_policy=MCPRecoveryPolicy(
+                max_attempts=1,
+                initial_backoff=0.0,
+                max_backoff=0.0,
+                cooldown=0.0,
+            ),
+        )
+    )
+
+    client = await manager.get_client("server-a")
+
+    active = 0
+    max_active = 0
+
+    async def connect() -> None:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+
+    async def disconnect() -> None:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+
+    client.connect = AsyncMock(side_effect=connect)
+    client.disconnect = AsyncMock(side_effect=disconnect)
+    client.send_ping = AsyncMock()
+    client.list_tools = AsyncMock(return_value=[])
+
+    await asyncio.gather(
+        manager.recover_server("server-a"),
+        manager.recover_server("server-a"),
+    )
+
+    assert max_active == 1
+    assert client.connect.await_count == 2
+    assert client.disconnect.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_recover_server_serializes_until_discovery_completes():
+    manager = make_manager()
+
+    await manager.register_server(
+        make_stdio_config(
+            "server-a",
+            recovery_policy=MCPRecoveryPolicy(
+                max_attempts=1,
+                initial_backoff=0.0,
+                max_backoff=0.0,
+                cooldown=0.0,
+            ),
+        )
+    )
+
+    client = await manager.get_client("server-a")
+
+    discovery_started = asyncio.Event()
+    release_discovery = asyncio.Event()
+    recovery_b_started = asyncio.Event()
+
+    discovery_calls = 0
+
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.send_ping = AsyncMock()
+
+    async def list_tools():
+        nonlocal discovery_calls
+
+        discovery_calls += 1
+
+        if discovery_calls == 1:
+            discovery_started.set()
+            await release_discovery.wait()
+        else:
+            recovery_b_started.set()
+
+        return []
+
+    client.list_tools = AsyncMock(side_effect=list_tools)
+
+    first_recovery = asyncio.create_task(manager.recover_server("server-a"))
+
+    await discovery_started.wait()
+
+    second_recovery = asyncio.create_task(manager.recover_server("server-a"))
+
+    await asyncio.sleep(0)
+
+    assert not recovery_b_started.is_set()
+
+    release_discovery.set()
+
+    await asyncio.gather(
+        first_recovery,
+        second_recovery,
+    )
+
+    assert discovery_calls == 2
+    assert recovery_b_started.is_set()

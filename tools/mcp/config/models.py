@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from tools.mcp.recovery import MCPRecoveryPolicy
+
 
 @dataclass(frozen=True)
 class MCPToolCapability:
@@ -53,6 +55,10 @@ class MCPServerConfig:
     health_check_timeout: float = 5.0
     verify_ssl: bool = True
 
+    recovery_policy: MCPRecoveryPolicy = field(
+        default_factory=MCPRecoveryPolicy,
+    )
+
     tool_capabilities: dict[str, MCPToolCapability] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -96,6 +102,9 @@ class MCPServerConfig:
 
         if self.health_check_timeout <= 0:
             raise ValueError("MCP health check timeout must be greater than zero.")
+
+        if not isinstance(self.recovery_policy, MCPRecoveryPolicy):
+            raise TypeError("MCP recovery policy must be an MCPRecoveryPolicy instance.")
 
         for tool_name, capability in self.tool_capabilities.items():
             if not tool_name.strip():
