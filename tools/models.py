@@ -11,6 +11,7 @@ class ToolExecutionFailureCategory(StrEnum):
     SCHEMA_VALIDATION = "schema_validation"
     INVALID_SCHEMA = "invalid_schema"
     MISSING_PRINCIPAL = "missing_principal"
+    TENANT_POLICY = "tenant_policy"
     AUTHORIZATION = "authorization"
     EXECUTION_IN_PROGRESS = "execution_in_progress"
     EXECUTION_AMBIGUOUS = "execution_ambiguous"

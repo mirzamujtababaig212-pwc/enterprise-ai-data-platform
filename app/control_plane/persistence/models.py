@@ -136,6 +136,12 @@ class AgentRunRecord(Base):
 
     principal: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
     idempotency_key: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,

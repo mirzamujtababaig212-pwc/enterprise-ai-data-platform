@@ -60,6 +60,7 @@ async def run_agent(
             session_id=payload.session_id,
             user_id=payload.user_id,
             principal=getattr(request.state, "principal", None),
+            tenant_id=getattr(request.state, "tenant_id", None),
             metadata=payload.metadata,
         )
 

@@ -52,6 +52,7 @@ def make_run(
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
     principal: str | None = None,
+    tenant_id: str | None = None,
     idempotency_key: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
@@ -71,6 +72,7 @@ def make_run(
         session_id=session_id,
         user_id=user_id,
         principal=principal,
+        tenant_id=tenant_id,
         idempotency_key=idempotency_key,
         status=status,
         started_at=started_at,
@@ -99,6 +101,7 @@ def test_create_and_get_round_trip(repository) -> None:
         output={"step": "started"},
         metadata={"source": "test", "attempt": 1},
         principal="api_key:test-principal",
+        tenant_id="tenant-acme",
     )
 
     result = repository.create(run)
@@ -111,6 +114,7 @@ def test_create_and_get_round_trip(repository) -> None:
     assert restored.session_id == run.session_id
     assert restored.user_id == run.user_id
     assert restored.principal == run.principal
+    assert restored.tenant_id == run.tenant_id
     assert restored.status == AgentRunStatus.RUNNING
     assert restored.started_at == started_at
     assert restored.output == {"step": "started"}
@@ -123,6 +127,7 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
         session_id="session-123",
         user_id="user-456",
         principal="api_key:snapshot-principal",
+        tenant_id="tenant-acme",
         memory_namespace="fleet-memory",
         governance_policy=GovernancePolicy(
             required_metadata={
@@ -149,6 +154,7 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
         session_id=request.session_id,
         user_id=request.user_id,
         principal=request.principal,
+        tenant_id=request.tenant_id,
         request_snapshot=snapshot,
     )
 
@@ -159,6 +165,8 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
     assert restored is not None
     assert restored.request_snapshot is not None
     assert restored.request_snapshot.schema_version == 1
+    assert restored.tenant_id == "tenant-acme"
+    assert restored.request_snapshot.tenant_id == "tenant-acme"
 
     reconstructed = restored.request_snapshot.to_request(
         session_id=restored.session_id,
@@ -170,6 +178,7 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
     assert reconstructed.session_id == request.session_id
     assert reconstructed.user_id == request.user_id
     assert reconstructed.principal == request.principal
+    assert reconstructed.tenant_id == request.tenant_id
     assert reconstructed.memory_namespace == request.memory_namespace
     assert reconstructed.governance_policy is not None
     assert reconstructed.governance_policy.required_metadata == (
@@ -181,6 +190,23 @@ def test_request_snapshot_round_trip_reconstructs_request(repository) -> None:
     assert reconstructed.execution_budget.max_tool_calls == 11
     assert reconstructed.execution_budget.max_tool_rounds == 4
     assert reconstructed.execution_budget.max_duration_seconds == 42.5
+
+
+def test_historical_run_with_null_tenant_remains_loadable(repository) -> None:
+    run = make_run(
+        run_id="historical-no-tenant",
+        tenant_id=None,
+        principal="api_key:historical-principal",
+    )
+
+    repository.create(run)
+
+    restored = repository.get(run.run_id)
+
+    assert restored is not None
+    assert restored.run_id == run.run_id
+    assert restored.principal == "api_key:historical-principal"
+    assert restored.tenant_id is None
 
 
 def test_get_missing_run_returns_none(repository) -> None:
@@ -507,7 +533,11 @@ def test_claim_for_recovery_can_only_claim_once(repository) -> None:
 
 
 def test_update_round_trip(repository) -> None:
-    repository.create(make_run())
+    repository.create(
+        make_run(
+            tenant_id="tenant-acme",
+        )
+    )
 
     completed_at = datetime(2026, 9, 17, 10, 5, tzinfo=UTC)
 
@@ -517,6 +547,7 @@ def test_update_round_trip(repository) -> None:
         completed_at=completed_at,
         output={"answer": "completed"},
         metadata={"source": "agent_execution"},
+        tenant_id="tenant-acme",
     )
 
     result = repository.update(updated)
@@ -526,6 +557,7 @@ def test_update_round_trip(repository) -> None:
     assert restored is not None
     assert restored.status == AgentRunStatus.COMPLETED
     assert restored.completed_at == completed_at
+    assert restored.tenant_id == "tenant-acme"
     assert restored.output == {"answer": "completed"}
     assert restored.metadata == {"source": "agent_execution"}
 
@@ -2281,6 +2313,7 @@ def test_get_by_idempotency_key_returns_matching_user_run(repository) -> None:
     run = make_run(
         run_id="idempotency-lookup",
         user_id="user-42",
+        tenant_id="tenant-acme",
         idempotency_key="request-key-42",
     )
     repository.create(run)
@@ -2291,6 +2324,8 @@ def test_get_by_idempotency_key_returns_matching_user_run(repository) -> None:
     )
 
     assert restored == run
+    assert restored.tenant_id == "tenant-acme"
+    assert restored.request_snapshot is None
 
 
 def test_get_by_idempotency_key_is_scoped_to_user(repository) -> None:

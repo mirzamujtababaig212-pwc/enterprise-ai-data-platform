@@ -181,3 +181,125 @@ def test_mcp_servers_rejects_non_boolean_verify_ssl(monkeypatch) -> None:
         match="MCP_SERVERS contains an invalid server configuration",
     ):
         Settings.from_environment()
+
+
+def test_tenant_policy_enforcement_is_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "TENANT_POLICIES",
+        raising=False,
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.tenant_policy_enforcement_enabled is False
+    assert settings.tenant_policies == ()
+
+
+def test_tenant_policies_are_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_tools": [
+                        "rag.search",
+                        "vehicle.data.query",
+                    ],
+                    "blocked_tools": [],
+                    "allowed_mcp_servers": [
+                        "document-server",
+                    ],
+                    "max_tokens_per_run": 10000,
+                    "allow_cross_tenant_data": False,
+                }
+            ]
+        ),
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.tenant_policy_enforcement_enabled is True
+    assert len(settings.tenant_policies) == 1
+
+    policy = settings.tenant_policies[0]
+
+    assert policy.tenant_id == "tenant-acme"
+    assert policy.allowed_tools == frozenset(
+        {
+            "rag.search",
+            "vehicle.data.query",
+        }
+    )
+    assert policy.blocked_tools == frozenset()
+    assert policy.allowed_mcp_servers == frozenset({"document-server"})
+    assert policy.max_tokens_per_run == 10000
+    assert policy.allow_cross_tenant_data is False
+
+
+def test_tenant_policy_enforcement_requires_policies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.delenv(
+        "TENANT_POLICIES",
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES must contain at least one policy",
+    ):
+        Settings.from_environment()
+
+
+def test_tenant_policies_reject_non_array(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps({"tenant_id": "tenant-acme"}),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES must contain a JSON array",
+    ):
+        Settings.from_environment()
+
+
+def test_tenant_policies_reject_invalid_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_tools": "rag.search",
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES contains an invalid policy configuration",
+    ):
+        Settings.from_environment()

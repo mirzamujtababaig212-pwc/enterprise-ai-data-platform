@@ -202,6 +202,9 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         response = await runtime.run(
@@ -365,6 +368,9 @@ async def test_agent_mcp_execution_creates_otel_trace_hierarchy() -> None:
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         response = await runtime.run(
@@ -687,6 +693,9 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         response = await runtime.run(

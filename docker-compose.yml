@@ -24,6 +24,9 @@ services:
       # Authentication
       # --------------------------------------------------------
       API_KEY: ${API_KEY}
+      CONTROL_PLANE_API_KEY_TENANTS: ${CONTROL_PLANE_API_KEY_TENANTS}
+      TENANT_POLICY_ENFORCEMENT_ENABLED: ${TENANT_POLICY_ENFORCEMENT_ENABLED:-false}
+      TENANT_POLICIES: ${TENANT_POLICIES:-}
 
       # --------------------------------------------------------
       # LLM Providers

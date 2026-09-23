@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 os.environ["API_KEY"] = "super-secret-key"
+os.environ["CONTROL_PLANE_API_KEY_TENANTS"] = "tenant-a=super-secret-key"
 
 import pytest  # noqa: E402
 from delta import configure_spark_with_delta_pip  # noqa: E402

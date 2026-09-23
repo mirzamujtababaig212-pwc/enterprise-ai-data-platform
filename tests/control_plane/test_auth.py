@@ -3,7 +3,11 @@ import hashlib
 from fastapi.testclient import TestClient
 
 from app.control_plane.app import app
-from app.control_plane.auth import principal_from_api_key
+from app.control_plane.auth import (
+    identity_from_api_key,
+    principal_from_api_key,
+    tenant_id_from_api_key,
+)
 
 client = TestClient(app)
 
@@ -146,3 +150,38 @@ def test_rag_index_requires_authentication():
     )
 
     assert response.status_code == 401
+
+
+def test_tenant_id_from_api_key_uses_explicit_mapping(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.control_plane.auth.settings.CONTROL_PLANE_API_KEY_TENANTS",
+        "tenant-a=super-secret-key,tenant-b=other-secret-key",
+    )
+
+    assert tenant_id_from_api_key("super-secret-key") == "tenant-a"
+
+
+def test_tenant_id_from_api_key_rejects_unmapped_key(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.control_plane.auth.settings.CONTROL_PLANE_API_KEY_TENANTS",
+        "tenant-a=super-secret-key",
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="no configured tenant"):
+        tenant_id_from_api_key("other-secret-key")
+
+
+def test_identity_from_api_key_contains_no_raw_secret(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.control_plane.auth.settings.CONTROL_PLANE_API_KEY_TENANTS",
+        "tenant-a=super-secret-key",
+    )
+
+    identity = identity_from_api_key("super-secret-key")
+
+    assert identity.tenant_id == "tenant-a"
+    assert identity.principal.startswith("api_key:")
+    assert identity.user_id is None
+    assert "super-secret-key" not in repr(identity)

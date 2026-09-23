@@ -146,6 +146,7 @@ def build_client(
     application_service: FakeAgentRunApplicationService | None = None,
     *,
     principal: str | None = None,
+    tenant_id: str | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(router)
@@ -155,17 +156,24 @@ def build_client(
     if application_service is not None:
         app.dependency_overrides[get_agent_run_application_service] = lambda: application_service
 
-    if principal is not None:
+    if principal is not None or tenant_id is not None:
 
-        class PrincipalMiddleware:
+        class IdentityMiddleware:
             def __init__(self, inner_app):
                 self.inner_app = inner_app
 
             async def __call__(self, scope, receive, send):
-                scope.setdefault("state", {})["principal"] = principal
+                state = scope.setdefault("state", {})
+
+                if principal is not None:
+                    state["principal"] = principal
+
+                if tenant_id is not None:
+                    state["tenant_id"] = tenant_id
+
                 await self.inner_app(scope, receive, send)
 
-        app.add_middleware(PrincipalMiddleware)
+        app.add_middleware(IdentityMiddleware)
 
     return TestClient(app)
 
@@ -207,6 +215,40 @@ def test_run_agent_propagates_authenticated_principal() -> None:
     assert agent_request.principal != "super-secret-key"
     assert agent_request.user_id == "user-456"
     assert agent_request.session_id == "session-123"
+
+
+def test_run_agent_uses_authenticated_tenant_not_metadata_tenant() -> None:
+    recovery_service = FakeAgentRunRecoveryService()
+    application_service = FakeAgentRunApplicationService()
+
+    client = build_client(
+        recovery_service,
+        application_service,
+        principal="api_key:authenticated-principal",
+        tenant_id="tenant-acme",
+    )
+
+    response = client.post(
+        "/api/v1/agents/enterprise-analyst/run",
+        json={
+            "input": "Analyze the vehicle data.",
+            "session_id": "session-tenant-123",
+            "user_id": "user-tenant-456",
+            "metadata": {
+                "tenant_id": "tenant-attacker",
+                "classification": "internal",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(application_service.requests) == 1
+
+    agent_request = application_service.requests[0]
+
+    assert agent_request.tenant_id == "tenant-acme"
+    assert agent_request.metadata["tenant_id"] == "tenant-attacker"
+    assert agent_request.tenant_id != agent_request.metadata["tenant_id"]
 
 
 def test_recover_agent_run_returns_recovered_response() -> None:

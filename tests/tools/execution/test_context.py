@@ -15,6 +15,7 @@ def test_tool_execution_context_defaults_to_empty_context() -> None:
     assert context.session_id is None
     assert context.user_id is None
     assert context.principal is None
+    assert context.tenant_id is None
     assert context.governance_policy is None
     assert context.request_metadata == {}
 
@@ -31,6 +32,7 @@ def test_tool_execution_context_preserves_execution_metadata() -> None:
         session_id="session-789",
         user_id="user-123",
         principal="api_key:abc123",
+        tenant_id="tenant-acme",
         governance_policy=policy,
         request_metadata={"source": "api"},
     )
@@ -41,6 +43,7 @@ def test_tool_execution_context_preserves_execution_metadata() -> None:
     assert context.session_id == "session-789"
     assert context.user_id == "user-123"
     assert context.principal == "api_key:abc123"
+    assert context.tenant_id == "tenant-acme"
     assert context.governance_policy is policy
     assert context.request_metadata == {"source": "api"}
 
@@ -75,6 +78,7 @@ def test_tool_execution_context_is_immutable() -> None:
         "session_id",
         "user_id",
         "principal",
+        "tenant_id",
     ),
 )
 def test_tool_execution_context_rejects_empty_identity_fields(field: str) -> None:

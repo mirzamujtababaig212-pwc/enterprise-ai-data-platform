@@ -12,6 +12,10 @@ from tools.authorization.audit import (
 )
 from tools.authorization.service import ToolAuthorizationService
 from tools.contracts import ToolRegistry
+from ai_platform.agents.policy import (
+    PolicyViolationError,
+    TenantPolicyEngine,
+)
 from tools.execution.context import ToolExecutionContext
 from tools.execution.exceptions import ToolExecutionOwnershipLostError
 from tools.execution.idempotency import (
@@ -35,6 +39,7 @@ class ToolExecutionService:
         authorization_service: ToolAuthorizationService | None = None,
         audit_sink: ToolAuthorizationAuditSink | None = None,
         idempotency_store: ToolExecutionIdempotencyStore | None = None,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
         default_timeout_seconds: float = 30.0,
     ):
         if default_timeout_seconds <= 0:
@@ -44,6 +49,7 @@ class ToolExecutionService:
         self.authorization_service = authorization_service
         self.audit_sink = audit_sink
         self.idempotency_store = idempotency_store
+        self.tenant_policy_engine = tenant_policy_engine
         self.default_timeout_seconds = default_timeout_seconds
 
     async def execute(
@@ -109,6 +115,33 @@ class ToolExecutionService:
                 error=f"Tool input schema is invalid: {exc.message}",
                 failure_category=ToolExecutionFailureCategory.INVALID_SCHEMA,
             )
+
+        if self.tenant_policy_engine is not None:
+            tenant_id = execution_context.tenant_id if execution_context is not None else None
+
+            if tenant_id is None or not tenant_id.strip():
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error="Tenant identity is required when tenant policy enforcement is enabled.",
+                    failure_category=ToolExecutionFailureCategory.TENANT_POLICY,
+                )
+
+            server_id = tool.definition.metadata.get("mcp_server")
+
+            try:
+                self.tenant_policy_engine.validate_tool_execution(
+                    tenant_id=tenant_id,
+                    tool_name=tool_name,
+                    server_id=server_id,
+                )
+            except PolicyViolationError as exc:
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=str(exc),
+                    failure_category=ToolExecutionFailureCategory.TENANT_POLICY,
+                )
 
         if self.authorization_service is not None:
             if principal is None or not principal.strip():
@@ -382,6 +415,8 @@ class ToolExecutionService:
                 agent_name=execution_context.get("agent_name"),
                 session_id=execution_context.get("session_id"),
                 user_id=execution_context.get("user_id"),
+                principal=execution_context.get("principal"),
+                tenant_id=execution_context.get("tenant_id"),
                 governance_policy=execution_context.get("governance_policy"),
                 request_metadata=execution_context.get("request_metadata", {}),
                 execution_ownership_lost=execution_context.get("execution_ownership_lost"),

@@ -828,6 +828,8 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
             input="Check the status.",
             session_id="session-123",
             user_id="user-456",
+            principal="api_key:test",
+            tenant_id="tenant-acme",
         ),
         tools=tools,
         llm=AgentLLMContext(
@@ -855,7 +857,7 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
             "arguments": {
                 "query": "pipeline status",
             },
-            "principal": None,
+            "principal": "api_key:test",
             "timeout_seconds": None,
             "execution_context": ToolExecutionContext(
                 run_id="run-789",
@@ -864,7 +866,8 @@ async def test_execution_context_propagates_run_and_call_ids_to_tool_execution()
                 agent_name="test-agent",
                 session_id="session-123",
                 user_id="user-456",
-                principal=None,
+                principal="api_key:test",
+                tenant_id="tenant-acme",
                 request_metadata={},
             ),
         }

@@ -506,3 +506,61 @@ async def test_validate_agent_tool_capabilities_rejects_disabled_tool(
         ),
     ):
         await dependencies._validate_agent_tool_capabilities()
+
+
+def test_tool_execution_service_uses_configured_tenant_policy_engine() -> None:
+    from app.control_plane import dependencies
+    from ai_platform.agents.policy import TenantPolicyEngine
+
+    assert isinstance(
+        dependencies._tool_execution_service,
+        ToolExecutionService,
+    )
+
+    if dependencies._tenant_policy_engine is not None:
+        assert isinstance(
+            dependencies._tenant_policy_engine,
+            TenantPolicyEngine,
+        )
+        assert (
+            dependencies._tool_execution_service.tenant_policy_engine
+            is dependencies._tenant_policy_engine
+        )
+
+
+def test_build_tenant_policy_engine_loads_environment_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from app.control_plane import dependencies
+    from ai_platform.agents.policy import TenantPolicyEngine
+
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_tools": ["rag.search"],
+                    "blocked_tools": ["vehicle.data.query"],
+                    "allowed_mcp_servers": ["document-server"],
+                }
+            ]
+        ),
+    )
+
+    engine = dependencies._build_tenant_policy_engine()
+
+    assert isinstance(engine, TenantPolicyEngine)
+
+    policy = engine.get_policy("tenant-acme")
+
+    assert policy.tenant_id == "tenant-acme"
+    assert policy.allowed_tools == frozenset({"rag.search"})
+    assert policy.blocked_tools == frozenset({"vehicle.data.query"})
+    assert policy.allowed_mcp_servers == frozenset({"document-server"})

@@ -149,6 +149,47 @@ class FailingObserver:
 
 
 @pytest.mark.asyncio
+async def test_execute_persists_authenticated_tenant_in_run_and_snapshot() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-tenant-1",
+        user_id="user-tenant-1",
+        principal="api_key:tenant-principal",
+        tenant_id="tenant-acme",
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    assert result.run_id
+
+    pending = repository.create.call_args.args[0]
+    running = repository.update.call_args_list[0].args[0]
+    completed = repository.completed_run
+
+    assert pending.tenant_id == "tenant-acme"
+    assert pending.request_snapshot.tenant_id == "tenant-acme"
+
+    assert running.tenant_id == "tenant-acme"
+    assert running.request_snapshot.tenant_id == "tenant-acme"
+
+    assert completed.tenant_id == "tenant-acme"
+    assert completed.request_snapshot.tenant_id == "tenant-acme"
+
+
+@pytest.mark.asyncio
 async def test_execute_persists_pending_running_and_completed_lifecycle() -> None:
     repository = _repository()
 

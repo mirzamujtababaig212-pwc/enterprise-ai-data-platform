@@ -32,6 +32,7 @@ class PostgreSQLAgentRunRepository:
             session_id=run.session_id,
             user_id=run.user_id,
             principal=run.principal,
+            tenant_id=run.tenant_id,
             idempotency_key=run.idempotency_key,
             status=run.status.value,
             started_at=run.started_at,
@@ -122,6 +123,7 @@ class PostgreSQLAgentRunRepository:
         record.session_id = run.session_id
         record.user_id = run.user_id
         record.principal = run.principal
+        record.tenant_id = run.tenant_id
         record.idempotency_key = run.idempotency_key
         record.status = run.status.value
         record.started_at = run.started_at
@@ -540,6 +542,7 @@ class PostgreSQLAgentRunRepository:
             session_id=record.session_id,
             user_id=record.user_id,
             principal=record.principal,
+            tenant_id=record.tenant_id,
             idempotency_key=record.idempotency_key,
             status=AgentRunStatus(record.status),
             started_at=(

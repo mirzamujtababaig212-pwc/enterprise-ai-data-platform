@@ -198,6 +198,11 @@ class AgentExecutionContext:
         return self.request.principal
 
     @property
+    def tenant_id(self) -> str | None:
+        """Return the authenticated tenant identity for this execution."""
+        return self.request.tenant_id
+
+    @property
     def metadata(self) -> dict[str, object]:
         """Return request metadata available during agent execution."""
         return dict(self.request.metadata)
@@ -241,6 +246,7 @@ class AgentExecutionContext:
                         session_id=self.session_id,
                         user_id=self.user_id,
                         principal=self.principal,
+                        tenant_id=self.tenant_id,
                         request_metadata=self.metadata,
                         execution_ownership_lost=self.execution_ownership_lost,
                     ),

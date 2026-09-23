@@ -2,6 +2,10 @@ import asyncio
 
 import pytest
 
+from ai_platform.agents.policy import (
+    TenantPolicy,
+    TenantPolicyEngine,
+)
 from tools.authorization.in_memory import (
     InMemoryToolAuthorizer,
 )
@@ -1758,3 +1762,373 @@ async def test_denied_authorization_blocks_idempotent_replay():
     assert second.output is None
     assert tool.execution_count == 1
     assert len(authorizer.authorization_requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_allows_registered_tenant_tool() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="test_tool")
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"test_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-policy-1",
+        call_id="call-policy-1",
+        tenant_id="tenant-acme",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_blocks_tool_before_execution() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="test_tool")
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"other_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-policy-2",
+        call_id="call-policy-2",
+        tenant_id="tenant-acme",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_rejects_unregistered_tenant() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="test_tool")
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-policy-3",
+        call_id="call-policy-3",
+        tenant_id="tenant-unknown",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_requires_authenticated_tenant_context() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="test_tool")
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"test_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=ToolExecutionContext(
+            run_id="run-policy-4",
+            call_id="call-policy-4",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_ignores_caller_metadata_tenant_id() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="test_tool")
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"test_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-policy-5",
+        call_id="call-policy-5",
+        tenant_id="tenant-acme",
+        request_metadata={
+            "tenant_id": "tenant-attacker",
+        },
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_rejects_unauthorized_mcp_server() -> None:
+    registry = InMemoryToolRegistry()
+
+    class MCPTool:
+        def __init__(self) -> None:
+            self._definition = ToolDefinition(
+                name="mcp_tool",
+                description="A test MCP tool.",
+                metadata={
+                    "mcp_server": "untrusted-server",
+                },
+            )
+            self.execution_count = 0
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments):
+            self.execution_count += 1
+            return {"status": "executed"}
+
+    tool = MCPTool()
+    await registry.register(tool)
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"mcp_tool"}),
+            allowed_mcp_servers=frozenset({"trusted-server"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    result = await service.execute(
+        "mcp_tool",
+        {},
+        execution_context=ToolExecutionContext(
+            run_id="run-policy-6",
+            call_id="call-policy-6",
+            tenant_id="tenant-acme",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_rejects_tool_before_execution() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="restricted_tool")
+    await registry.register(tool)
+
+    from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"allowed_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-tenant-policy",
+        call_id="call-tenant-policy",
+        tenant_id="tenant-acme",
+    )
+
+    result = await service.execute(
+        "restricted_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_allows_authorized_tool_execution() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="allowed_tool")
+    await registry.register(tool)
+
+    from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"allowed_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-tenant-policy",
+        call_id="call-tenant-policy",
+        tenant_id="tenant-acme",
+    )
+
+    result = await service.execute(
+        "allowed_tool",
+        {"value": 1},
+        execution_context=context,
+    )
+
+    assert result.success is True
+    assert result.failure_category is None
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_uses_authenticated_context_not_metadata() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="allowed_tool")
+    await registry.register(tool)
+
+    from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_tools=frozenset({"allowed_tool"}),
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-tenant-policy",
+        call_id="call-tenant-policy",
+        tenant_id="tenant-acme",
+        request_metadata={"tenant_id": "tenant-attacker"},
+    )
+
+    result = await service.execute(
+        "allowed_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_policy_requires_authenticated_tenant() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool(name="allowed_tool")
+    await registry.register(tool)
+
+    from ai_platform.agents.policy import TenantPolicyEngine
+
+    policy_engine = TenantPolicyEngine()
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=policy_engine,
+    )
+
+    result = await service.execute(
+        "allowed_tool",
+        {},
+        execution_context=ToolExecutionContext(
+            run_id="run-tenant-policy",
+            call_id="call-tenant-policy",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0

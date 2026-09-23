@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from ai_platform.agents.policy import TenantPolicy
 from tools.mcp.config import MCPServerConfig
 
 
@@ -19,6 +20,8 @@ class Settings:
     agent_run_lease_duration_seconds: int
     agent_run_max_recovery_attempts: int
     mcp_servers: tuple[MCPServerConfig, ...] = ()
+    tenant_policy_enforcement_enabled: bool = False
+    tenant_policies: tuple[TenantPolicy, ...] = ()
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -86,6 +89,90 @@ class Settings:
             except (KeyError, TypeError, ValueError) as exc:
                 raise RuntimeError("MCP_SERVERS contains an invalid server configuration.") from exc
 
+        tenant_policy_enforcement_enabled = os.getenv(
+            "TENANT_POLICY_ENFORCEMENT_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
+        tenant_policies_raw = os.getenv("TENANT_POLICIES", "").strip()
+
+        if not tenant_policies_raw:
+            tenant_policies: tuple[TenantPolicy, ...] = ()
+        else:
+            try:
+                tenant_policies_payload = json.loads(tenant_policies_raw)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("TENANT_POLICIES must contain valid JSON") from exc
+
+            if not isinstance(tenant_policies_payload, list):
+                raise RuntimeError("TENANT_POLICIES must contain a JSON array.")
+
+            try:
+                parsed_policies: list[TenantPolicy] = []
+
+                for policy in tenant_policies_payload:
+                    if not isinstance(policy, dict):
+                        raise ValueError("Tenant policy entry must be an object.")
+
+                    tenant_id = policy["tenant_id"]
+
+                    allowed_tools = policy.get("allowed_tools", [])
+                    blocked_tools = policy.get("blocked_tools", [])
+                    allowed_mcp_servers = policy.get(
+                        "allowed_mcp_servers",
+                        [],
+                    )
+
+                    if not isinstance(allowed_tools, list):
+                        raise ValueError("Tenant policy allowed_tools must be an array.")
+
+                    if not isinstance(blocked_tools, list):
+                        raise ValueError("Tenant policy blocked_tools must be an array.")
+
+                    if not isinstance(allowed_mcp_servers, list):
+                        raise ValueError("Tenant policy allowed_mcp_servers must be an array.")
+
+                    max_tokens_per_run = policy.get("max_tokens_per_run")
+
+                    if max_tokens_per_run is not None and not isinstance(
+                        max_tokens_per_run,
+                        int,
+                    ):
+                        raise ValueError("Tenant policy max_tokens_per_run must be an integer.")
+
+                    allow_cross_tenant_data = policy.get(
+                        "allow_cross_tenant_data",
+                        False,
+                    )
+
+                    if not isinstance(allow_cross_tenant_data, bool):
+                        raise ValueError(
+                            "Tenant policy allow_cross_tenant_data " "must be a boolean."
+                        )
+
+                    parsed_policies.append(
+                        TenantPolicy(
+                            tenant_id=tenant_id,
+                            allowed_tools=frozenset(allowed_tools),
+                            blocked_tools=frozenset(blocked_tools),
+                            allowed_mcp_servers=frozenset(allowed_mcp_servers),
+                            max_tokens_per_run=max_tokens_per_run,
+                            allow_cross_tenant_data=allow_cross_tenant_data,
+                        )
+                    )
+
+                tenant_policies = tuple(parsed_policies)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "TENANT_POLICIES contains an invalid policy configuration."
+                ) from exc
+
+        if tenant_policy_enforcement_enabled and not tenant_policies:
+            raise RuntimeError(
+                "TENANT_POLICIES must contain at least one policy when "
+                "tenant policy enforcement is enabled."
+            )
+
         return cls(
             environment=os.getenv("ENVIRONMENT", "dev"),
             aws_region=os.getenv("AWS_REGION", "us-east-1"),
@@ -109,4 +196,6 @@ class Settings:
             ),
             agent_run_max_recovery_attempts=int(os.getenv("AGENT_RUN_MAX_RECOVERY_ATTEMPTS", "3")),
             mcp_servers=mcp_servers,
+            tenant_policy_enforcement_enabled=tenant_policy_enforcement_enabled,
+            tenant_policies=tenant_policies,
         )

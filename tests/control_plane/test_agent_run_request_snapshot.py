@@ -1,0 +1,46 @@
+from ai_platform.agents.models import AgentRequest
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+
+
+def test_snapshot_round_trip_preserves_tenant_identity() -> None:
+    request = AgentRequest(
+        input="retrieve customer policy",
+        session_id="session-123",
+        user_id="user-123",
+        principal="principal-123",
+        tenant_id="tenant-acme",
+        memory_namespace="tenant-acme-memory",
+        metadata={"tenant_id": "attacker-controlled-metadata"},
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.tenant_id == "tenant-acme"
+    assert snapshot.metadata["tenant_id"] == "attacker-controlled-metadata"
+
+    recovered = snapshot.to_request(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        principal=request.principal,
+    )
+
+    assert recovered.tenant_id == "tenant-acme"
+    assert recovered.metadata["tenant_id"] == "attacker-controlled-metadata"
+
+
+def test_snapshot_with_null_tenant_remains_backward_compatible() -> None:
+    snapshot = AgentRunRequestSnapshot(
+        input="historical request",
+        principal="historical-principal",
+        tenant_id=None,
+    )
+
+    recovered = snapshot.to_request(
+        session_id="historical-session",
+        user_id="historical-user",
+        principal="historical-principal",
+    )
+
+    assert recovered.tenant_id is None
+    assert recovered.input == "historical request"
+    assert recovered.principal == "historical-principal"

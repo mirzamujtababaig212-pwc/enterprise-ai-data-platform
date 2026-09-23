@@ -97,6 +97,7 @@ class AgentRequest:
     session_id: str | None = None
     user_id: str | None = None
     principal: str | None = None
+    tenant_id: str | None = None
     memory_namespace: str | None = None
     governance_policy: GovernancePolicy | None = None
     execution_budget: ExecutionBudget | None = None
@@ -115,6 +116,9 @@ class AgentRequest:
 
         if self.principal is not None and not self.principal.strip():
             raise ValueError("Agent request principal must not be empty when provided.")
+
+        if self.tenant_id is not None and not self.tenant_id.strip():
+            raise ValueError("Agent request tenant_id must not be empty when provided.")
 
         if self.memory_namespace is not None and not self.memory_namespace.strip():
             raise ValueError("Agent request memory_namespace must not be empty when provided.")

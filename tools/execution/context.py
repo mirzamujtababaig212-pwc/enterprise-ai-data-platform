@@ -26,6 +26,7 @@ class ToolExecutionContext:
     session_id: str | None = None
     user_id: str | None = None
     principal: str | None = None
+    tenant_id: str | None = None
     governance_policy: GovernancePolicy | None = None
     request_metadata: dict[str, Any] = field(default_factory=dict)
     execution_ownership_lost: asyncio.Event | None = None
@@ -66,6 +67,12 @@ class ToolExecutionContext:
                 raise TypeError("principal must be a string or None.")
             if not self.principal.strip():
                 raise ValueError("principal must not be empty.")
+
+        if self.tenant_id is not None:
+            if not isinstance(self.tenant_id, str):
+                raise TypeError("tenant_id must be a string or None.")
+            if not self.tenant_id.strip():
+                raise ValueError("tenant_id must not be empty.")
 
         if self.governance_policy is not None and not isinstance(
             self.governance_policy,

@@ -18,6 +18,7 @@ def test_agent_run_record_columns() -> None:
         "session_id",
         "user_id",
         "principal",
+        "tenant_id",
         "idempotency_key",
         "status",
         "started_at",

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ai_platform.agents.composite_observer import CompositeAgentExecutionObserver
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.models import AgentDefinition
+from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.otel_observer import OpenTelemetryAgentExecutionObserver
 from ai_platform.agents.prometheus_observer import PrometheusAgentExecutionObserver
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
@@ -113,6 +114,23 @@ _tool_idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
 )
 
 
+def _build_tenant_policy_engine() -> TenantPolicyEngine | None:
+    app_settings = Settings.from_environment()
+
+    if not app_settings.tenant_policy_enforcement_enabled:
+        return None
+
+    engine = TenantPolicyEngine()
+
+    for policy in app_settings.tenant_policies:
+        engine.register_policy(policy)
+
+    return engine
+
+
+_tenant_policy_engine = _build_tenant_policy_engine()
+
+
 def _agent_run_steps_repository_factory():
     return PostgreSQLAgentRunStepsRepository(SessionLocal())
 
@@ -122,6 +140,7 @@ _tool_execution_service = ToolExecutionService(
     authorization_service=_tool_authorization_service,
     audit_sink=_tool_authorization_audit_sink,
     idempotency_store=_tool_idempotency_store,
+    tenant_policy_engine=_tenant_policy_engine,
 )
 
 _vehicle_data_service = VehicleDataService()

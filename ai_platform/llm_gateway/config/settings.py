@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     API_KEY: str = os.getenv("API_KEY", "")
+    CONTROL_PLANE_API_KEY_TENANTS: str = os.getenv(
+        "CONTROL_PLANE_API_KEY_TENANTS",
+        "",
+    )
 
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv(
