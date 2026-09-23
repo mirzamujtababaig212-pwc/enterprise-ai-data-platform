@@ -278,3 +278,103 @@ async def test_discovery_rejects_duplicate_tool_identity_across_mcp_servers():
         match="already registered",
     ):
         await service_b.discover_and_register()
+
+
+@pytest.mark.asyncio
+async def test_discovery_removes_stale_tools_from_same_mcp_server():
+    client = FakeMCPClient()
+    registry = InMemoryToolRegistry()
+
+    service = MCPToolDiscoveryService(
+        client=client,
+        registry=registry,
+        server_name="document-server",
+    )
+
+    await service.discover_and_register()
+
+    assert await registry.get("search_documents") is not None
+    assert await registry.get("get_document") is not None
+
+    client.list_tools = AsyncMock(
+        return_value=[
+            MCPToolDefinition(
+                name="search_documents",
+                description="Search enterprise documents.",
+                input_schema={"type": "object"},
+            )
+        ]
+    )
+
+    definitions = await service.discover_and_register()
+
+    assert [definition.name for definition in definitions] == [
+        "search_documents",
+    ]
+
+    assert await registry.get("search_documents") is not None
+    assert await registry.get("get_document") is None
+
+
+@pytest.mark.asyncio
+async def test_discovery_removes_all_server_tools_when_server_returns_empty():
+    client = FakeMCPClient()
+    registry = InMemoryToolRegistry()
+
+    service = MCPToolDiscoveryService(
+        client=client,
+        registry=registry,
+        server_name="document-server",
+    )
+
+    await service.discover_and_register()
+
+    client.list_tools = AsyncMock(return_value=[])
+
+    definitions = await service.discover_and_register()
+
+    assert definitions == []
+    assert await registry.get("search_documents") is None
+    assert await registry.get("get_document") is None
+
+
+@pytest.mark.asyncio
+async def test_discovery_does_not_remove_tools_owned_by_another_mcp_server():
+    client_a = FakeMCPClient()
+    client_b = FakeMCPClient()
+
+    registry = InMemoryToolRegistry()
+
+    service_a = MCPToolDiscoveryService(
+        client=client_a,
+        registry=registry,
+        server_name="server-a",
+    )
+
+    await service_a.discover_and_register()
+
+    client_b.list_tools = AsyncMock(
+        return_value=[
+            MCPToolDefinition(
+                name="server_b_tool",
+                description="Tool owned by server B.",
+                input_schema={"type": "object"},
+            )
+        ]
+    )
+
+    service_b = MCPToolDiscoveryService(
+        client=client_b,
+        registry=registry,
+        server_name="server-b",
+    )
+
+    await service_b.discover_and_register()
+
+    client_a.list_tools = AsyncMock(return_value=[])
+
+    await service_a.discover_and_register()
+
+    assert await registry.get("search_documents") is None
+    assert await registry.get("get_document") is None
+    assert await registry.get("server_b_tool") is not None

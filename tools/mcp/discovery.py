@@ -54,4 +54,28 @@ class MCPToolDiscoveryService:
 
             definitions.append(adapter.definition)
 
+        await self._reconcile_stale_tools(
+            discovered_tool_names={definition.name for definition in definitions},
+        )
+
         return definitions
+
+    async def _reconcile_stale_tools(
+        self,
+        *,
+        discovered_tool_names: set[str],
+    ) -> None:
+        if self.server_name is None:
+            return
+
+        registered_tools = await self.registry.list_tools()
+
+        stale_tool_names = {
+            definition.name
+            for definition in registered_tools
+            if definition.metadata.get("mcp_server") == self.server_name
+            and definition.name not in discovered_tool_names
+        }
+
+        for tool_name in stale_tool_names:
+            await self.registry.remove(tool_name)
