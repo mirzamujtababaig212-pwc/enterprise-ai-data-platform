@@ -55,12 +55,15 @@ def test_invalid_step_transition_is_rejected():
         step.transition_to(AgentRunStepStatus.COMPLETED)
 
 
-def test_failed_step_cannot_become_running_via_generic_transition():
+def test_failed_step_can_become_running_via_explicit_retry_transition():
     step = make_step().transition_to(AgentRunStepStatus.RUNNING)
     failed = step.transition_to(AgentRunStepStatus.FAILED)
 
-    with pytest.raises(InvalidAgentRunStepTransitionError):
-        failed.transition_to(AgentRunStepStatus.RUNNING)
+    retried = failed.transition_to(AgentRunStepStatus.RUNNING)
+
+    assert failed.status == AgentRunStepStatus.FAILED
+    assert retried.status == AgentRunStepStatus.RUNNING
+    assert retried.attempt == failed.attempt
 
 
 def test_ambiguous_step_is_terminal():

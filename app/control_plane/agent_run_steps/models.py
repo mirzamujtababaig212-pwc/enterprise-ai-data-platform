@@ -41,6 +41,7 @@ _ALLOWED_AGENT_RUN_STEP_TRANSITIONS: dict[
     AgentRunStepStatus.COMPLETED: frozenset(),
     AgentRunStepStatus.FAILED: frozenset(
         {
+            AgentRunStepStatus.RUNNING,
             AgentRunStepStatus.CANCELLED,
         }
     ),

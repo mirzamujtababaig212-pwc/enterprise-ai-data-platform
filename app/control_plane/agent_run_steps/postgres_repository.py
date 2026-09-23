@@ -275,7 +275,10 @@ class PostgreSQLAgentRunStepsRepository:
             if record.status != AgentRunStepStatus.FAILED.value:
                 raise ValueError("agent run step retry requires FAILED status: " f"{record.status}")
 
-            record.status = AgentRunStepStatus.RUNNING.value
+            current = self._to_domain(record)
+            transitioned = current.transition_to(AgentRunStepStatus.RUNNING)
+
+            record.status = transitioned.status.value
             record.attempt += 1
             record.started_at = started_at
             record.completed_at = None

@@ -199,9 +199,10 @@ class InMemoryAgentRunStepsRepository:
                     "agent run step retry requires FAILED status: " f"{step.status.value}"
                 )
 
-            updated = step.model_copy(
+            transitioned = step.transition_to(AgentRunStepStatus.RUNNING)
+
+            updated = transitioned.model_copy(
                 update={
-                    "status": AgentRunStepStatus.RUNNING,
                     "attempt": step.attempt + 1,
                     "started_at": started_at,
                     "completed_at": None,
