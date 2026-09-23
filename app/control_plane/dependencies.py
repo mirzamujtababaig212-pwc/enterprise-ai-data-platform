@@ -43,6 +43,10 @@ from app.control_plane.agent_run_steps.postgres_repository import (
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
 from app.control_plane.mcp_management_service import MCPManagementService
+from app.control_plane.mcp_servers.lifecycle_service import MCPServerLifecycleService
+from app.control_plane.mcp_servers.postgres_repository import (
+    PostgreSQLMCPServerRepository,
+)
 from app.control_plane.persistence.database import SessionLocal, get_db
 from app.control_plane.persistence.rag_state import PostgreSQLRAGStateRepository
 from app.control_plane.tool_execution.postgres_idempotency import (
@@ -407,6 +411,15 @@ def get_mcp_management_service() -> MCPManagementService:
     return MCPManagementService(
         manager=_mcp_server_manager,
         tenant_policy_engine=_tenant_policy_engine,
+    )
+
+
+def get_mcp_server_lifecycle_service(
+    db: Session = Depends(get_db),
+) -> MCPServerLifecycleService:
+    return MCPServerLifecycleService(
+        repository=PostgreSQLMCPServerRepository(db),
+        manager=_mcp_server_manager,
     )
 
 

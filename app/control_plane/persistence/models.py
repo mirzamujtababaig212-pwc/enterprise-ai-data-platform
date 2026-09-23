@@ -24,6 +24,62 @@ class Base(DeclarativeBase):
     pass
 
 
+class MCPServerRecord(Base):
+    __tablename__ = "mcp_servers"
+
+    server_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+    )
+
+    transport: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    desired_state: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    configuration: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+    secret_references: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class RetrievalEvaluationRunRecord(Base):
     __tablename__ = "retrieval_evaluation_runs"
 

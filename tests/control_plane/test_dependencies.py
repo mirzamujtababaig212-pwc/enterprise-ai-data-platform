@@ -10,9 +10,14 @@ from app.control_plane.dependencies import (
     _build_rag_retriever,
     get_agent_run_application_service,
     get_agent_run_recovery_service,
+    get_mcp_server_lifecycle_service,
     get_usage_store,
 )
 from app.control_plane.usage.postgres_store import PostgreSQLUsageRepository
+from app.control_plane.mcp_servers.lifecycle_service import MCPServerLifecycleService
+from app.control_plane.mcp_servers.postgres_repository import (
+    PostgreSQLMCPServerRepository,
+)
 from app.control_plane.tool_execution.postgres_idempotency import (
     PostgreSQLToolExecutionIdempotencyStore,
 )
@@ -34,6 +39,22 @@ def test_get_usage_store_creates_repository_from_injected_session() -> None:
     assert store_one is not store_two
     assert store_one._session is session_one
     assert store_two._session is session_two
+
+
+def test_get_mcp_server_lifecycle_service_uses_injected_session() -> None:
+    from app.control_plane import dependencies
+
+    session = Mock()
+
+    service = get_mcp_server_lifecycle_service(db=session)
+
+    assert isinstance(service, MCPServerLifecycleService)
+    assert isinstance(
+        service._repository,
+        PostgreSQLMCPServerRepository,
+    )
+    assert service._repository._session is session
+    assert service._manager is dependencies._mcp_server_manager
 
 
 def test_tool_execution_service_uses_durable_idempotency_store() -> None:
