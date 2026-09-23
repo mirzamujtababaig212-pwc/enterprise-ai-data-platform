@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from dataclasses import dataclass
 
 from ai_platform.agents.budget import ExecutionBudgetState
 from ai_platform.agents.observer import AgentExecutionObserver
+from app.control_plane.agent_run_steps.models import AgentRunStep, AgentRunStepStatus
 from ai_platform.agents.checkpoint import (
     AgentCheckpointHandler,
     AgentCheckpointPosition,
     AgentExecutionCheckpoint,
 )
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.orchestration import (
     OrchestrationStep,
     OrchestrationStepCompletionPolicy,
@@ -20,6 +24,7 @@ from ai_platform.agents.models import (
     AgentDefinition,
     AgentResponse,
 )
+from tools.models import ToolExecutionFailureCategory
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -144,6 +149,80 @@ class LLMAgent:
             }
         }
 
+    async def _bind_orchestration_tool_execution(
+        self,
+        context: AgentExecutionContext,
+        tool_calls,
+    ) -> None:
+        """Bind the actual tool call to the current durable tool step."""
+        if context.run_id is None:
+            return
+
+        if context.orchestration_plan is None:
+            return
+
+        step = context.orchestration_state.current_step
+
+        if step is None:
+            return
+
+        if step.completion_policy is not OrchestrationStepCompletionPolicy.ON_TOOL_RESULT:
+            return
+
+        expected_tool_name = step.metadata.get("completion_tool_name")
+
+        if not isinstance(expected_tool_name, str) or not expected_tool_name:
+            return
+
+        matching_calls = [
+            tool_call for tool_call in tool_calls if tool_call.name == expected_tool_name
+        ]
+
+        if len(matching_calls) != 1:
+            raise RuntimeError(
+                "durable orchestration tool binding requires exactly one "
+                "matching tool call: "
+                f"step={step.step_id}, expected_tool={expected_tool_name}, "
+                f"matching_calls={len(matching_calls)}"
+            )
+
+        repository = context.get_agent_run_steps_repository()
+
+        if repository is None:
+            return
+
+        tool_call = matching_calls[0]
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                raise RuntimeError(
+                    "cannot bind tool execution to missing durable "
+                    "orchestration step: "
+                    f"{context.run_id}/{step.step_id}"
+                )
+
+            if existing.status is not AgentRunStepStatus.RUNNING:
+                raise RuntimeError(
+                    "cannot execute tool for durable orchestration step "
+                    "from status: "
+                    f"{existing.status.value}"
+                )
+
+            repository.bind_execution(
+                context.run_id,
+                step.step_id,
+                tool_name=tool_call.name,
+                call_id=tool_call.call_id,
+                input=tool_call.arguments,
+            )
+        finally:
+            repository.close()
+
     async def _execute_tool_calls_and_append_results(
         self,
         messages: list[AgentMessage],
@@ -178,9 +257,33 @@ class LLMAgent:
 
         context.raise_if_execution_ownership_lost()
 
-        tool_results = await context.execute_tool_calls(
+        await self._bind_orchestration_tool_execution(
+            context,
             tool_calls,
         )
+
+        context.raise_if_execution_ownership_lost()
+
+        try:
+            tool_results = await context.execute_tool_calls(
+                tool_calls,
+            )
+        except AgentExecutionOwnershipLostError as exc:
+            if context.orchestration_plan is not None:
+                step = context.orchestration_state.current_step
+
+                if (
+                    step is not None
+                    and step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
+                ):
+                    await self._persist_orchestration_step_ambiguous(
+                        context,
+                        step,
+                        error=str(exc),
+                        failure_category=(ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS.value),
+                    )
+
+            raise
 
         context.raise_if_execution_ownership_lost()
 
@@ -213,6 +316,43 @@ class LLMAgent:
                     tool_round=tool_round,
                 )
             else:
+                if (
+                    context.orchestration_plan is not None
+                    and context.orchestration_state.current_step is not None
+                ):
+                    step = context.orchestration_state.current_step
+
+                    if (
+                        step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
+                        and step.metadata.get("completion_tool_name") == tool_call.name
+                    ):
+                        failure_category = (
+                            tool_result.failure_category.value
+                            if tool_result.failure_category is not None
+                            else None
+                        )
+
+                        if (
+                            tool_result.failure_category
+                            is ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS
+                        ):
+                            await self._persist_orchestration_step_ambiguous(
+                                context,
+                                step,
+                                error=(tool_result.error or "Tool execution outcome is ambiguous."),
+                                failure_category=failure_category,
+                            )
+                        elif (
+                            tool_result.failure_category
+                            is not ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
+                        ):
+                            await self._persist_orchestration_step_failed(
+                                context,
+                                step,
+                                error=(tool_result.error or "Tool execution failed."),
+                                failure_category=failure_category,
+                            )
+
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_FAILED,
@@ -571,18 +711,284 @@ class LLMAgent:
             metadata=metadata,
         )
 
+    @staticmethod
+    def _durable_step_type(step: OrchestrationStep) -> str:
+        """Map an orchestration step to its durable ledger type."""
+        if step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT:
+            return "tool"
+
+        return "model"
+
+    async def _persist_orchestration_step_planned(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+    ) -> None:
+        """Ensure the logical orchestration step exists as PLANNED."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is not None:
+                return
+
+            repository.create(
+                AgentRunStep(
+                    run_id=context.run_id,
+                    step_id=step.step_id,
+                    step_index=step.step_index,
+                    step_type=self._durable_step_type(step),
+                    status=AgentRunStepStatus.PLANNED,
+                    metadata=dict(step.metadata),
+                )
+            )
+        finally:
+            repository.close()
+
+    async def _persist_orchestration_step_running(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+    ) -> None:
+        """Ensure the durable orchestration step is RUNNING."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                repository.create(
+                    AgentRunStep(
+                        run_id=context.run_id,
+                        step_id=step.step_id,
+                        step_index=step.step_index,
+                        step_type=self._durable_step_type(step),
+                        status=AgentRunStepStatus.PLANNED,
+                        metadata=dict(step.metadata),
+                    )
+                )
+                existing = repository.get(
+                    context.run_id,
+                    step.step_id,
+                )
+
+            if existing is None:
+                raise RuntimeError(
+                    "durable orchestration step disappeared after creation: "
+                    f"{context.run_id}/{step.step_id}"
+                )
+
+            if existing.status is AgentRunStepStatus.RUNNING:
+                return
+
+            if existing.status is not AgentRunStepStatus.PLANNED:
+                raise RuntimeError(
+                    "cannot start durable orchestration step from status: "
+                    f"{existing.status.value}"
+                )
+
+            now = datetime.now(UTC)
+
+            repository.transition(
+                context.run_id,
+                step.step_id,
+                status=AgentRunStepStatus.RUNNING,
+                updated_at=now,
+                started_at=now,
+            )
+        finally:
+            repository.close()
+
+    async def _persist_orchestration_step_completed(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+        *,
+        output: object | None = None,
+    ) -> None:
+        """Persist successful completion of an orchestration step."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                raise RuntimeError(
+                    "cannot complete missing durable orchestration step: "
+                    f"{context.run_id}/{step.step_id}"
+                )
+
+            if existing.status is AgentRunStepStatus.COMPLETED:
+                return
+
+            now = datetime.now(UTC)
+
+            repository.transition(
+                context.run_id,
+                step.step_id,
+                status=AgentRunStepStatus.COMPLETED,
+                updated_at=now,
+                completed_at=now,
+                output=output,
+            )
+        finally:
+            repository.close()
+
+    async def _persist_orchestration_step_ambiguous(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+        *,
+        error: str,
+        failure_category: str | None = None,
+    ) -> None:
+        """Persist an orchestration step whose external outcome is uncertain."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                raise RuntimeError(
+                    "cannot mark missing durable orchestration step ambiguous: "
+                    f"{context.run_id}/{step.step_id}"
+                )
+
+            if existing.status is AgentRunStepStatus.AMBIGUOUS:
+                return
+
+            if existing.status is AgentRunStepStatus.COMPLETED:
+                return
+
+            now = datetime.now(UTC)
+
+            repository.transition(
+                context.run_id,
+                step.step_id,
+                status=AgentRunStepStatus.AMBIGUOUS,
+                updated_at=now,
+                completed_at=now,
+                error=error,
+                failure_category=failure_category,
+            )
+        finally:
+            repository.close()
+
+    async def _persist_orchestration_step_failed(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+        *,
+        error: str,
+        failure_category: str | None = None,
+    ) -> None:
+        """Persist failed execution of an orchestration step."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                raise RuntimeError(
+                    "cannot fail missing durable orchestration step: "
+                    f"{context.run_id}/{step.step_id}"
+                )
+
+            if existing.status in {
+                AgentRunStepStatus.FAILED,
+                AgentRunStepStatus.AMBIGUOUS,
+            }:
+                return
+
+            now = datetime.now(UTC)
+
+            repository.transition(
+                context.run_id,
+                step.step_id,
+                status=AgentRunStepStatus.FAILED,
+                updated_at=now,
+                completed_at=now,
+                error=error,
+                failure_category=failure_category,
+            )
+        finally:
+            repository.close()
+
     async def _start_orchestration_step(
         self,
         context: AgentExecutionContext,
     ) -> int | None:
+        """Start the current orchestration step and persist its lifecycle."""
         state = context.orchestration_state
 
         if context.orchestration_plan is None:
             return None
 
         step = state.current_step
+
         if step is None:
-            step = state.start_step(0)
+            step = state.steps[0]
+
+            await self._persist_orchestration_step_planned(
+                context,
+                step,
+            )
+
+            state.start_step(0)
+
+        elif step.status is OrchestrationStepStatus.PENDING:
+            await self._persist_orchestration_step_planned(
+                context,
+                step,
+            )
+
+            state.start_step(step.step_index)
+
+        await self._persist_orchestration_step_running(
+            context,
+            step,
+        )
 
         await self._emit_orchestration_step_started(
             context,
@@ -631,6 +1037,15 @@ class LLMAgent:
         state.complete_step(
             step_index,
             tool_round=tool_round,
+        )
+
+        completed_step = state.steps[step_index]
+        step_result = state.get_step_result(completed_step.step_id)
+
+        await self._persist_orchestration_step_completed(
+            context,
+            completed_step,
+            output=step_result.output if step_result is not None else None,
         )
 
         await self._emit_orchestration_step_completed(
@@ -687,6 +1102,14 @@ class LLMAgent:
         state.complete_step(
             step.step_index,
             tool_round=tool_round,
+        )
+
+        completed_step = state.steps[step.step_index]
+
+        await self._persist_orchestration_step_completed(
+            context,
+            completed_step,
+            output=tool_result.output,
         )
 
         await self._emit_orchestration_step_completed(

@@ -216,6 +216,121 @@ class AgentRunRecord(Base):
     )
 
 
+class AgentRunStepRecord(Base):
+    __tablename__ = "agent_run_steps"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    step_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    step_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    step_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    attempt: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    tool_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    call_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    input: Mapped[object | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
+    output: Mapped[object | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
+    error: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    failure_category: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    step_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "run_id",
+            "step_id",
+            name="pk_agent_run_steps",
+        ),
+        Index(
+            "ix_agent_run_steps_run_step_index",
+            "run_id",
+            "step_index",
+        ),
+        Index(
+            "ix_agent_run_steps_run_status",
+            "run_id",
+            "status",
+        ),
+    )
+
+
 class ToolExecutionIdempotencyRecord(Base):
     __tablename__ = "tool_execution_idempotency"
 

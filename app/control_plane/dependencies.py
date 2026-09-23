@@ -36,6 +36,9 @@ from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunR
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
 )
+from app.control_plane.agent_run_steps.postgres_repository import (
+    PostgreSQLAgentRunStepsRepository,
+)
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
 from app.control_plane.persistence.database import SessionLocal, get_db
@@ -109,6 +112,11 @@ _tool_idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
     SessionLocal,
 )
 
+
+def _agent_run_steps_repository_factory():
+    return PostgreSQLAgentRunStepsRepository(SessionLocal())
+
+
 _tool_execution_service = ToolExecutionService(
     _tool_registry,
     authorization_service=_tool_authorization_service,
@@ -159,6 +167,7 @@ _agent_runtime = AgentRuntime(
     memory_context_builder=_memory_context_builder,
     memory_service=_memory_service,
     observer=_agent_observer,
+    agent_run_steps_repository_factory=_agent_run_steps_repository_factory,
 )
 
 _agent_initialization_lock = asyncio.Lock()

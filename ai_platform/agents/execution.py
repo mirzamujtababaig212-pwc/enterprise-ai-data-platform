@@ -6,6 +6,7 @@ from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.orchestration import OrchestrationPlan, OrchestrationState
+from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
 from ai_platform.agents.llm_messages import (
     AgentMessage,
     system_message,
@@ -47,6 +48,7 @@ class AgentExecutionContext:
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
         orchestration_plan: OrchestrationPlan | None = None,
+        agent_run_steps_repository_factory=None,
     ) -> None:
         self.request = request
         self.tools = tools
@@ -56,6 +58,7 @@ class AgentExecutionContext:
         self.run_id = run_id
         self.lease_id = lease_id
         self.execution_ownership_lost = execution_ownership_lost
+        self.agent_run_steps_repository_factory = agent_run_steps_repository_factory
 
         self.execution_budget = request.execution_budget or ExecutionBudget()
         self.execution_budget_state = ExecutionBudgetState()
@@ -76,6 +79,13 @@ class AgentExecutionContext:
         for message in self.history:
             if not isinstance(message, AgentMessage):
                 raise TypeError("Agent execution history must contain " "AgentMessage instances.")
+
+    def get_agent_run_steps_repository(self) -> AgentRunStepsRepository | None:
+        """Return a fresh durable step repository for this execution."""
+        if self.agent_run_steps_repository_factory is None:
+            return None
+
+        return self.agent_run_steps_repository_factory()
 
     def raise_if_execution_ownership_lost(self) -> None:
         """

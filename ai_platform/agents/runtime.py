@@ -68,6 +68,7 @@ class AgentRuntime:
         memory_context_builder: MemoryContextBuilder | None = None,
         memory_service: MemoryService | None = None,
         observer: AgentExecutionObserver | None = None,
+        agent_run_steps_repository_factory=None,
     ) -> None:
         self._registry = registry
         self._tool_registry = tool_registry
@@ -86,6 +87,7 @@ class AgentRuntime:
         self._memory_context_builder = memory_context_builder
         self._memory_service = memory_service
         self._observer = observer
+        self._agent_run_steps_repository_factory = agent_run_steps_repository_factory
 
     async def resume(
         self,
@@ -184,6 +186,7 @@ class AgentRuntime:
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
             orchestration_plan=orchestration_plan,
+            agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
         )
 
         return await resume_agent(context, checkpoint)
@@ -282,6 +285,7 @@ class AgentRuntime:
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
             orchestration_plan=orchestration_plan,
+            agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
         )
 
         response = await agent.run(context)

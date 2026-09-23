@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from app.control_plane.agent_run_steps.in_memory import InMemoryAgentRunStepsRepository
+from app.control_plane.agent_run_steps.models import AgentRunStep, AgentRunStepStatus
+
 import asyncio
 
 from typing import Any
 
 import pytest
 
-from tests.tools.execution.test_service import FakeTool, FailingTool
+from tests.tools.execution.test_service import (
+    FakeTool,
+    FailingTool,
+    OwnershipLosingTool,
+)
 from ai_platform.agents.contracts import Agent
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
@@ -33,6 +40,7 @@ from ai_platform.agents.llm_messages import (
 from ai_platform.agents.orchestration import (
     OrchestrationPlan,
     OrchestrationStep,
+    OrchestrationStepCompletionPolicy,
     OrchestrationStepStatus,
 )
 from ai_platform.agents.models import (
@@ -42,7 +50,7 @@ from ai_platform.agents.models import (
 )
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
-from tools.models import ToolDefinition
+from tools.models import ToolDefinition, ToolExecutionFailureCategory
 from tools.rag.search import RAGSearchTool
 from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
 from tools.execution.service import ToolExecutionService
@@ -135,6 +143,8 @@ def make_context(
     *,
     request: AgentRequest | None = None,
     history: tuple[Any, ...] = (),
+    run_id: str | None = None,
+    agent_run_steps_repository_factory=None,
 ) -> tuple[AgentExecutionContext, FakeLLMGateway]:
     definition = AgentDefinition(
         name="test-llm-agent",
@@ -169,6 +179,8 @@ def make_context(
         tools=tools,
         llm=llm_context,
         history=history,
+        run_id=run_id,
+        agent_run_steps_repository_factory=agent_run_steps_repository_factory,
     )
 
     return context, gateway
@@ -419,6 +431,59 @@ async def test_llm_agent_starts_first_orchestration_step() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_persists_orchestration_step_as_running() -> None:
+    from app.control_plane.agent_run_steps.in_memory import (
+        InMemoryAgentRunStepsRepository,
+    )
+    from app.control_plane.agent_run_steps.models import AgentRunStepStatus
+    from ai_platform.agents.orchestration import (
+        OrchestrationPlan,
+        OrchestrationStep,
+        OrchestrationStepStatus,
+    )
+
+    repository = InMemoryAgentRunStepsRepository()
+    context, _ = make_context(
+        run_id="run-durable-step",
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    context.orchestration_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="step-1",
+                step_index=0,
+                name="First step",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        )
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test LLM-backed agent.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        )
+    )
+
+    await agent._start_orchestration_step(context)
+
+    durable_step = repository.get(
+        "run-durable-step",
+        "step-1",
+    )
+
+    assert durable_step is not None
+    assert durable_step.status is AgentRunStepStatus.RUNNING
+    assert durable_step.step_index == 0
+    assert durable_step.step_type == "model"
+    assert durable_step.attempt == 1
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_does_not_start_step_without_orchestration_plan() -> None:
     context, _ = make_context()
 
@@ -490,7 +555,16 @@ async def test_llm_agent_completes_orchestration_step() -> None:
         OrchestrationStepStatus,
     )
 
-    context, _ = make_context()
+    from app.control_plane.agent_run_steps.in_memory import (
+        InMemoryAgentRunStepsRepository,
+    )
+    from app.control_plane.agent_run_steps.models import AgentRunStepStatus
+
+    repository = InMemoryAgentRunStepsRepository()
+    context, _ = make_context(
+        run_id="run-durable-complete",
+        agent_run_steps_repository_factory=lambda: repository,
+    )
 
     context.orchestration_plan = OrchestrationPlan(
         steps=(
@@ -526,6 +600,15 @@ async def test_llm_agent_completes_orchestration_step() -> None:
     assert step.status is OrchestrationStepStatus.COMPLETED
     assert step.tool_round == 2
     assert context.orchestration_state.current_step_index == 0
+
+    durable_step = repository.get(
+        "run-durable-complete",
+        "step-1",
+    )
+
+    assert durable_step is not None
+    assert durable_step.status is AgentRunStepStatus.COMPLETED
+    assert durable_step.completed_at is not None
 
 
 @pytest.mark.asyncio
@@ -2164,6 +2247,532 @@ async def test_llm_agent_completes_rag_orchestration_step_on_tool_result() -> No
     assert result.metadata["rag_provenance"]["retrieved_count"] == 2
 
     assert response.output == "RAG retrieves relevant context for generation."
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
+    from app.control_plane.agent_run_steps.in_memory import (
+        InMemoryAgentRunStepsRepository,
+    )
+
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    await tool_registry.register(FakeRAGTool())
+
+    plan = build_enterprise_rag_analyst_plan()
+    state = plan.materialize_state()
+    repository = InMemoryAgentRunStepsRepository()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-binding",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id="run-rag-binding",
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    context.orchestration_plan = plan
+    context.orchestration_state = state
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    assert response.output == "RAG retrieves relevant context for generation."
+
+    step = repository.get(
+        "run-rag-binding",
+        "retrieve_evidence",
+    )
+
+    assert step is not None
+    assert step.step_id == "retrieve_evidence"
+    assert step.step_id != "call-123"
+    assert step.step_type == "tool"
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.tool_name == "rag.search"
+    assert step.call_id == "call-123"
+    assert step.input == {"query": "RAG"}
+    assert step.output["query"] == "RAG"
+    assert step.output["retrieved_count"] == 2
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_never_executes_tool_for_completed_durable_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool = FakeTool(name="rag.search")
+
+    tool_registry = InMemoryToolRegistry()
+    await tool_registry.register(tool)
+
+    plan = build_enterprise_rag_analyst_plan()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-rag-completed-no-reexecution"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-completed",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+    step = context.orchestration_state.steps[0]
+    context.orchestration_state.start_step(0)
+
+    repository.create(
+        AgentRunStep(
+            run_id=run_id,
+            step_id=step.step_id,
+            step_index=step.step_index,
+            step_type="tool",
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-123",
+            input={"query": "RAG"},
+            output={"query": "RAG", "retrieved_count": 2},
+        )
+    )
+
+    tool_calls = (
+        AgentToolCall(
+            call_id="call-123",
+            name="rag.search",
+            arguments={"query": "RAG"},
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="cannot execute tool for durable orchestration step from status: completed",
+    ):
+        await agent._execute_tool_calls_and_append_results(
+            [],
+            context,
+            tool_calls,
+            tool_round=1,
+        )
+
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_rejects_tool_execution_when_durable_binding_fails() -> None:
+
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool = FakeTool(name="rag.search")
+
+    tool_registry = InMemoryToolRegistry()
+    await tool_registry.register(tool)
+
+    plan = build_enterprise_rag_analyst_plan()
+
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-rag-binding-failure"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-123",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    state = context.orchestration_state
+    step = state.steps[0]
+
+    repository.create(
+        AgentRunStep(
+            run_id=run_id,
+            step_id=step.step_id,
+            step_index=step.step_index,
+            step_type="tool",
+            status=AgentRunStepStatus.RUNNING,
+            tool_name="rag.search",
+            call_id="different-call-id",
+        )
+    )
+
+    await agent._start_orchestration_step(context)
+
+    tool_calls = (
+        AgentToolCall(
+            call_id="call-123",
+            name="rag.search",
+            arguments={"query": "RAG"},
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="call_id is already bound to a different value",
+    ):
+        await agent._execute_tool_calls_and_append_results(
+            [],
+            context,
+            tool_calls,
+            tool_round=1,
+        )
+
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_persists_failed_durable_tool_step() -> None:
+    definition = AgentDefinition(
+        name="test-tool-failure-agent",
+        description="Test agent for durable tool failure.",
+        system_prompt="You are a test agent.",
+        model="gpt-test",
+        tool_names=("failing_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="failing_tool")
+    tool_registry = InMemoryToolRegistry()
+    await tool_registry.register(FailingTool())
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute failing tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "failing_tool"},
+            ),
+        )
+    )
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-tool-failed"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the failing tool.",
+            session_id="session-failed",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    with pytest.raises(Exception):
+        await agent.run(context)
+
+    step = repository.get(run_id, "execute_tool")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
+    assert step.error == "RuntimeError: simulated tool failure"
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_persists_ambiguous_durable_tool_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    plan = build_enterprise_rag_analyst_plan()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-rag-tool-ambiguous"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-ambiguous",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    tool_calls = (
+        AgentToolCall(
+            call_id="call-123",
+            name="rag.search",
+            arguments={"query": "RAG"},
+        ),
+    )
+
+    async def ambiguous_execute_tool_calls(tool_calls):
+        from ai_platform.agents.tool_calls import AgentToolResult
+
+        return [
+            AgentToolResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.name,
+                error="Tool execution outcome is ambiguous.",
+                failure_category=ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS,
+            )
+            for tool_call in tool_calls
+        ]
+
+    context.execute_tool_calls = ambiguous_execute_tool_calls
+
+    await agent._execute_tool_calls_and_append_results(
+        [],
+        context,
+        tool_calls,
+        tool_round=1,
+    )
+
+    step = repository.get(run_id, "retrieve_evidence")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.AMBIGUOUS
+    assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS.value
+    assert step.error == "Tool execution outcome is ambiguous."
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_keeps_durable_tool_step_running_when_execution_is_in_progress() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    plan = build_enterprise_rag_analyst_plan()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-rag-tool-in-progress"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-in-progress",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    tool_calls = (
+        AgentToolCall(
+            call_id="call-123",
+            name="rag.search",
+            arguments={"query": "RAG"},
+        ),
+    )
+
+    async def in_progress_execute_tool_calls(tool_calls):
+        from ai_platform.agents.tool_calls import AgentToolResult
+
+        return [
+            AgentToolResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.name,
+                error="Tool execution is already in progress.",
+                failure_category=ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS,
+            )
+            for tool_call in tool_calls
+        ]
+
+    context.execute_tool_calls = in_progress_execute_tool_calls
+
+    await agent._execute_tool_calls_and_append_results(
+        [],
+        context,
+        tool_calls,
+        tool_round=1,
+    )
+
+    step = repository.get(run_id, "retrieve_evidence")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.RUNNING
+    assert step.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_marks_durable_tool_step_ambiguous_on_ownership_loss() -> None:
+    definition = AgentDefinition(
+        name="ownership-loss-agent",
+        description="Test agent for ownership-loss recovery.",
+        system_prompt="You are a test agent.",
+        model="gpt-test",
+        tool_names=("ownership_losing_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="ownership_losing_tool")
+    tool_registry = InMemoryToolRegistry()
+    ownership_lost = asyncio.Event()
+    tool = OwnershipLosingTool(ownership_lost)
+    await tool_registry.register(tool)
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute ownership-losing tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "ownership_losing_tool"},
+            ),
+        )
+    )
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-tool-ownership-loss"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the ownership-losing tool.",
+            session_id="session-ownership-loss",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        execution_ownership_lost=ownership_lost,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    tool_calls = (
+        AgentToolCall(
+            call_id="call-ownership-loss",
+            name="ownership_losing_tool",
+            arguments={"query": "RAG"},
+        ),
+    )
+
+    with pytest.raises(AgentExecutionOwnershipLostError):
+        await agent._execute_tool_calls_and_append_results(
+            [],
+            context,
+            tool_calls,
+            tool_round=1,
+        )
+
+    step = repository.get(run_id, "execute_tool")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.AMBIGUOUS
+    assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS.value
+    assert step.completed_at is not None
+    assert tool.execution_count == 1
 
 
 @pytest.mark.asyncio
