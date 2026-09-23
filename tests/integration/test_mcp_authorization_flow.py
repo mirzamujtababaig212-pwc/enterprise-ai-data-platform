@@ -59,6 +59,9 @@ async def test_real_mcp_tool_metadata_reaches_authorization_policy() -> None:
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         discovered_tool = await registry.get("search_documents")
@@ -67,6 +70,9 @@ async def test_real_mcp_tool_metadata_reaches_authorization_policy() -> None:
         assert discovered_tool.definition.metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         await authorizer.allow(
@@ -130,6 +136,9 @@ async def test_real_mcp_tool_is_denied_when_authorization_metadata_policy_does_n
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         await authorizer.allow(

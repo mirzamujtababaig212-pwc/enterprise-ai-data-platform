@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from tools.mcp.config import MCPToolCapability
 from tools.mcp.discovery import MCPToolDiscoveryService
 from tools.mcp.models import MCPToolDefinition
 from tools.registry.in_memory import InMemoryToolRegistry
@@ -58,11 +59,17 @@ async def test_discovers_and_registers_mcp_tools():
     assert definitions[0].name == "search_documents"
     assert definitions[0].metadata == {
         "source": "mcp",
+        "capability": "unclassified",
+        "risk_tier": "unknown",
+        "side_effect": True,
     }
 
     assert definitions[1].name == "get_document"
     assert definitions[1].metadata == {
         "source": "mcp",
+        "capability": "unclassified",
+        "risk_tier": "unknown",
+        "side_effect": True,
     }
 
     client.list_tools.assert_awaited_once()
@@ -115,6 +122,9 @@ async def test_registered_mcp_tool_can_be_retrieved_from_registry():
     assert tool.definition.name == "search_documents"
     assert tool.definition.metadata == {
         "source": "mcp",
+        "capability": "unclassified",
+        "risk_tier": "unknown",
+        "side_effect": True,
     }
 
 
@@ -137,3 +147,106 @@ async def test_discovery_propagates_client_failure():
         await service.discover_and_register()
 
     assert await registry.list_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_discovery_propagates_deldai_tool_capability_metadata():
+    client = FakeMCPClient()
+    registry = InMemoryToolRegistry()
+
+    service = MCPToolDiscoveryService(
+        client=client,
+        registry=registry,
+        server_name="document-server",
+        tool_capabilities={
+            "search_documents": MCPToolCapability(
+                capability="document.read",
+                risk_tier="low",
+                side_effect=False,
+                permission_scope="document:read",
+            ),
+        },
+    )
+
+    definitions = await service.discover_and_register()
+
+    assert definitions[0].metadata == {
+        "source": "mcp",
+        "mcp_server": "document-server",
+        "capability": "document.read",
+        "risk_tier": "low",
+        "side_effect": False,
+        "permission_scope": "document:read",
+    }
+
+
+@pytest.mark.asyncio
+async def test_discovery_assigns_conservative_capability_to_unclassified_tool():
+    client = FakeMCPClient()
+    client.list_tools = AsyncMock(
+        return_value=[
+            MCPToolDefinition(
+                name="unknown_tool",
+                description="An unclassified MCP tool",
+                input_schema={"type": "object"},
+            )
+        ]
+    )
+
+    service = MCPToolDiscoveryService(
+        client=client,
+        registry=InMemoryToolRegistry(),
+        server_name="external-server",
+    )
+
+    definitions = await service.discover_and_register()
+
+    assert len(definitions) == 1
+    assert definitions[0].metadata == {
+        "source": "mcp",
+        "mcp_server": "external-server",
+        "capability": "unclassified",
+        "risk_tier": "unknown",
+        "side_effect": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_discovery_prefers_explicit_capability_over_default():
+    capability = MCPToolCapability(
+        capability="document.search",
+        risk_tier="low",
+        side_effect=False,
+        permission_scope="documents:read",
+    )
+
+    client = FakeMCPClient()
+    client.list_tools = AsyncMock(
+        return_value=[
+            MCPToolDefinition(
+                name="search_documents",
+                description="Search documents",
+                input_schema={"type": "object"},
+            )
+        ]
+    )
+
+    service = MCPToolDiscoveryService(
+        client=client,
+        registry=InMemoryToolRegistry(),
+        server_name="document-server",
+        tool_capabilities={
+            "search_documents": capability,
+        },
+    )
+
+    definitions = await service.discover_and_register()
+
+    assert definitions[0].metadata == {
+        "source": "mcp",
+        "mcp_server": "document-server",
+        "capability": "document.search",
+        "risk_tier": "low",
+        "side_effect": False,
+        "permission_scope": "documents:read",
+    }

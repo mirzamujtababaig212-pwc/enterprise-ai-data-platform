@@ -338,3 +338,128 @@ async def test_authorizer_without_policy_preserves_existing_behavior():
 
     assert result.allowed is True
     assert result.reason == "Tool is authorized."
+
+
+@pytest.mark.asyncio
+async def test_authorizer_allows_tool_when_permission_and_capability_policy_match():
+    from tools.authorization.policy import CapabilityAuthorizationPolicy
+
+    policy = CapabilityAuthorizationPolicy(
+        allowed_capabilities={"document.search"},
+        allowed_risk_tiers={"low"},
+        allowed_side_effects={False},
+        required_permission_scope="documents:read",
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "capability": "document.search",
+            "risk_tier": "low",
+            "side_effect": False,
+            "permission_scope": "documents:read",
+        },
+    )
+
+    assert result.allowed is True
+    assert result.policy_id == "capability_policy"
+    assert result.policy_version == "1.0"
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_tool_when_capability_policy_rejects_risk():
+    from tools.authorization.policy import CapabilityAuthorizationPolicy
+
+    policy = CapabilityAuthorizationPolicy(
+        allowed_capabilities={"document.search"},
+        allowed_risk_tiers={"low"},
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "capability": "document.search",
+            "risk_tier": "high",
+        },
+    )
+
+    assert result.allowed is False
+    assert "risk_tier='high'" in result.reason
+    assert result.policy_id == "capability_policy"
+    assert result.policy_version == "1.0"
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_side_effecting_tool_when_policy_disallows_it():
+    from tools.authorization.policy import CapabilityAuthorizationPolicy
+
+    policy = CapabilityAuthorizationPolicy(
+        allowed_side_effects={False},
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "delete_document",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "delete_document",
+        metadata={
+            "side_effect": True,
+        },
+    )
+
+    assert result.allowed is False
+    assert "side_effect=True" in result.reason
+    assert result.policy_id == "capability_policy"
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_permission_scope_mismatch():
+    from tools.authorization.policy import CapabilityAuthorizationPolicy
+
+    policy = CapabilityAuthorizationPolicy(
+        required_permission_scope="documents:read",
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "permission_scope": "documents:write",
+        },
+    )
+
+    assert result.allowed is False
+    assert "permission_scope='documents:write'" in result.reason
+    assert result.policy_id == "capability_policy"

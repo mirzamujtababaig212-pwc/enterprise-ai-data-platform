@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tools.mcp.config import MCPServerConfig
+from tools.mcp.config import MCPServerConfig, MCPToolCapability
 from tools.mcp.manager import MCPServerManager
 from tools.mcp.models import MCPToolDefinition
 from tools.models import ToolDefinition
@@ -213,6 +213,9 @@ async def test_discover_server_registers_tools():
             metadata={
                 "source": "mcp",
                 "mcp_server": "server-a",
+                "capability": "unclassified",
+                "risk_tier": "unknown",
+                "side_effect": True,
             },
         )
     ]
@@ -224,6 +227,9 @@ async def test_discover_server_registers_tools():
     assert registered.definition.metadata == {
         "source": "mcp",
         "mcp_server": "server-a",
+        "capability": "unclassified",
+        "risk_tier": "unknown",
+        "side_effect": True,
     }
 
 
@@ -252,6 +258,54 @@ async def test_connect_and_discover():
     assert manager.is_connected("server-a") is True
     assert len(definitions) == 1
     assert definitions[0].name == "search"
+
+
+@pytest.mark.asyncio
+async def test_discover_server_propagates_configured_tool_capability():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="server-a",
+        transport="stdio",
+        command="python",
+        args=("server.py",),
+        tool_capabilities={
+            "search": MCPToolCapability(
+                capability="document.read",
+                risk_tier="low",
+                side_effect=False,
+                permission_scope="document:read",
+            ),
+        },
+    )
+
+    await manager.register_server(config)
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.list_tools = AsyncMock(
+        return_value=[
+            make_mcp_tool(
+                name="search",
+                description="Search documents",
+                input_schema={"type": "object"},
+            )
+        ]
+    )
+
+    await manager.connect_server("server-a")
+
+    definitions = await manager.discover_server("server-a")
+
+    assert definitions[0].metadata == {
+        "source": "mcp",
+        "mcp_server": "server-a",
+        "capability": "document.read",
+        "risk_tier": "low",
+        "side_effect": False,
+        "permission_scope": "document:read",
+    }
 
 
 @pytest.mark.asyncio

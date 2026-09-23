@@ -112,6 +112,7 @@ class MCPServerManager:
             client=runtime.client,
             registry=self.registry,
             server_name=name,
+            tool_capabilities=runtime.config.tool_capabilities,
         )
 
         return await discovery.discover_and_register()

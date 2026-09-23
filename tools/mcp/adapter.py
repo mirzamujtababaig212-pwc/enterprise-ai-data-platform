@@ -5,6 +5,7 @@ from typing import Any
 from tools.execution.context import ToolExecutionContext
 from tools.execution.idempotency import build_external_idempotency_key
 from tools.mcp.client import MCPClient
+from tools.mcp.config import MCPToolCapability
 from tools.mcp.models import MCPToolDefinition
 from tools.models import ToolDefinition
 
@@ -15,6 +16,7 @@ class MCPToolAdapter:
         client: MCPClient,
         definition: MCPToolDefinition,
         server_name: str | None = None,
+        capability: MCPToolCapability | None = None,
     ):
         if not definition.name.strip():
             raise ValueError("MCP tool name must not be empty.")
@@ -28,6 +30,7 @@ class MCPToolAdapter:
         self.client = client
         self._definition = definition
         self._server_name = server_name
+        self._capability = capability
 
     @property
     def definition(self) -> ToolDefinition:
@@ -37,6 +40,18 @@ class MCPToolAdapter:
 
         if self._server_name is not None:
             metadata["mcp_server"] = self._server_name
+
+        if self._capability is not None:
+            metadata.update(
+                {
+                    "capability": self._capability.capability,
+                    "risk_tier": self._capability.risk_tier,
+                    "side_effect": self._capability.side_effect,
+                }
+            )
+
+            if self._capability.permission_scope is not None:
+                metadata["permission_scope"] = self._capability.permission_scope
 
         return ToolDefinition(
             name=self._definition.name,

@@ -1,6 +1,7 @@
 import pytest
 
 from tools.mcp.adapter import MCPToolAdapter
+from tools.mcp.config import MCPToolCapability
 from tools.mcp.models import (
     MCPToolCallResult,
     MCPToolDefinition,
@@ -298,3 +299,34 @@ async def test_mcp_adapter_does_not_add_meta_without_execution_identity():
             "meta": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_mcp_adapter_exposes_deldai_capability_metadata():
+    client = FakeMCPClient()
+
+    definition = MCPToolDefinition(
+        name="search_documents",
+        description="Search enterprise documents.",
+    )
+
+    tool = MCPToolAdapter(
+        client,
+        definition,
+        server_name="document-server",
+        capability=MCPToolCapability(
+            capability="document.read",
+            risk_tier="low",
+            side_effect=False,
+            permission_scope="document:read",
+        ),
+    )
+
+    assert tool.definition.metadata == {
+        "source": "mcp",
+        "mcp_server": "document-server",
+        "capability": "document.read",
+        "risk_tier": "low",
+        "side_effect": False,
+        "permission_scope": "document:read",
+    }
