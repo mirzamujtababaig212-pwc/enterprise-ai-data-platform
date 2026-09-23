@@ -134,6 +134,9 @@ async def test_agent_runtime_authorizes_real_mcp_tool_before_execution() -> None
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         response = await runtime.run(
@@ -225,6 +228,9 @@ async def test_agent_runtime_denies_real_mcp_tool_before_server_execution() -> N
         assert definitions[0].metadata == {
             "source": "mcp",
             "mcp_server": "document-server",
+            "capability": "unclassified",
+            "risk_tier": "unknown",
+            "side_effect": True,
         }
 
         response = await runtime.run(
