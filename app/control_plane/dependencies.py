@@ -407,6 +407,7 @@ async def get_agent_run_recovery_service(
         checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
+        tool_idempotency_store=_tool_idempotency_store,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
     )
@@ -424,6 +425,7 @@ async def build_agent_run_recovery_service(
         checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
+        tool_idempotency_store=_tool_idempotency_store,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
     )

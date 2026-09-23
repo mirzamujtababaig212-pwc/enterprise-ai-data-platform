@@ -314,6 +314,50 @@ async def test_execute_releases_idempotency_after_ordinary_tool_failure():
 
 
 @pytest.mark.asyncio
+async def test_execute_does_not_reexecute_when_previous_claim_is_unresolved():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    context = ToolExecutionContext(
+        run_id="run-crash-recovery",
+        call_id="call-crash-recovery",
+    )
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-crash-recovery",
+        call_id="call-crash-recovery",
+        tool_name="test_tool",
+    )
+
+    # Simulate the durable claim that remains after a worker/process
+    # disappears before idempotency completion is persisted.
+    first_claim = await store.claim(key)
+
+    assert first_claim.status == ToolIdempotencyClaimStatus.CLAIMED
+    assert first_claim.claim_token is not None
+
+    # A subsequent execution must never invoke the side-effecting tool.
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        execution_context=context,
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
 async def test_execute_calls_registered_tool():
     registry = InMemoryToolRegistry()
     tool = FakeTool()

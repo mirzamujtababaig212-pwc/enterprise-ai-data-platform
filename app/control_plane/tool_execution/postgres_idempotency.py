@@ -225,6 +225,38 @@ class PostgreSQLToolExecutionIdempotencyStore(
         finally:
             session.close()
 
+    async def mark_run_claims_ambiguous(
+        self,
+        run_id: str,
+    ) -> int:
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValueError("run_id must be a non-empty string.")
+
+        session = self._session_factory()
+
+        try:
+            statement = (
+                update(ToolExecutionIdempotencyRecord)
+                .where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.status
+                    == ToolIdempotencyClaimStatus.CLAIMED.value,
+                )
+                .values(
+                    status=ToolIdempotencyClaimStatus.AMBIGUOUS.value,
+                )
+            )
+
+            try:
+                updated = session.execute(statement)
+                session.commit()
+                return updated.rowcount
+            except Exception:
+                session.rollback()
+                raise
+        finally:
+            session.close()
+
     @staticmethod
     def _result_from_record(
         record: ToolExecutionIdempotencyRecord,

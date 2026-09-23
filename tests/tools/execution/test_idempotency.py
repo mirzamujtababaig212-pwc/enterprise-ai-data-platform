@@ -236,3 +236,44 @@ def test_external_idempotency_key_changes_with_logical_tool_identity() -> None:
 
     assert first != second
     assert first != third
+
+
+@pytest.mark.asyncio
+async def test_mark_run_claims_ambiguous_marks_only_unresolved_claims() -> None:
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    target_key = ToolExecutionIdempotencyKey(
+        run_id="run-reconcile",
+        call_id="call-1",
+        tool_name="tool-a",
+    )
+    second_target_key = ToolExecutionIdempotencyKey(
+        run_id="run-reconcile",
+        call_id="call-2",
+        tool_name="tool-b",
+    )
+    other_run_key = ToolExecutionIdempotencyKey(
+        run_id="other-run",
+        call_id="call-3",
+        tool_name="tool-c",
+    )
+
+    target_claim = await store.claim(target_key)
+    second_target_claim = await store.claim(second_target_key)
+    other_claim = await store.claim(other_run_key)
+
+    assert target_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert second_target_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert other_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+
+    marked = await store.mark_run_claims_ambiguous("run-reconcile")
+
+    assert marked == 2
+
+    target_result = await store.claim(target_key)
+    second_target_result = await store.claim(second_target_key)
+    other_result = await store.claim(other_run_key)
+
+    assert target_result.status is ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert second_target_result.status is ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert other_result.status is ToolIdempotencyClaimStatus.IN_PROGRESS

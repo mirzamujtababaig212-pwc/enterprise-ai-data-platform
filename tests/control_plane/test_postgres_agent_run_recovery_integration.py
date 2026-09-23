@@ -515,6 +515,258 @@ def test_postgres_recovery_replays_completed_tool_from_before_checkpoint() -> No
         engine.dispose()
 
 
+def test_postgres_recovery_reconciles_stranded_claim_before_resume() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "pg-stranded-claim-recovery-e2e"
+
+    session = session_factory()
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Execute the fleet-42 recovery operation.",
+            session_id="session-stranded-claim",
+            user_id="user-stranded-claim",
+            metadata={
+                "request_id": "stranded-claim-request",
+                "source": "integration-test",
+            },
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="crash-boundary-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                lease_id="initial-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        tool = CrashBoundaryTool()
+        tool_registry = InMemoryToolRegistry()
+
+        import asyncio
+
+        asyncio.run(tool_registry.register(tool))
+
+        idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
+            session_factory,
+        )
+        tool_execution_service = ToolExecutionService(
+            tool_registry,
+            idempotency_store=idempotency_store,
+        )
+
+        llm_gateway = CrashBoundaryLLMGateway()
+        registry = InMemoryAgentRegistry()
+
+        definition = AgentDefinition(
+            name="crash-boundary-agent",
+            description="Stranded-claim recovery integration agent.",
+            system_prompt="Execute the requested operation using the available tool.",
+            model="fake-model",
+            temperature=0.0,
+            max_tokens=256,
+            tool_names=("crash.boundary.tool",),
+        )
+
+        checkpoint_handler = CrashBoundaryCheckpointHandler(session_factory)
+        observer = PostgreSQLAgentRunEventObserver(session_factory)
+
+        agent = LLMAgent(
+            definition,
+            observer=observer,
+            checkpoint_handler=checkpoint_handler,
+        )
+
+        asyncio.run(registry.register(agent))
+
+        runtime = AgentRuntime(
+            registry,
+            tool_registry=tool_registry,
+            tool_execution_service=tool_execution_service,
+            llm_gateway=llm_gateway,
+        )
+
+        with pytest.raises(RuntimeError, match="simulated process crash"):
+            asyncio.run(
+                runtime.run(
+                    "crash-boundary-agent",
+                    request,
+                    run_id=run_id,
+                )
+            )
+
+        # The external side effect happened exactly once.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 2
+
+        checkpoint = checkpoint_repository.get_latest(run_id)
+        assert checkpoint is not None
+        assert checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+        assert checkpoint.tool_round == 1
+
+        # The normal execution path completed the idempotency record.
+        # We now deliberately reconstruct the durable state representing
+        # a worker disappearing after the side effect but before the
+        # completion state could be relied upon by recovery.
+        idempotency_session = session_factory()
+        try:
+            idempotency_record = idempotency_session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "crash-boundary-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "crash.boundary.tool",
+                )
+            )
+            assert idempotency_record is not None
+            assert idempotency_record.status == "completed"
+
+            idempotency_session.execute(
+                update(ToolExecutionIdempotencyRecord)
+                .where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "crash-boundary-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "crash.boundary.tool",
+                )
+                .values(
+                    status="claimed",
+                    claim_token="stranded-worker-claim-token",
+                )
+            )
+            idempotency_session.commit()
+        finally:
+            idempotency_session.close()
+
+        # Verify the durable state is now a stranded CLAIMED record.
+        verification_session = session_factory()
+        try:
+            stranded_record = verification_session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "crash-boundary-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "crash.boundary.tool",
+                )
+            )
+            assert stranded_record is not None
+            assert stranded_record.status == "claimed"
+            assert stranded_record.claim_token == "stranded-worker-claim-token"
+        finally:
+            verification_session.close()
+
+        # Simulate worker disappearance after the side effect and before
+        # recovery can reconcile the stranded execution claim.
+        expired_at = datetime.now(UTC) - timedelta(minutes=5)
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                status=AgentRunStatus.RUNNING.value,
+                lease_id="expired-stranded-claim",
+                lease_expires_at=expired_at,
+            )
+        )
+        session.commit()
+
+        # Recovery must now be able to persist the resumed AFTER checkpoint.
+        checkpoint_handler.suppress_after_tool_checkpoint = False
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            observer=observer,
+            tool_idempotency_store=idempotency_store,
+            lease_seconds=60,
+        )
+
+        results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == run_id
+        assert results.recovered[0].response.output == (
+            "Recovered execution completed successfully."
+        )
+        assert results.failed_run_ids == ()
+
+        # The recovery boundary must reconcile the stranded CLAIMED row to
+        # AMBIGUOUS before resume. The same call_id therefore cannot execute
+        # the external side effect a second time.
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 3
+
+        idempotency_session = session_factory()
+        try:
+            reconciled_record = idempotency_session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == "crash-boundary-call-001",
+                    ToolExecutionIdempotencyRecord.tool_name == "crash.boundary.tool",
+                )
+            )
+            assert reconciled_record is not None
+            assert reconciled_record.status == "ambiguous"
+        finally:
+            idempotency_session.close()
+
+        session.expire_all()
+
+        restored = run_repository.get(run_id)
+        assert restored is not None
+        assert restored.status is AgentRunStatus.COMPLETED
+        assert restored.output == "Recovered execution completed successfully."
+        assert restored.lease_id is None
+        assert restored.lease_expires_at is None
+
+        restored_checkpoint = checkpoint_repository.get_latest(run_id)
+        assert restored_checkpoint is not None
+        assert restored_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+
+        assert any(
+            message.role.value == "tool" and "crash-boundary-call-001" in message.content
+            for message in restored_checkpoint.messages
+        )
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
+        engine.dispose()
+
+
 def test_postgres_recovery_does_not_repeat_side_effect_after_lease_loss() -> None:
     engine = make_engine()
     session_factory = sessionmaker(

@@ -24,6 +24,7 @@ from app.control_plane.agent_runs.models import (
 )
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.repository import AgentRunRepository
+from tools.execution.idempotency import ToolExecutionIdempotencyStore
 from app.control_plane.agent_runs.lease import (
     create_lease,
     heartbeat_loop,
@@ -64,6 +65,7 @@ class AgentRunRecoveryService:
         checkpoints_repository: AgentCheckpointsRepository,
         observer: AgentExecutionObserver | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
+        tool_idempotency_store: ToolExecutionIdempotencyStore | None = None,
         lease_seconds: int = 60,
         max_recovery_attempts: int = 3,
     ) -> None:
@@ -74,6 +76,7 @@ class AgentRunRecoveryService:
         self._repository = repository
         self._checkpoints_repository = checkpoints_repository
         self._observer = observer
+        self._tool_idempotency_store = tool_idempotency_store
         self._lease_seconds = lease_seconds
         self._max_recovery_attempts = max_recovery_attempts
 
@@ -89,6 +92,15 @@ class AgentRunRecoveryService:
         except Exception:
             # Recovery observability must never change recovery semantics.
             pass
+
+    async def _reconcile_tool_execution_claims(
+        self,
+        run_id: str,
+    ) -> None:
+        if self._tool_idempotency_store is None:
+            return
+
+        await self._tool_idempotency_store.mark_run_claims_ambiguous(run_id)
 
     async def recover(
         self,
@@ -136,6 +148,8 @@ class AgentRunRecoveryService:
             raise RuntimeError(
                 f"Agent run '{run_id}' could not be claimed for recovery.",
             )
+
+        await self._reconcile_tool_execution_claims(run.run_id)
 
         await self._emit(
             AgentExecutionEvent(
@@ -222,6 +236,8 @@ class AgentRunRecoveryService:
 
             if run is None:
                 continue
+
+            await self._reconcile_tool_execution_claims(run.run_id)
 
             await self._emit(
                 AgentExecutionEvent(

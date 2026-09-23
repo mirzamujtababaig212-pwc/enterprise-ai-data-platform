@@ -562,3 +562,67 @@ async def test_postgres_stale_completion_cannot_complete_released_claim(
 
     assert replay.status is ToolIdempotencyClaimStatus.COMPLETED
     assert replay.result == current_result
+
+
+@pytest.mark.asyncio
+async def test_postgres_mark_run_claims_ambiguous_marks_only_unresolved_claims(
+    postgres_sessions,
+) -> None:
+    _, session_factory = postgres_sessions
+
+    target_run_id = "postgres-reconcile-run"
+    other_run_id = "postgres-reconcile-other-run"
+
+    target_key_one = make_key(
+        run_id=target_run_id,
+        call_id="call-1",
+        tool_name="tool-a",
+    )
+    target_key_two = make_key(
+        run_id=target_run_id,
+        call_id="call-2",
+        tool_name="tool-b",
+    )
+    other_key = make_key(
+        run_id=other_run_id,
+        call_id="call-3",
+        tool_name="tool-c",
+    )
+
+    store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+
+    for key in (target_key_one, target_key_two, other_key):
+        clear_integration_key(session_factory, key)
+
+    first_claim = await store.claim(target_key_one)
+    second_claim = await store.claim(target_key_two)
+    other_claim = await store.claim(other_key)
+
+    assert first_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert second_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+    assert other_claim.status is ToolIdempotencyClaimStatus.CLAIMED
+
+    completed_result = make_result(
+        tool_name=target_key_one.tool_name,
+        output={"status": "already-completed"},
+    )
+
+    await store.complete(
+        target_key_one,
+        completed_result,
+        claim_token=first_claim.claim_token,
+    )
+
+    marked = await store.mark_run_claims_ambiguous(target_run_id)
+
+    assert marked == 1
+
+    completed_claim = await store.claim(target_key_one)
+    unresolved_claim = await store.claim(target_key_two)
+    other_run_claim = await store.claim(other_key)
+
+    assert completed_claim.status is ToolIdempotencyClaimStatus.COMPLETED
+    assert completed_claim.result == completed_result
+
+    assert unresolved_claim.status is ToolIdempotencyClaimStatus.AMBIGUOUS
+    assert other_run_claim.status is ToolIdempotencyClaimStatus.IN_PROGRESS

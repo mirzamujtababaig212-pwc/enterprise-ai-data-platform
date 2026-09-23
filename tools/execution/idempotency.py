@@ -84,6 +84,12 @@ class ToolExecutionIdempotencyStore:
     ) -> None:
         raise NotImplementedError
 
+    async def mark_run_claims_ambiguous(
+        self,
+        run_id: str,
+    ) -> int:
+        raise NotImplementedError
+
 
 class InMemoryToolExecutionIdempotencyStore(
     ToolExecutionIdempotencyStore,
@@ -184,3 +190,19 @@ class InMemoryToolExecutionIdempotencyStore(
 
             self._in_progress.pop(key)
             self._ambiguous.add(key)
+
+    async def mark_run_claims_ambiguous(
+        self,
+        run_id: str,
+    ) -> int:
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValueError("run_id must be a non-empty string.")
+
+        async with self._lock:
+            matching_keys = [key for key in self._in_progress if key.run_id == run_id]
+
+            for key in matching_keys:
+                self._in_progress.pop(key)
+                self._ambiguous.add(key)
+
+            return len(matching_keys)
