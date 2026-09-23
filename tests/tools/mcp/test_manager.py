@@ -315,6 +315,151 @@ async def test_discover_server_propagates_configured_tool_capability():
 
 
 @pytest.mark.asyncio
+async def test_unregister_server_removes_disconnected_server_and_owned_tools():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.list_tools = AsyncMock(
+        return_value=[
+            make_mcp_tool(name="search"),
+            make_mcp_tool(name="get_document"),
+        ]
+    )
+
+    client.connect = AsyncMock()
+    await manager.connect_server("server-a")
+    await manager.discover_server("server-a")
+
+    await manager.unregister_server("server-a")
+
+    assert manager.list_servers() == []
+    assert await registry.get("search") is None
+    assert await registry.get("get_document") is None
+
+
+@pytest.mark.asyncio
+async def test_unregister_server_removes_disabled_owned_tools():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.list_tools = AsyncMock(return_value=[make_mcp_tool(name="search")])
+
+    await manager.connect_and_discover("server-a")
+
+    tool = await registry.get("search")
+    assert tool is not None
+
+    disabled_definition = ToolDefinition(
+        name=tool.definition.name,
+        description=tool.definition.description,
+        input_schema=tool.definition.input_schema,
+        metadata=tool.definition.metadata,
+        enabled=False,
+        execution_policy=tool.definition.execution_policy,
+    )
+
+    class DisabledTool:
+        definition = disabled_definition
+
+        async def execute(self, arguments):
+            return await tool.execute(arguments)
+
+    await registry.register(DisabledTool())
+
+    assert await registry.list_tools() == []
+
+    await manager.unregister_server("server-a")
+
+    assert await registry.get("search") is None
+    assert manager.list_servers() == []
+
+
+@pytest.mark.asyncio
+async def test_unregister_server_disconnects_connected_server_first():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+
+    await manager.connect_server("server-a")
+    await manager.unregister_server("server-a")
+
+    client.disconnect.assert_awaited_once()
+    assert manager.list_servers() == []
+
+
+@pytest.mark.asyncio
+async def test_unregister_server_preserves_other_server_and_tools():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    await manager.register_server(make_stdio_config("server-a"))
+    await manager.register_server(make_stdio_config("server-b"))
+
+    client_a = await manager.get_client("server-a")
+    client_b = await manager.get_client("server-b")
+
+    client_a.connect = AsyncMock()
+    client_b.connect = AsyncMock()
+
+    client_a.list_tools = AsyncMock(return_value=[make_mcp_tool(name="search")])
+    client_b.list_tools = AsyncMock(return_value=[make_mcp_tool(name="policy")])
+
+    await manager.connect_and_discover("server-a")
+    await manager.connect_and_discover("server-b")
+
+    await manager.unregister_server("server-a")
+
+    assert manager.list_servers() == ["server-b"]
+    assert await registry.get("search") is None
+    assert await registry.get("policy") is not None
+    assert manager.is_connected("server-b") is True
+
+
+@pytest.mark.asyncio
+async def test_unregister_server_rejects_unknown_server():
+    manager = make_manager()
+
+    with pytest.raises(
+        KeyError,
+        match="not registered",
+    ):
+        await manager.unregister_server("missing-server")
+
+
+@pytest.mark.asyncio
+async def test_unregister_server_preserves_registration_when_disconnect_fails():
+    manager = make_manager()
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock(side_effect=RuntimeError("disconnect failed"))
+
+    await manager.connect_server("server-a")
+
+    with pytest.raises(
+        RuntimeError,
+        match="disconnect failed",
+    ):
+        await manager.unregister_server("server-a")
+
+    assert manager.list_servers() == ["server-a"]
+    assert manager.is_connected("server-a") is False
+
+
+@pytest.mark.asyncio
 async def test_disconnect_server():
     manager = make_manager()
 

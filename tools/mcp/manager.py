@@ -33,6 +33,7 @@ class _MCPServerRuntime:
         default_factory=asyncio.Lock,
     )
     last_recovery_at: datetime | None = None
+    discovered_tool_names: set[str] = dataclass_field(default_factory=set)
 
 
 class MCPServerManager:
@@ -126,7 +127,9 @@ class MCPServerManager:
             tool_capabilities=runtime.config.tool_capabilities,
         )
 
-        return await discovery.discover_and_register()
+        definitions = await discovery.discover_and_register()
+        runtime.discovered_tool_names = {definition.name for definition in definitions}
+        return definitions
 
     async def connect_and_discover(
         self,
@@ -338,6 +341,30 @@ class MCPServerManager:
             statuses[name] = await self.check_health(name)
 
         return statuses
+
+    async def unregister_server(
+        self,
+        name: str,
+    ) -> None:
+        """
+        Unregister an MCP server and remove its discovered tools.
+
+        If the server is connected, it is disconnected before its runtime
+        registration is removed. A disconnect failure leaves the server
+        registered so callers do not observe a false successful removal.
+
+        Only tools explicitly owned by this MCP server are removed.
+        """
+        self._get_runtime(name)
+
+        await self.disconnect_server(name)
+
+        runtime = self._get_runtime(name)
+
+        for tool_name in runtime.discovered_tool_names:
+            await self.registry.remove(tool_name)
+
+        self._servers.pop(name, None)
 
     async def disconnect_server(
         self,
