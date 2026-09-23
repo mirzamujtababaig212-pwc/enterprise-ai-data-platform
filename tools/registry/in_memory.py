@@ -17,6 +17,26 @@ class InMemoryToolRegistry:
         if not definition.description.strip():
             raise ValueError("Tool description must not be empty.")
 
+        existing = self._tools.get(definition.name)
+
+        if existing is not None:
+            existing_metadata = existing.definition.metadata
+            new_metadata = definition.metadata
+
+            existing_mcp_server = existing_metadata.get("mcp_server")
+            new_mcp_server = new_metadata.get("mcp_server")
+
+            if (
+                existing_mcp_server is not None
+                and new_mcp_server is not None
+                and existing_mcp_server != new_mcp_server
+            ):
+                raise ValueError(
+                    f"Tool '{definition.name}' is already registered "
+                    f"by MCP server '{existing_mcp_server}' and cannot "
+                    f"also be registered by MCP server '{new_mcp_server}'."
+                )
+
         self._tools[definition.name] = tool
 
     async def get(self, name: str) -> Tool | None:

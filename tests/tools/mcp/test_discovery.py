@@ -250,3 +250,31 @@ async def test_discovery_prefers_explicit_capability_over_default():
         "side_effect": False,
         "permission_scope": "documents:read",
     }
+
+
+@pytest.mark.asyncio
+async def test_discovery_rejects_duplicate_tool_identity_across_mcp_servers():
+    client_a = FakeMCPClient()
+    client_b = FakeMCPClient()
+
+    registry = InMemoryToolRegistry()
+
+    service_a = MCPToolDiscoveryService(
+        client=client_a,
+        registry=registry,
+        server_name="server-a",
+    )
+
+    service_b = MCPToolDiscoveryService(
+        client=client_b,
+        registry=registry,
+        server_name="server-b",
+    )
+
+    await service_a.discover_and_register()
+
+    with pytest.raises(
+        ValueError,
+        match="already registered",
+    ):
+        await service_b.discover_and_register()
