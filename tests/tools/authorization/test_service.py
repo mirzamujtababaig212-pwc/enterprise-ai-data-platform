@@ -7,7 +7,11 @@ from tools.authorization.models import (
     ToolAuthorizationRequest,
     ToolAuthorizationResult,
 )
-from tools.authorization.policy import MetadataAuthorizationPolicy
+from tools.authorization.policy import (
+    CapabilityAuthorizationPolicy,
+    CompositeToolAuthorizationPolicy,
+    MetadataAuthorizationPolicy,
+)
 from tools.authorization.service import (
     ToolAuthorizationService,
 )
@@ -342,8 +346,6 @@ async def test_authorizer_without_policy_preserves_existing_behavior():
 
 @pytest.mark.asyncio
 async def test_authorizer_allows_tool_when_permission_and_capability_policy_match():
-    from tools.authorization.policy import CapabilityAuthorizationPolicy
-
     policy = CapabilityAuthorizationPolicy(
         allowed_capabilities={"document.search"},
         allowed_risk_tiers={"low"},
@@ -377,8 +379,6 @@ async def test_authorizer_allows_tool_when_permission_and_capability_policy_matc
 
 @pytest.mark.asyncio
 async def test_authorizer_denies_tool_when_capability_policy_rejects_risk():
-    from tools.authorization.policy import CapabilityAuthorizationPolicy
-
     policy = CapabilityAuthorizationPolicy(
         allowed_capabilities={"document.search"},
         allowed_risk_tiers={"low"},
@@ -409,8 +409,6 @@ async def test_authorizer_denies_tool_when_capability_policy_rejects_risk():
 
 @pytest.mark.asyncio
 async def test_authorizer_denies_side_effecting_tool_when_policy_disallows_it():
-    from tools.authorization.policy import CapabilityAuthorizationPolicy
-
     policy = CapabilityAuthorizationPolicy(
         allowed_side_effects={False},
     )
@@ -438,8 +436,6 @@ async def test_authorizer_denies_side_effecting_tool_when_policy_disallows_it():
 
 @pytest.mark.asyncio
 async def test_authorizer_denies_permission_scope_mismatch():
-    from tools.authorization.policy import CapabilityAuthorizationPolicy
-
     policy = CapabilityAuthorizationPolicy(
         required_permission_scope="documents:read",
     )
@@ -463,3 +459,130 @@ async def test_authorizer_denies_permission_scope_mismatch():
     assert result.allowed is False
     assert "permission_scope='documents:write'" in result.reason
     assert result.policy_id == "capability_policy"
+
+
+@pytest.mark.asyncio
+async def test_composite_authorizer_requires_tool_permission_even_when_policies_allow():
+    policy = CompositeToolAuthorizationPolicy(
+        [
+            MetadataAuthorizationPolicy({"source": "mcp"}),
+            CapabilityAuthorizationPolicy(
+                allowed_capabilities={"document.search"},
+                allowed_risk_tiers={"low"},
+                allowed_side_effects={False},
+            ),
+        ],
+        policy_id="enterprise_policy",
+        policy_version="3.0",
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "capability": "document.search",
+            "risk_tier": "low",
+            "side_effect": False,
+        },
+    )
+
+    assert result.allowed is False
+    assert result.reason == "Tool is not authorized for this principal."
+    assert result.policy_id is None
+    assert result.policy_version is None
+
+
+@pytest.mark.asyncio
+async def test_composite_authorizer_propagates_denying_policy_metadata():
+    policy = CompositeToolAuthorizationPolicy(
+        [
+            MetadataAuthorizationPolicy(
+                {"source": "mcp"},
+                policy_id="provenance_policy",
+                policy_version="1.0",
+            ),
+            CapabilityAuthorizationPolicy(
+                allowed_capabilities={"document.search"},
+                allowed_risk_tiers={"low"},
+                policy_id="capability_policy",
+                policy_version="5.0",
+            ),
+        ],
+        policy_id="enterprise_policy",
+        policy_version="3.0",
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "capability": "document.search",
+            "risk_tier": "high",
+        },
+    )
+
+    assert result.allowed is False
+    assert "risk_tier='high'" in result.reason
+    assert result.policy_id == "capability_policy"
+    assert result.policy_version == "5.0"
+
+
+@pytest.mark.asyncio
+async def test_composite_authorizer_propagates_composite_policy_identity_when_allowed():
+    policy = CompositeToolAuthorizationPolicy(
+        [
+            MetadataAuthorizationPolicy(
+                {"source": "mcp"},
+                policy_id="provenance_policy",
+                policy_version="1.0",
+            ),
+            CapabilityAuthorizationPolicy(
+                allowed_capabilities={"document.search"},
+                allowed_risk_tiers={"low"},
+                allowed_side_effects={False},
+                required_permission_scope="documents:read",
+                policy_id="capability_policy",
+                policy_version="2.0",
+            ),
+        ],
+        policy_id="enterprise_policy",
+        policy_version="3.0",
+    )
+    authorizer = InMemoryToolAuthorizer(policy=policy)
+
+    await authorizer.allow(
+        "agent:research",
+        "search_documents",
+    )
+
+    service = ToolAuthorizationService(authorizer)
+
+    result = await service.authorize(
+        "agent:research",
+        "search_documents",
+        metadata={
+            "source": "mcp",
+            "capability": "document.search",
+            "risk_tier": "low",
+            "side_effect": False,
+            "permission_scope": "documents:read",
+        },
+    )
+
+    assert result.allowed is True
+    assert result.reason == "Tool is authorized."
+    assert result.policy_id == "enterprise_policy"
+    assert result.policy_version == "3.0"

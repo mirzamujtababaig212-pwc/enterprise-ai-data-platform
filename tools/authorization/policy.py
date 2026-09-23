@@ -21,6 +21,52 @@ class ToolAuthorizationPolicy(Protocol):
     ) -> ToolAuthorizationPolicyResult: ...
 
 
+class CompositeToolAuthorizationPolicy:
+    """
+    Evaluate multiple authorization policies in deterministic order.
+
+    Policy composition is an additional governance gate. Tool permission
+    remains the responsibility of the authorizer and is evaluated separately.
+    """
+
+    def __init__(
+        self,
+        policies: list[ToolAuthorizationPolicy] | tuple[ToolAuthorizationPolicy, ...],
+        *,
+        policy_id: str = "composite_policy",
+        policy_version: str = "1.0",
+    ) -> None:
+        if not policies:
+            raise ValueError("At least one authorization policy is required.")
+
+        if not policy_id.strip():
+            raise ValueError("policy_id must not be empty.")
+
+        if not policy_version.strip():
+            raise ValueError("policy_version must not be empty.")
+
+        self._policies = tuple(policies)
+        self._policy_id = policy_id
+        self._policy_version = policy_version
+
+    async def evaluate(
+        self,
+        request: ToolAuthorizationRequest,
+    ) -> ToolAuthorizationPolicyResult:
+        for policy in self._policies:
+            result = await policy.evaluate(request)
+
+            if not result.allowed:
+                return result
+
+        return ToolAuthorizationPolicyResult(
+            allowed=True,
+            reason="All authorization policies satisfied.",
+            policy_id=self._policy_id,
+            policy_version=self._policy_version,
+        )
+
+
 class MetadataAuthorizationPolicy:
     def __init__(
         self,
