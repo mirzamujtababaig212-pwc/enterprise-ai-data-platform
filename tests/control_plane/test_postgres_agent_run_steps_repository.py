@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.control_plane.agent_run_steps.exceptions import (
     DuplicateAgentRunStepError,
+    InvalidAgentRunStepTransitionError,
 )
 from app.control_plane.agent_run_steps.models import (
     AgentRunStep,
@@ -290,10 +291,6 @@ def test_transition_running_to_failed_persists_error(repository) -> None:
 def test_transition_rejects_invalid_lifecycle(repository) -> None:
     repository.create(make_step())
 
-    from app.control_plane.agent_run_steps.exceptions import (
-        InvalidAgentRunStepTransitionError,
-    )
-
     with pytest.raises(
         InvalidAgentRunStepTransitionError,
         match="invalid agent run step transition",
@@ -305,6 +302,51 @@ def test_transition_rejects_invalid_lifecycle(repository) -> None:
             updated_at=datetime(2026, 9, 23, 10, 1, tzinfo=UTC),
             completed_at=datetime(2026, 9, 23, 10, 1, tzinfo=UTC),
         )
+
+
+def test_transition_rejects_ambiguous_to_completed(repository) -> None:
+    repository.create(make_step())
+
+    started_at = datetime(2026, 9, 23, 10, 1, tzinfo=UTC)
+    ambiguous_at = datetime(2026, 9, 23, 10, 2, tzinfo=UTC)
+
+    repository.transition(
+        "run-1",
+        "step-1",
+        status=AgentRunStepStatus.RUNNING,
+        updated_at=started_at,
+        started_at=started_at,
+    )
+
+    repository.transition(
+        "run-1",
+        "step-1",
+        status=AgentRunStepStatus.AMBIGUOUS,
+        updated_at=ambiguous_at,
+        completed_at=ambiguous_at,
+        error="execution outcome could not be established",
+        failure_category="execution_ambiguous",
+    )
+
+    with pytest.raises(
+        InvalidAgentRunStepTransitionError,
+        match="invalid agent run step transition",
+    ):
+        repository.transition(
+            "run-1",
+            "step-1",
+            status=AgentRunStepStatus.COMPLETED,
+            updated_at=datetime(2026, 9, 23, 10, 3, tzinfo=UTC),
+            completed_at=datetime(2026, 9, 23, 10, 3, tzinfo=UTC),
+            output={"rows": 4},
+        )
+
+    restored = repository.get("run-1", "step-1")
+
+    assert restored is not None
+    assert restored.status is AgentRunStepStatus.AMBIGUOUS
+    assert restored.error == "execution outcome could not be established"
+    assert restored.failure_category == "execution_ambiguous"
 
 
 def test_transition_requires_completed_at_for_terminal_status(repository) -> None:
