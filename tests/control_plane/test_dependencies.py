@@ -153,7 +153,15 @@ async def test_get_agent_run_application_service_uses_configured_lease_duration(
     assert service._lease_seconds == 123
 
     from app.control_plane import dependencies
+    from app.control_plane.agent_run_steps.postgres_repository import (
+        PostgreSQLAgentRunStepsRepository,
+    )
 
+    assert isinstance(
+        service._agent_run_steps_repository,
+        PostgreSQLAgentRunStepsRepository,
+    )
+    assert service._agent_run_steps_repository._session is not None
     assert service._cancellation_registry is dependencies._agent_run_cancellation_registry
 
 

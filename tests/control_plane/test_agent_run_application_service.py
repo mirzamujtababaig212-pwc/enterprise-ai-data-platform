@@ -33,6 +33,13 @@ from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
 from app.control_plane.agent_runs.lease import heartbeat_loop
+from app.control_plane.agent_run_steps.models import (
+    AgentRunStep,
+    AgentRunStepStatus,
+)
+from app.control_plane.agent_run_steps.repository import (
+    AgentRunStepsRepository,
+)
 
 
 def _response(
@@ -1818,3 +1825,227 @@ async def test_execute_rejects_idempotency_key_for_different_session() -> None:
 
     runtime.run.assert_not_awaited()
     repository.create.assert_not_called()
+
+
+def _step(
+    *,
+    run_id: str = "run-123",
+    step_id: str = "step-1",
+    step_index: int = 0,
+    status: AgentRunStepStatus = AgentRunStepStatus.COMPLETED,
+) -> AgentRunStep:
+    return AgentRunStep(
+        run_id=run_id,
+        step_id=step_id,
+        step_index=step_index,
+        step_type="tool_execution",
+        status=status,
+        attempt=1,
+        tool_name="vehicle_query",
+        call_id="call-1",
+        input={"query": "vehicle events"},
+        output={"rows": 3},
+        metadata={"source": "test"},
+    )
+
+
+def test_list_steps_delegates_to_step_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+    steps = [
+        _step(step_id="step-1", step_index=0),
+        _step(step_id="step-2", step_index=1),
+    ]
+    steps_repository.list.return_value = steps
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    result = service.list_steps(
+        "run-123",
+        principal="api_key:test-owner",
+        status=AgentRunStepStatus.COMPLETED,
+        limit=25,
+    )
+
+    assert result == steps
+    repository.get.assert_called_once_with("run-123")
+    steps_repository.list.assert_called_once_with(
+        "run-123",
+        status=AgentRunStepStatus.COMPLETED,
+        limit=25,
+    )
+
+
+def test_list_steps_raises_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    with pytest.raises(
+        LookupError,
+        match="Agent run 'missing-run' was not found.",
+    ):
+        service.list_steps(
+            "missing-run",
+            principal="api_key:test-owner",
+        )
+
+    repository.get.assert_called_once_with("missing-run")
+    steps_repository.list.assert_not_called()
+
+
+def test_list_steps_requires_step_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Agent run steps repository is not configured.",
+    ):
+        service.list_steps(
+            "run-123",
+            principal="api_key:test-owner",
+        )
+
+
+def test_get_step_delegates_to_step_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+    step = _step()
+    steps_repository.get.return_value = step
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    result = service.get_step(
+        "run-123",
+        "step-1",
+        principal="api_key:test-owner",
+    )
+
+    assert result is step
+    repository.get.assert_called_once_with("run-123")
+    steps_repository.get.assert_called_once_with(
+        "run-123",
+        "step-1",
+    )
+
+
+def test_get_step_returns_none_for_missing_step() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+    steps_repository.get.return_value = None
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    result = service.get_step(
+        "run-123",
+        "missing-step",
+        principal="api_key:test-owner",
+    )
+
+    assert result is None
+    steps_repository.get.assert_called_once_with(
+        "run-123",
+        "missing-step",
+    )
+
+
+def test_get_step_raises_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    with pytest.raises(
+        LookupError,
+        match="Agent run 'missing-run' was not found.",
+    ):
+        service.get_step(
+            "missing-run",
+            "step-1",
+            principal="api_key:test-owner",
+        )
+
+    repository.get.assert_called_once_with("missing-run")
+    steps_repository.get.assert_not_called()
+
+
+def test_get_step_requires_step_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Agent run steps repository is not configured.",
+    ):
+        service.get_step(
+            "run-123",
+            "step-1",
+            principal="api_key:test-owner",
+        )

@@ -6,6 +6,10 @@ class AgentRunNotFoundError(LookupError):
     """Raised when an agent run cannot be found for an update."""
 
 
+class AgentRunAccessDeniedError(PermissionError):
+    """Raised when a principal cannot access an agent run."""
+
+
 class AgentRunIdempotencyConflictError(ValueError):
     """Raised when an idempotency key is reused for a different request."""
 

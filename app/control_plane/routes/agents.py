@@ -8,8 +8,10 @@ from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
 from app.control_plane.agent_runs.exceptions import (
+    AgentRunAccessDeniedError,
     AgentRunIdempotencyConflictError,
 )
+from app.control_plane.agent_run_steps.models import AgentRunStepStatus
 from app.control_plane.agent_runs.models import AgentRunStatus
 from app.control_plane.dependencies import (
     get_agent_run_application_service,
@@ -23,6 +25,8 @@ from app.control_plane.schemas.agents import (
     AgentRunListResponse,
     AgentRunRequest,
     AgentRunResponse,
+    AgentRunStepListResponse,
+    AgentRunStepResponse,
 )
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
@@ -254,6 +258,130 @@ async def get_agent_run(
         completed_at=run.completed_at,
         output=run.output,
         metadata=run.metadata,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/steps",
+    response_model=AgentRunStepListResponse,
+)
+async def list_agent_run_steps(
+    request: Request,
+    run_id: str,
+    run_status: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=100),
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunStepListResponse:
+    selected_status = None
+
+    if run_status is not None:
+        try:
+            selected_status = AgentRunStepStatus(run_status)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Invalid agent run step status: {run_status}",
+            ) from exc
+
+    try:
+        steps = service.list_steps(
+            run_id,
+            principal=getattr(request.state, "principal", None),
+            status=selected_status,
+            limit=limit,
+        )
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    return AgentRunStepListResponse(
+        steps=[
+            AgentRunStepResponse(
+                run_id=step.run_id,
+                step_id=step.step_id,
+                step_index=step.step_index,
+                step_type=step.step_type,
+                status=step.status.value,
+                attempt=step.attempt,
+                tool_name=step.tool_name,
+                call_id=step.call_id,
+                input=step.input,
+                output=step.output,
+                error=step.error,
+                failure_category=step.failure_category,
+                started_at=step.started_at,
+                completed_at=step.completed_at,
+                created_at=step.created_at,
+                updated_at=step.updated_at,
+                metadata=step.metadata,
+            )
+            for step in steps
+        ]
+    )
+
+
+@router.get(
+    "/runs/{run_id}/steps/{step_id}",
+    response_model=AgentRunStepResponse,
+)
+async def get_agent_run_step(
+    request: Request,
+    run_id: str,
+    step_id: str,
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunStepResponse:
+    try:
+        step = service.get_step(
+            run_id,
+            step_id,
+            principal=getattr(request.state, "principal", None),
+        )
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    if step is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(f"Agent run step '{step_id}' for run " f"'{run_id}' was not found."),
+        )
+
+    return AgentRunStepResponse(
+        run_id=step.run_id,
+        step_id=step.step_id,
+        step_index=step.step_index,
+        step_type=step.step_type,
+        status=step.status.value,
+        attempt=step.attempt,
+        tool_name=step.tool_name,
+        call_id=step.call_id,
+        input=step.input,
+        output=step.output,
+        error=step.error,
+        failure_category=step.failure_category,
+        started_at=step.started_at,
+        completed_at=step.completed_at,
+        created_at=step.created_at,
+        updated_at=step.updated_at,
+        metadata=step.metadata,
     )
 
 

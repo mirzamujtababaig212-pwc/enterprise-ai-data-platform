@@ -85,3 +85,27 @@ class AgentRunEventResponse(BaseModel):
 
 class AgentRunEventListResponse(BaseModel):
     events: list[AgentRunEventResponse]
+
+
+class AgentRunStepResponse(BaseModel):
+    run_id: str
+    step_id: str
+    step_index: int
+    step_type: str
+    status: str
+    attempt: int
+    tool_name: str | None = None
+    call_id: str | None = None
+    input: Any | None = None
+    output: Any | None = None
+    error: str | None = None
+    failure_category: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRunStepListResponse(BaseModel):
+    steps: list[AgentRunStepResponse]

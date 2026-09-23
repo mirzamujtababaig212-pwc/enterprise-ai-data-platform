@@ -20,6 +20,7 @@ from app.control_plane.agent_runs.admission import (
     AllowAllAgentRunAdmissionPolicy,
 )
 from app.control_plane.agent_runs.exceptions import (
+    AgentRunAccessDeniedError,
     AgentRunAdmissionRejectedError,
     AgentRunIdempotencyConflictError,
     DuplicateAgentRunError,
@@ -32,6 +33,13 @@ from app.control_plane.agent_runs.models import (
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 from app.control_plane.agent_run_events.repository import (
     AgentRunEventsRepository,
+)
+from app.control_plane.agent_run_steps.models import (
+    AgentRunStep,
+    AgentRunStepStatus,
+)
+from app.control_plane.agent_run_steps.repository import (
+    AgentRunStepsRepository,
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.lease import (
@@ -47,6 +55,7 @@ class AgentRunApplicationService:
         runtime: AgentRuntime,
         repository: AgentRunRepository,
         events_repository: AgentRunEventsRepository | None = None,
+        agent_run_steps_repository: AgentRunStepsRepository | None = None,
         observer: AgentExecutionObserver | None = None,
         admission_policy: AgentRunAdmissionPolicy | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
@@ -55,6 +64,7 @@ class AgentRunApplicationService:
         self._runtime = runtime
         self._repository = repository
         self._events_repository = events_repository
+        self._agent_run_steps_repository = agent_run_steps_repository
         self._observer = observer
         self._admission_policy = (
             admission_policy if admission_policy is not None else AllowAllAgentRunAdmissionPolicy()
@@ -412,4 +422,75 @@ class AgentRunApplicationService:
         return self._events_repository.list(
             run_id,
             limit=limit,
+        )
+
+    def _authorize_run_access(
+        self,
+        run: AgentRun,
+        *,
+        principal: str | None,
+    ) -> None:
+        if principal is None or run.principal != principal:
+            raise AgentRunAccessDeniedError(
+                f"Principal is not authorized to access agent run '{run.run_id}'.",
+            )
+
+    def list_steps(
+        self,
+        run_id: str,
+        *,
+        principal: str | None,
+        status: AgentRunStepStatus | None = None,
+        limit: int = 100,
+    ) -> list[AgentRunStep]:
+        run = self._repository.get(run_id)
+
+        if run is None:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        self._authorize_run_access(
+            run,
+            principal=principal,
+        )
+
+        if self._agent_run_steps_repository is None:
+            raise RuntimeError(
+                "Agent run steps repository is not configured.",
+            )
+
+        return self._agent_run_steps_repository.list(
+            run_id,
+            status=status,
+            limit=limit,
+        )
+
+    def get_step(
+        self,
+        run_id: str,
+        step_id: str,
+        *,
+        principal: str | None,
+    ) -> AgentRunStep | None:
+        run = self._repository.get(run_id)
+
+        if run is None:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        self._authorize_run_access(
+            run,
+            principal=principal,
+        )
+
+        if self._agent_run_steps_repository is None:
+            raise RuntimeError(
+                "Agent run steps repository is not configured.",
+            )
+
+        return self._agent_run_steps_repository.get(
+            run_id,
+            step_id,
         )
