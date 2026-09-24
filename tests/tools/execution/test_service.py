@@ -19,6 +19,7 @@ from tools.execution.idempotency import (
     ToolIdempotencyClaimStatus,
 )
 from tools.execution.service import ToolExecutionService
+from tools.governance.audit import ToolGovernanceDecisionRecord
 from tools.models import (
     ToolDefinition,
     ToolExecutionFailureCategory,
@@ -52,6 +53,19 @@ class ProvenanceToolAuthorizer:
             policy_id="policy-enterprise-tools",
             policy_version="v7",
         )
+
+
+class RecordingGovernanceSink:
+    def __init__(self) -> None:
+        self.records: list[ToolGovernanceDecisionRecord] = []
+
+    async def record(self, record: ToolGovernanceDecisionRecord) -> None:
+        self.records.append(record)
+
+
+class FailingGovernanceSink:
+    async def record(self, record: ToolGovernanceDecisionRecord) -> None:
+        raise RuntimeError("simulated governance sink failure")
 
 
 class FakeTool:
@@ -2210,3 +2224,218 @@ async def test_tenant_policy_requires_authenticated_tenant() -> None:
     assert result.success is False
     assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
     assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_emits_governance_deny_for_tenant_policy():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-restricted",
+            blocked_tools=frozenset({"test_tool"}),
+            policy_id="tenant-policy-1",
+            policy_version="v3",
+        )
+    )
+
+    governance_sink = RecordingGovernanceSink()
+
+    service = ToolExecutionService(
+        registry,
+        tenant_policy_engine=tenant_policy_engine,
+        governance_sink=governance_sink,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        principal="user-123",
+        execution_context=ToolExecutionContext(
+            run_id="run-tenant-deny",
+            call_id="call-tenant-deny",
+            agent_name="test-agent",
+            session_id="session-tenant-deny",
+            tenant_id="tenant-restricted",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.TENANT_POLICY
+    assert tool.execution_count == 0
+
+    assert len(governance_sink.records) == 1
+
+    record = governance_sink.records[0]
+    assert record.tool_name == "test_tool"
+    assert record.decision == "deny"
+    assert record.tenant_id == "tenant-restricted"
+    assert record.policy_id == "tenant-policy-1"
+    assert record.policy_version == "v3"
+    assert record.run_id == "run-tenant-deny"
+    assert record.call_id == "call-tenant-deny"
+    assert record.agent_name == "test-agent"
+    assert record.session_id == "session-tenant-deny"
+    assert record.principal == "user-123"
+    assert record.details == {
+        "enforcement_layer": "tenant_policy",
+        "failure_category": "tenant_policy",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_emits_governance_deny_for_authorization():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(InMemoryToolAuthorizer())
+    governance_sink = RecordingGovernanceSink()
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        governance_sink=governance_sink,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {},
+        principal="agent:restricted",
+        execution_context=ToolExecutionContext(
+            run_id="run-auth-deny",
+            call_id="call-auth-deny",
+            agent_name="test-agent",
+            session_id="session-auth-deny",
+            tenant_id="tenant-123",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.AUTHORIZATION
+    assert tool.execution_count == 0
+
+    assert len(governance_sink.records) == 1
+
+    record = governance_sink.records[0]
+    assert record.tool_name == "test_tool"
+    assert record.decision == "deny"
+    assert record.tenant_id == "tenant-123"
+    assert record.policy_id is None
+    assert record.policy_version is None
+    assert record.principal == "agent:restricted"
+    assert record.details == {
+        "enforcement_layer": "authorization",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_emits_single_governance_allow_after_tenant_and_authorization():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    authorizer = InMemoryToolAuthorizer()
+    await authorizer.allow(
+        "agent:research",
+        "test_tool",
+    )
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-123",
+            policy_id="tenant-policy-7",
+            policy_version="v9",
+        )
+    )
+
+    governance_sink = RecordingGovernanceSink()
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        governance_sink=governance_sink,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=ToolExecutionContext(
+            run_id="run-allow",
+            call_id="call-allow",
+            agent_name="test-agent",
+            session_id="session-allow",
+            tenant_id="tenant-123",
+        ),
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1
+
+    assert len(governance_sink.records) == 1
+
+    record = governance_sink.records[0]
+    assert record.tool_name == "test_tool"
+    assert record.decision == "allow"
+    assert record.tenant_id == "tenant-123"
+    assert record.policy_id is None
+    assert record.policy_version is None
+    assert record.principal == "agent:research"
+    assert record.details == {
+        "enforcement_layer": "authorization",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_continues_when_governance_sink_fails():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    authorizer = InMemoryToolAuthorizer()
+    await authorizer.allow(
+        "agent:research",
+        "test_tool",
+    )
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        governance_sink=FailingGovernanceSink(),
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        principal="agent:research",
+        execution_context=ToolExecutionContext(
+            run_id="run-sink-failure",
+            call_id="call-sink-failure",
+            tenant_id="tenant-123",
+        ),
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1

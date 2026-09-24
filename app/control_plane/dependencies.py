@@ -31,6 +31,9 @@ from app.control_plane.agent_run_events.postgres_repository import (
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
+from app.control_plane.agent_run_events.tool_governance_observer import (
+    ToolGovernanceDecisionObserver,
+)
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
@@ -108,6 +111,9 @@ _agent_checkpoint_handler = PostgreSQLAgentCheckpointHandler(SessionLocal)
 _tool_authorization_audit_sink = ToolAuthorizationAuditObserver(
     _agent_observer,
 )
+_tool_governance_decision_sink = ToolGovernanceDecisionObserver(
+    _agent_observer,
+)
 
 _tool_authorizer = InMemoryToolAuthorizer()
 _tool_authorization_service = ToolAuthorizationService(
@@ -144,6 +150,7 @@ _tool_execution_service = ToolExecutionService(
     _tool_registry,
     authorization_service=_tool_authorization_service,
     audit_sink=_tool_authorization_audit_sink,
+    governance_sink=_tool_governance_decision_sink,
     idempotency_store=_tool_idempotency_store,
     tenant_policy_engine=_tenant_policy_engine,
 )

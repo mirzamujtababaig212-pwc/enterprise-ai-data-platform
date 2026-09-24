@@ -17,6 +17,10 @@ from ai_platform.agents.policy import (
     TenantPolicyEngine,
 )
 from tools.execution.context import ToolExecutionContext
+from tools.governance.audit import (
+    ToolGovernanceDecisionRecord,
+    ToolGovernanceDecisionSink,
+)
 from tools.execution.exceptions import ToolExecutionOwnershipLostError
 from tools.execution.idempotency import (
     ToolExecutionIdempotencyKey,
@@ -94,6 +98,7 @@ class ToolExecutionService:
         *,
         authorization_service: ToolAuthorizationService | None = None,
         audit_sink: ToolAuthorizationAuditSink | None = None,
+        governance_sink: ToolGovernanceDecisionSink | None = None,
         idempotency_store: ToolExecutionIdempotencyStore | None = None,
         tenant_policy_engine: TenantPolicyEngine | None = None,
         default_timeout_seconds: float = 30.0,
@@ -104,9 +109,49 @@ class ToolExecutionService:
         self.registry = registry
         self.authorization_service = authorization_service
         self.audit_sink = audit_sink
+        self.governance_sink = governance_sink
         self.idempotency_store = idempotency_store
         self.tenant_policy_engine = tenant_policy_engine
         self.default_timeout_seconds = default_timeout_seconds
+
+    async def _record_governance_decision(
+        self,
+        *,
+        tool_name: str,
+        decision: str,
+        reason: str | None = None,
+        policy_id: str | None = None,
+        policy_version: str | None = None,
+        principal: str | None = None,
+        execution_context: ToolExecutionContext | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        if self.governance_sink is None:
+            return
+
+        record = ToolGovernanceDecisionRecord(
+            tool_name=tool_name,
+            decision=decision,
+            tenant_id=(execution_context.tenant_id if execution_context is not None else None),
+            reason=reason,
+            policy_id=policy_id,
+            policy_version=policy_version,
+            run_id=(execution_context.run_id if execution_context is not None else None),
+            call_id=(execution_context.call_id if execution_context is not None else None),
+            agent_name=(execution_context.agent_name if execution_context is not None else None),
+            session_id=(execution_context.session_id if execution_context is not None else None),
+            principal=principal,
+            details=details,
+        )
+
+        try:
+            await self.governance_sink.record(record)
+        except Exception:
+            logger.exception(
+                "Failed to record tool governance decision: " "tool_name=%s decision=%s",
+                tool_name,
+                decision,
+            )
 
     async def execute(
         self,
@@ -172,26 +217,56 @@ class ToolExecutionService:
                 failure_category=ToolExecutionFailureCategory.INVALID_SCHEMA,
             )
 
+        tenant_policy = None
+
         if self.tenant_policy_engine is not None:
             tenant_id = execution_context.tenant_id if execution_context is not None else None
 
             if tenant_id is None or not tenant_id.strip():
+                reason = "Tenant identity is required when tenant policy enforcement is enabled."
+                await self._record_governance_decision(
+                    tool_name=tool_name,
+                    decision="deny",
+                    reason=reason,
+                    principal=principal,
+                    execution_context=execution_context,
+                    details={
+                        "enforcement_layer": "tenant_policy",
+                        "failure_category": "tenant_policy",
+                    },
+                )
                 return ToolExecutionResult(
                     tool_name=tool_name,
                     success=False,
-                    error="Tenant identity is required when tenant policy enforcement is enabled.",
+                    error=reason,
                     failure_category=ToolExecutionFailureCategory.TENANT_POLICY,
                 )
 
-            server_id = tool.definition.metadata.get("mcp_server")
-
             try:
+                tenant_policy = self.tenant_policy_engine.get_policy(tenant_id)
+                server_id = tool.definition.metadata.get("mcp_server")
+
                 self.tenant_policy_engine.validate_tool_execution(
                     tenant_id=tenant_id,
                     tool_name=tool_name,
                     server_id=server_id,
                 )
             except PolicyViolationError as exc:
+                await self._record_governance_decision(
+                    tool_name=tool_name,
+                    decision="deny",
+                    reason=str(exc),
+                    policy_id=(tenant_policy.policy_id if tenant_policy is not None else None),
+                    policy_version=(
+                        tenant_policy.policy_version if tenant_policy is not None else None
+                    ),
+                    principal=principal,
+                    execution_context=execution_context,
+                    details={
+                        "enforcement_layer": "tenant_policy",
+                        "failure_category": "tenant_policy",
+                    },
+                )
                 return ToolExecutionResult(
                     tool_name=tool_name,
                     success=False,
@@ -201,10 +276,21 @@ class ToolExecutionService:
 
         if self.authorization_service is not None:
             if principal is None or not principal.strip():
+                reason = "Principal is required when tool authorization is enabled."
+                await self._record_governance_decision(
+                    tool_name=tool_name,
+                    decision="deny",
+                    reason=reason,
+                    execution_context=execution_context,
+                    details={
+                        "enforcement_layer": "authorization",
+                        "failure_category": "missing_principal",
+                    },
+                )
                 return ToolExecutionResult(
                     tool_name=tool_name,
                     success=False,
-                    error=("Principal is required when " "tool authorization is enabled."),
+                    error=reason,
                     failure_category=ToolExecutionFailureCategory.MISSING_PRINCIPAL,
                 )
 
@@ -225,12 +311,50 @@ class ToolExecutionService:
             )
 
             if not authorization.allowed:
+                await self._record_governance_decision(
+                    tool_name=tool_name,
+                    decision="deny",
+                    reason=authorization.reason,
+                    policy_id=authorization.policy_id,
+                    policy_version=authorization.policy_version,
+                    principal=principal,
+                    execution_context=execution_context,
+                    details={"enforcement_layer": "authorization"},
+                )
+
+            if not authorization.allowed:
                 return ToolExecutionResult(
                     tool_name=tool_name,
                     success=False,
                     error=(authorization.reason or "Tool execution is not authorized."),
                     failure_category=ToolExecutionFailureCategory.AUTHORIZATION,
                 )
+
+        if self.authorization_service is not None:
+            governance_policy_id = authorization.policy_id
+            governance_policy_version = authorization.policy_version
+            governance_enforcement_layer = "authorization"
+        elif tenant_policy is not None:
+            governance_policy_id = tenant_policy.policy_id
+            governance_policy_version = tenant_policy.policy_version
+            governance_enforcement_layer = "tenant_policy"
+        else:
+            governance_policy_id = None
+            governance_policy_version = None
+            governance_enforcement_layer = None
+
+        if governance_enforcement_layer is not None:
+            await self._record_governance_decision(
+                tool_name=tool_name,
+                decision="allow",
+                policy_id=governance_policy_id,
+                policy_version=governance_policy_version,
+                principal=principal,
+                execution_context=execution_context,
+                details={
+                    "enforcement_layer": governance_enforcement_layer,
+                },
+            )
 
         idempotency_key = None
         claim_token = None

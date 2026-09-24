@@ -71,6 +71,22 @@ def test_tool_execution_service_uses_durable_idempotency_store() -> None:
     )
 
 
+def test_tool_execution_service_uses_configured_governance_sink() -> None:
+    from app.control_plane import dependencies
+    from app.control_plane.agent_run_events.tool_governance_observer import (
+        ToolGovernanceDecisionObserver,
+    )
+
+    assert isinstance(
+        dependencies._tool_execution_service.governance_sink,
+        ToolGovernanceDecisionObserver,
+    )
+    assert (
+        dependencies._tool_execution_service.governance_sink._observer
+        is dependencies._agent_observer
+    )
+
+
 def test_get_external_evaluation_dispatcher_is_lazy() -> None:
     from app.control_plane.dependencies import get_external_evaluation_dispatcher
 

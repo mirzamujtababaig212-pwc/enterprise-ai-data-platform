@@ -9,7 +9,11 @@ from ai_platform.agents.observability import (
 from app.control_plane.agent_run_events.tool_authorization_observer import (
     ToolAuthorizationAuditObserver,
 )
+from app.control_plane.agent_run_events.tool_governance_observer import (
+    ToolGovernanceDecisionObserver,
+)
 from tools.authorization.audit import ToolAuthorizationAuditRecord
+from tools.governance.audit import ToolGovernanceDecisionRecord
 
 
 class RecordingAgentExecutionObserver:
@@ -106,3 +110,77 @@ async def test_authorization_record_without_agent_is_skipped() -> None:
     await audit_observer.record(record)
 
     assert observer.events == []
+
+
+@pytest.mark.asyncio
+async def test_tool_governance_record_is_translated_to_agent_event() -> None:
+    observer = RecordingAgentExecutionObserver()
+    governance_observer = ToolGovernanceDecisionObserver(observer)
+
+    record = ToolGovernanceDecisionRecord(
+        tool_name="rag.search",
+        decision="deny",
+        tenant_id="tenant-123",
+        reason="Tool is blocked by tenant policy.",
+        policy_id="tenant_policy",
+        policy_version="2.1",
+        run_id="run-123",
+        call_id="call-456",
+        agent_name="enterprise-rag-analyst",
+        session_id="session-789",
+        principal="user-123",
+        details={
+            "enforcement_layer": "tenant_policy",
+            "failure_category": "tenant_policy",
+        },
+    )
+
+    await governance_observer.record(record)
+
+    assert observer.events == [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.GOVERNANCE_DECISION,
+            agent_name="enterprise-rag-analyst",
+            run_id="run-123",
+            session_id="session-789",
+            user_id="user-123",
+            tool_name="rag.search",
+            call_id="call-456",
+            metadata={
+                "governance_domain": "tool",
+                "decision": "deny",
+                "tenant_id": "tenant-123",
+                "reason": "Tool is blocked by tenant policy.",
+                "policy_id": "tenant_policy",
+                "policy_version": "2.1",
+                "details": {
+                    "enforcement_layer": "tenant_policy",
+                    "failure_category": "tenant_policy",
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_governance_record_does_not_copy_principal_into_metadata() -> None:
+    observer = RecordingAgentExecutionObserver()
+    governance_observer = ToolGovernanceDecisionObserver(observer)
+
+    record = ToolGovernanceDecisionRecord(
+        tool_name="vehicle.query",
+        decision="allow",
+        tenant_id="tenant-123",
+        run_id="run-123",
+        principal="sensitive-user-id",
+        details={"enforcement_layer": "authorization"},
+    )
+
+    await governance_observer.record(record)
+
+    event = observer.events[0]
+
+    assert event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert event.user_id == "sensitive-user-id"
+    assert "principal" not in event.metadata
+    assert "sensitive-user-id" not in event.metadata

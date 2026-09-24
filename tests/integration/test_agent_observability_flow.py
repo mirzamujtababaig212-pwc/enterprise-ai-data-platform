@@ -280,7 +280,22 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         assert tool_completed.tool_round == 1
         assert tool_completed.tool_name == "search_documents"
         assert tool_completed.call_id == "call-observe-1"
-        assert tool_completed.metadata == {}
+        assert tool_completed.metadata == {
+            "execution_provenance": {
+                "tool_source": "mcp",
+                "mcp_server": "document-server",
+                "authorization_decision": True,
+                "authorization_policy_id": "metadata_policy",
+                "authorization_policy_version": "1.0",
+                "execution_status": "completed",
+            },
+        }
+
+        provenance = tool_completed.metadata["execution_provenance"]
+        assert "arguments" not in provenance
+        assert "output" not in provenance
+        assert "principal" not in provenance
+        assert "sensitive" not in provenance
 
         assert final_llm.tool_round == 1
         assert final_llm.provider == "fake"
