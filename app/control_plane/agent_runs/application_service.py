@@ -8,7 +8,7 @@ from uuid import uuid4
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.models import AgentRequest, AgentResponse
-from ai_platform.agents.policy import TenantPolicyEngine
+from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
 from rag.governance import GovernancePolicy
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -198,9 +198,9 @@ class AgentRunApplicationService:
         *,
         tenant_id: str | None,
         requested_budget: ExecutionBudget,
-    ) -> ExecutionBudget:
+    ) -> tuple[ExecutionBudget, TenantPolicy | None]:
         if self._tenant_policy_engine is None or not tenant_id:
-            return requested_budget
+            return requested_budget, None
 
         policy = self._tenant_policy_engine.get_policy(tenant_id)
 
@@ -214,13 +214,15 @@ class AgentRunApplicationService:
                     policy.max_tokens_per_run,
                 )
 
-        return ExecutionBudget(
+        effective_budget = ExecutionBudget(
             max_llm_calls=requested_budget.max_llm_calls,
             max_tool_calls=requested_budget.max_tool_calls,
             max_tool_rounds=requested_budget.max_tool_rounds,
             max_duration_seconds=requested_budget.max_duration_seconds,
             max_tokens_per_run=effective_max_tokens,
         )
+
+        return effective_budget, policy
 
     async def _emit(
         self,
@@ -294,7 +296,7 @@ class AgentRunApplicationService:
         request: AgentRequest,
         idempotency_key: str | None = None,
     ) -> AgentRunExecutionResult:
-        effective_budget = self._resolve_effective_budget(
+        effective_budget, budget_policy = self._resolve_effective_budget(
             tenant_id=request.tenant_id,
             requested_budget=request.execution_budget or ExecutionBudget(),
         )
@@ -376,6 +378,18 @@ class AgentRunApplicationService:
             run=run,
             decision=effective_model_governance,
         )
+
+        if budget_policy is not None:
+            await self._emit_governance_decision(
+                run=run,
+                governance_domain="budget",
+                decision="allow",
+                policy_id=budget_policy.policy_id,
+                policy_version=budget_policy.policy_version,
+                details={
+                    "max_tokens_per_run": effective_budget.max_tokens_per_run,
+                },
+            )
 
         admission = await self._admission_policy.evaluate(
             agent_name=agent_name,

@@ -228,6 +228,124 @@ async def test_execute_resolves_effective_token_budget_from_tenant_policy(
 
 
 @pytest.mark.asyncio
+async def test_execute_does_not_record_budget_governance_without_tenant_policy() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    observer = RecordingObserver()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        observer=observer,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-budget-no-policy-1",
+        user_id="user-budget-no-policy-1",
+        principal="principal-budget-no-policy-1",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=10_000,
+        ),
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    budget_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+        and event.metadata.get("governance_domain") == "budget"
+    ]
+
+    assert budget_events == []
+
+
+@pytest.mark.asyncio
+async def test_execute_records_effective_budget_governance_decision() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            max_tokens_per_run=20_000,
+            policy_id="enterprise-budget-policy",
+            policy_version="v3",
+        )
+    )
+
+    observer = RecordingObserver()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+        observer=observer,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-budget-governance-1",
+        user_id="user-budget-governance-1",
+        principal="principal-budget-governance-1",
+        tenant_id="tenant-acme",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=100_000,
+        ),
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    pending = repository.create.call_args.args[0]
+    assert pending.request_snapshot.execution_budget["max_tokens_per_run"] == 20_000
+
+    budget_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+        and event.metadata.get("governance_domain") == "budget"
+    ]
+
+    assert len(budget_events) == 1
+
+    budget_event = budget_events[0]
+    assert budget_event.run_id == pending.run_id
+    assert budget_event.metadata == {
+        "governance_domain": "budget",
+        "decision": "allow",
+        "tenant_id": "tenant-acme",
+        "policy_id": "enterprise-budget-policy",
+        "policy_version": "v3",
+        "details": {
+            "max_tokens_per_run": 20_000,
+        },
+    }
+
+    assert "Explain the platform" not in repr(budget_event.metadata)
+
+
+@pytest.mark.asyncio
 async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
     repository = _repository()
 
@@ -297,7 +415,7 @@ async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
     }
     assert running.request_snapshot.model_governance == (pending.request_snapshot.model_governance)
 
-    assert len(observer.events) == 2
+    assert len(observer.events) == 3
 
     model_event = observer.events[0]
     assert model_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
@@ -315,7 +433,21 @@ async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
         },
     }
 
-    admission_event = observer.events[1]
+    budget_event = observer.events[1]
+    assert budget_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert budget_event.run_id == pending.run_id
+    assert budget_event.metadata == {
+        "governance_domain": "budget",
+        "decision": "allow",
+        "tenant_id": "tenant-acme",
+        "policy_id": "enterprise-model-policy",
+        "policy_version": "v7",
+        "details": {
+            "max_tokens_per_run": None,
+        },
+    }
+
+    admission_event = observer.events[2]
     assert admission_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
     assert admission_event.metadata == {
         "governance_domain": "admission",
