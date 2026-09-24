@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from rag.contracts import Retriever
+from ai_platform.agents.policy import TenantPolicyEngine
 from rag.generation.gateway import GatewayChatService
+from rag.governance import GovernancePolicy
 from rag.models import RetrievalResult
 
 
@@ -54,9 +56,11 @@ class RAGQueryService:
         self,
         retriever: Retriever,
         chat_service: GatewayChatService,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
     ) -> None:
         self.retriever = retriever
         self.chat_service = chat_service
+        self.tenant_policy_engine = tenant_policy_engine
 
     async def query(
         self,
@@ -65,6 +69,8 @@ class RAGQueryService:
         top_k: int = 5,
         min_score: float | None = None,
         metadata_filter: Mapping[str, object] | None = None,
+        governance_policy: GovernancePolicy | None = None,
+        tenant_id: str | None = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
         user_id: str | None = None,
@@ -72,14 +78,27 @@ class RAGQueryService:
         if not query.strip():
             raise ValueError("Query must not be empty.")
 
+        effective_governance_policy = self._resolve_governance_policy(
+            tenant_id=tenant_id,
+            governance_policy=governance_policy,
+            metadata_filter=metadata_filter,
+        )
+
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
 
+        retrieval_kwargs = {
+            "top_k": top_k,
+            "min_score": min_score,
+            "metadata_filter": metadata_filter,
+        }
+
+        if effective_governance_policy is not None:
+            retrieval_kwargs["governance_policy"] = effective_governance_policy
+
         results = await self.retriever.retrieve(
             query,
-            top_k=top_k,
-            min_score=min_score,
-            metadata_filter=metadata_filter,
+            **retrieval_kwargs,
         )
 
         prompt = self._build_prompt(
@@ -103,6 +122,39 @@ class RAGQueryService:
             sources=sources,
             retrieved_count=len(results),
         )
+
+    def _resolve_governance_policy(
+        self,
+        *,
+        tenant_id: str | None,
+        governance_policy: GovernancePolicy | None,
+        metadata_filter: Mapping[str, object] | None,
+    ) -> GovernancePolicy | None:
+        if tenant_id is None:
+            return governance_policy
+
+        tenant_policy = (
+            self.tenant_policy_engine.get_policy(tenant_id)
+            if self.tenant_policy_engine is not None
+            else None
+        )
+
+        cross_tenant_allowed = tenant_policy is not None and tenant_policy.allow_cross_tenant_data
+
+        if not cross_tenant_allowed:
+            requested_tenant_id = (
+                metadata_filter.get("tenant_id") if metadata_filter is not None else None
+            )
+
+            if requested_tenant_id is not None and requested_tenant_id != tenant_id:
+                raise ValueError("Metadata filter tenant_id conflicts with authenticated tenant.")
+
+        if cross_tenant_allowed:
+            return governance_policy
+
+        base_policy = governance_policy if governance_policy is not None else GovernancePolicy()
+
+        return base_policy.with_tenant_scope(tenant_id)
 
     @staticmethod
     def _build_prompt(

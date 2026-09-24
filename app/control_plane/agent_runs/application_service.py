@@ -9,6 +9,7 @@ from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicyEngine
+from rag.governance import GovernancePolicy
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -76,6 +77,28 @@ class AgentRunApplicationService:
         self._lease_seconds = lease_seconds
         self._cancellation_registry = cancellation_registry
         self._tenant_policy_engine = tenant_policy_engine
+
+    def _resolve_effective_governance_policy(
+        self,
+        *,
+        tenant_id: str | None,
+        requested_policy: GovernancePolicy | None,
+    ) -> GovernancePolicy | None:
+        if tenant_id is None:
+            return requested_policy
+
+        policy = (
+            self._tenant_policy_engine.get_policy(tenant_id)
+            if self._tenant_policy_engine is not None
+            else None
+        )
+
+        if policy is not None and policy.allow_cross_tenant_data:
+            return requested_policy
+
+        base_policy = requested_policy if requested_policy is not None else GovernancePolicy()
+
+        return base_policy.with_tenant_scope(tenant_id)
 
     def _resolve_effective_budget(
         self,
@@ -182,9 +205,14 @@ class AgentRunApplicationService:
             tenant_id=request.tenant_id,
             requested_budget=request.execution_budget or ExecutionBudget(),
         )
+        effective_governance_policy = self._resolve_effective_governance_policy(
+            tenant_id=request.tenant_id,
+            requested_policy=request.governance_policy,
+        )
         effective_request = replace(
             request,
             execution_budget=effective_budget,
+            governance_policy=effective_governance_policy,
         )
 
         if idempotency_key is not None:

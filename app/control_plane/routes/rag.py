@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.control_plane.dependencies import (
     get_rag_indexer,
@@ -101,18 +101,21 @@ async def delete_document(
     response_model=RAGQueryResponse,
 )
 async def query_rag(
-    request: RAGQueryRequest,
+    request: Request,
+    payload: RAGQueryRequest,
     service: RAGQueryService = Depends(get_rag_query_service),
 ) -> RAGQueryResponse:
     try:
         result = await service.query(
-            query=request.query,
-            top_k=request.top_k,
-            min_score=request.min_score,
-            metadata_filter=request.metadata_filter,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            user_id=request.user_id,
+            query=payload.query,
+            top_k=payload.top_k,
+            min_score=payload.min_score,
+            metadata_filter=payload.metadata_filter,
+            governance_policy=None,
+            tenant_id=getattr(request.state, "tenant_id", None),
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+            user_id=payload.user_id,
         )
 
         return RAGQueryResponse(

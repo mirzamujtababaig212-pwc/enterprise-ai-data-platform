@@ -407,6 +407,7 @@ def test_control_plane_rag_query_executes() -> None:
                 id="doc-query",
                 content="Enterprise AI Platform supports RAG and model routing.",
                 metadata={
+                    "tenant_id": "tenant-a",
                     "source": "architecture.md",
                 },
             )
@@ -490,6 +491,8 @@ def test_control_plane_rag_query_passes_retrieval_controls() -> None:
             top_k=5,
             min_score=None,
             metadata_filter=None,
+            governance_policy=None,
+            tenant_id=None,
             temperature=0.2,
             max_tokens=1024,
             user_id=None,
@@ -500,6 +503,8 @@ def test_control_plane_rag_query_passes_retrieval_controls() -> None:
                     "top_k": top_k,
                     "min_score": min_score,
                     "metadata_filter": metadata_filter,
+                    "governance_policy": governance_policy,
+                    "tenant_id": tenant_id,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "user_id": user_id,
@@ -543,6 +548,8 @@ def test_control_plane_rag_query_passes_retrieval_controls() -> None:
             "top_k": 5,
             "min_score": 0.75,
             "metadata_filter": metadata_filter,
+            "governance_policy": None,
+            "tenant_id": "tenant-a",
             "temperature": 0.2,
             "max_tokens": 1024,
             "user_id": None,
@@ -662,3 +669,35 @@ def test_control_plane_rag_query_applies_metadata_filter_end_to_end() -> None:
         "tenant_id": "tenant-a",
         "document_type": "architecture",
     }
+
+
+def test_control_plane_rag_query_rejects_cross_tenant_metadata_filter() -> None:
+    vector_store = InMemoryVectorStore()
+    embedding_service = FakeEmbeddingService()
+
+    retriever = SemanticRetriever(
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+    )
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=FakeChatService(),
+    )
+
+    app.dependency_overrides[get_rag_query_service] = lambda: service
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "query": "enterprise policy",
+            "top_k": 5,
+            "metadata_filter": {
+                "tenant_id": "tenant-b",
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert "authenticated tenant" in response.json()["detail"]

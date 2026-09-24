@@ -262,6 +262,7 @@ _rag_retriever = _build_rag_retriever(
 _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
     chat_service=_rag_chat_service,
+    tenant_policy_engine=_tenant_policy_engine,
 )
 
 

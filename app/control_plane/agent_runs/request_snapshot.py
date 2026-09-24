@@ -37,7 +37,10 @@ class AgentRunRequestSnapshot(BaseModel):
             tenant_id=request.tenant_id,
             memory_namespace=request.memory_namespace,
             governance_policy=(
-                {"required_metadata": dict(policy.required_metadata)}
+                {
+                    "required_metadata": dict(policy.required_metadata),
+                    "tenant_id": policy.tenant_id,
+                }
                 if policy is not None
                 else None
             ),
@@ -65,7 +68,10 @@ class AgentRunRequestSnapshot(BaseModel):
         policy = self.governance_policy
 
         governance_policy = (
-            GovernancePolicy(required_metadata=dict(policy["required_metadata"]))
+            GovernancePolicy(
+                required_metadata=dict(policy["required_metadata"]),
+                tenant_id=policy.get("tenant_id"),
+            )
             if policy is not None
             else None
         )
