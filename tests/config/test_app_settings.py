@@ -249,6 +249,117 @@ def test_tenant_policies_are_parsed(
     assert policy.allow_cross_tenant_data is False
 
 
+def test_tenant_policies_parse_model_governance_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_tools": ["rag.search"],
+                    "allowed_models": [
+                        "gpt-5",
+                        "claude-sonnet-4",
+                    ],
+                    "allowed_providers": [
+                        "openai",
+                        "anthropic",
+                    ],
+                    "policy_id": "enterprise-model-policy",
+                    "policy_version": "v7",
+                }
+            ]
+        ),
+    )
+
+    settings = Settings.from_environment()
+
+    policy = settings.tenant_policies[0]
+
+    assert policy.allowed_models == frozenset(
+        {
+            "gpt-5",
+            "claude-sonnet-4",
+        }
+    )
+    assert policy.allowed_providers == frozenset(
+        {
+            "openai",
+            "anthropic",
+        }
+    )
+    assert policy.policy_id == "enterprise-model-policy"
+    assert policy.policy_version == "v7"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("allowed_models", {}),
+        ("allowed_providers", "openai"),
+    ],
+)
+def test_tenant_policies_reject_invalid_model_governance_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    value: object,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    field_name: value,
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES contains an invalid policy configuration",
+    ):
+        Settings.from_environment()
+
+
+def test_tenant_policies_preserve_explicit_empty_model_governance_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_models": [],
+                    "allowed_providers": [],
+                }
+            ]
+        ),
+    )
+
+    settings = Settings.from_environment()
+    policy = settings.tenant_policies[0]
+
+    assert policy.allowed_models == frozenset()
+    assert policy.allowed_providers == frozenset()
+
+
 def test_tenant_policy_enforcement_requires_policies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

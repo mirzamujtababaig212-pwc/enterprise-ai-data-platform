@@ -10,8 +10,13 @@ from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
 )
-from ai_platform.agents.models import AgentRequest, AgentResponse
-from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine, PolicyViolationError
+from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
+from ai_platform.agents.policy import (
+    ModelGovernanceDecision,
+    TenantPolicy,
+    TenantPolicyEngine,
+    PolicyViolationError,
+)
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -171,6 +176,14 @@ async def test_execute_resolves_effective_token_budget_from_tenant_policy(
 
     runtime = Mock()
     runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
 
     tenant_policy_engine = TenantPolicyEngine()
     tenant_policy_engine.register_policy(
@@ -212,6 +225,181 @@ async def test_execute_resolves_effective_token_budget_from_tenant_policy(
 
     assert effective_request.execution_budget is not None
     assert effective_request.execution_budget.max_tokens_per_run == expected_max_tokens
+
+
+@pytest.mark.asyncio
+async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_models=frozenset({"gpt-5"}),
+            policy_id="enterprise-model-policy",
+            policy_version="v7",
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-model-1",
+        user_id="user-model-1",
+        principal="principal-model-1",
+        tenant_id="tenant-acme",
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    effective_request = runtime.run.await_args.args[1]
+
+    assert isinstance(
+        effective_request.model_governance,
+        ModelGovernanceDecision,
+    )
+    assert effective_request.model_governance == ModelGovernanceDecision(
+        effective_model="gpt-5",
+        policy_id="enterprise-model-policy",
+        policy_version="v7",
+    )
+
+    pending = repository.create.call_args.args[0]
+    running = repository.update.call_args_list[0].args[0]
+
+    assert pending.request_snapshot.model_governance == {
+        "effective_model": "gpt-5",
+        "effective_provider": None,
+        "policy_id": "enterprise-model-policy",
+        "policy_version": "v7",
+    }
+    assert running.request_snapshot.model_governance == (pending.request_snapshot.model_governance)
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_model_not_allowed_by_tenant_policy() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_models=frozenset({"claude-sonnet-4"}),
+            policy_id="enterprise-model-policy",
+            policy_version="v7",
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-model-denied-1",
+        user_id="user-model-denied-1",
+        principal="principal-model-denied-1",
+        tenant_id="tenant-acme",
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="Model 'gpt-5' is not allowed for tenant 'tenant-acme'",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=request,
+        )
+
+    repository.create.assert_not_called()
+    repository.update.assert_not_called()
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_missing_provider_when_tenant_has_provider_allow_list() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_models=frozenset({"gpt-5"}),
+            allowed_providers=frozenset({"openai"}),
+            policy_id="enterprise-model-policy",
+            policy_version="v7",
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-provider-denied-1",
+        user_id="user-provider-denied-1",
+        principal="principal-provider-denied-1",
+        tenant_id="tenant-acme",
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="No provider was specified for model 'gpt-5'",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=request,
+        )
+
+    repository.create.assert_not_called()
+    repository.update.assert_not_called()
+    runtime.run.assert_not_awaited()
 
 
 @pytest.mark.asyncio

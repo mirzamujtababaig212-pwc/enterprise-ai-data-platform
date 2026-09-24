@@ -29,6 +29,7 @@ from ai_platform.agents.exceptions import (
 )
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
+from ai_platform.agents.policy import ModelGovernanceDecision
 from ai_platform.agents.llm_config import AgentLLMConfig
 from ai_platform.agents.llm_messages import (
     AgentMessageRole,
@@ -4039,6 +4040,58 @@ async def test_llm_agent_resume_rejects_completed_step_after_current_step() -> N
         match="steps after the current step must be PENDING",
     ):
         await agent.resume(context, checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_uses_pinned_model_governance_decision() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="agent-config-model",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    decision = ModelGovernanceDecision(
+        effective_model="governed-model",
+        effective_provider="governed-provider",
+        policy_id="policy-enterprise-models",
+        policy_version="v7",
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Use the governed model.",
+            model_governance=decision,
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-model-governance-1",
+    )
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    assert response.output == "Generated answer."
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["model"] == "governed-model"
+    assert gateway.requests[0]["provider"] == "governed-provider"
+    assert gateway.requests[0]["model"] != definition.model
 
 
 @pytest.mark.asyncio

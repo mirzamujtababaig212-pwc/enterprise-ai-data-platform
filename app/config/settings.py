@@ -122,6 +122,8 @@ class Settings:
                         "allowed_mcp_servers",
                         [],
                     )
+                    allowed_models = policy.get("allowed_models")
+                    allowed_providers = policy.get("allowed_providers")
 
                     if not isinstance(allowed_tools, list):
                         raise ValueError("Tenant policy allowed_tools must be an array.")
@@ -131,6 +133,18 @@ class Settings:
 
                     if not isinstance(allowed_mcp_servers, list):
                         raise ValueError("Tenant policy allowed_mcp_servers must be an array.")
+
+                    if allowed_models is not None and not isinstance(
+                        allowed_models,
+                        list,
+                    ):
+                        raise ValueError("Tenant policy allowed_models must be an array.")
+
+                    if allowed_providers is not None and not isinstance(
+                        allowed_providers,
+                        list,
+                    ):
+                        raise ValueError("Tenant policy allowed_providers must be an array.")
 
                     max_tokens_per_run = policy.get("max_tokens_per_run")
 
@@ -158,6 +172,14 @@ class Settings:
                             allowed_mcp_servers=frozenset(allowed_mcp_servers),
                             max_tokens_per_run=max_tokens_per_run,
                             allow_cross_tenant_data=allow_cross_tenant_data,
+                            allowed_models=(
+                                None if allowed_models is None else frozenset(allowed_models)
+                            ),
+                            allowed_providers=(
+                                None if allowed_providers is None else frozenset(allowed_providers)
+                            ),
+                            policy_id=policy.get("policy_id"),
+                            policy_version=policy.get("policy_version"),
                         )
                     )
 

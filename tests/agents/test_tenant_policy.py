@@ -88,3 +88,110 @@ def test_policy_rejects_negative_token_limit() -> None:
             tenant_id="tenant_a",
             max_tokens_per_run=-1,
         )
+
+
+def test_model_governance_decision_requires_model() -> None:
+    from ai_platform.agents.policy import ModelGovernanceDecision
+
+    with pytest.raises(ValueError, match="effective_model"):
+        ModelGovernanceDecision(effective_model="")
+
+
+def test_model_governance_decision_accepts_provider_and_policy_metadata() -> None:
+    from ai_platform.agents.policy import ModelGovernanceDecision
+
+    decision = ModelGovernanceDecision(
+        effective_model="gpt-5",
+        effective_provider="openai",
+        policy_id="enterprise-model-policy",
+        policy_version="v7",
+    )
+
+    assert decision.effective_model == "gpt-5"
+    assert decision.effective_provider == "openai"
+    assert decision.policy_id == "enterprise-model-policy"
+    assert decision.policy_version == "v7"
+
+
+def test_model_governance_decision_is_immutable() -> None:
+    from ai_platform.agents.policy import ModelGovernanceDecision
+
+    decision = ModelGovernanceDecision(effective_model="gpt-5")
+
+    with pytest.raises(AttributeError):
+        decision.effective_model = "gpt-4o"
+
+
+def test_tenant_policy_model_governance_defaults_to_unrestricted() -> None:
+    policy = TenantPolicy(tenant_id="tenant-a")
+
+    assert policy.allowed_models is None
+    assert policy.allowed_providers is None
+    assert policy.policy_id is None
+    assert policy.policy_version is None
+
+
+def test_tenant_policy_accepts_model_governance_configuration() -> None:
+    policy = TenantPolicy(
+        tenant_id="tenant-a",
+        allowed_models=frozenset({"gpt-5", "claude-sonnet-4"}),
+        allowed_providers=frozenset({"openai", "anthropic"}),
+        policy_id="enterprise-model-policy",
+        policy_version="v7",
+    )
+
+    assert policy.allowed_models == frozenset({"gpt-5", "claude-sonnet-4"})
+    assert policy.allowed_providers == frozenset({"openai", "anthropic"})
+    assert policy.policy_id == "enterprise-model-policy"
+    assert policy.policy_version == "v7"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("allowed_models", frozenset({""})),
+        ("allowed_providers", frozenset({""})),
+    ],
+)
+def test_tenant_policy_rejects_empty_model_governance_values(
+    field_name: str,
+    value: frozenset[str],
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        TenantPolicy(
+            tenant_id="tenant-a",
+            **{field_name: value},
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["policy_id", "policy_version"],
+)
+def test_tenant_policy_rejects_empty_policy_metadata(field_name: str) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        TenantPolicy(
+            tenant_id="tenant-a",
+            **{field_name: ""},
+        )
+
+
+def test_agent_request_carries_model_governance_decision() -> None:
+    from ai_platform.agents.models import AgentRequest
+    from ai_platform.agents.policy import ModelGovernanceDecision
+
+    decision = ModelGovernanceDecision(
+        effective_model="gpt-5",
+        effective_provider="openai",
+        policy_id="enterprise-model-policy",
+        policy_version="v7",
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        tenant_id="tenant-a",
+        model_governance=decision,
+    )
+
+    assert request.model_governance == decision
+    assert request.model_governance.effective_model == "gpt-5"

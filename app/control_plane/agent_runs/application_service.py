@@ -78,6 +78,33 @@ class AgentRunApplicationService:
         self._cancellation_registry = cancellation_registry
         self._tenant_policy_engine = tenant_policy_engine
 
+    async def _resolve_model_governance(
+        self,
+        *,
+        agent_name: str,
+        tenant_id: str | None,
+        requested_decision,
+    ):
+        if requested_decision is not None:
+            return requested_decision
+
+        if tenant_id is None or self._tenant_policy_engine is None:
+            return None
+
+        agent_definition = await self._runtime.get_agent_definition(agent_name)
+        model = agent_definition.llm_config.model
+
+        if model is None:
+            raise ValueError(
+                f"Agent '{agent_name}' does not define an LLM model "
+                "required for model governance."
+            )
+
+        return self._tenant_policy_engine.authorize_model(
+            tenant_id=tenant_id,
+            model=model,
+        )
+
     def _resolve_effective_governance_policy(
         self,
         *,
@@ -209,10 +236,16 @@ class AgentRunApplicationService:
             tenant_id=request.tenant_id,
             requested_policy=request.governance_policy,
         )
+        effective_model_governance = await self._resolve_model_governance(
+            agent_name=agent_name,
+            tenant_id=request.tenant_id,
+            requested_decision=request.model_governance,
+        )
         effective_request = replace(
             request,
             execution_budget=effective_budget,
             governance_policy=effective_governance_policy,
+            model_governance=effective_model_governance,
         )
 
         if idempotency_key is not None:

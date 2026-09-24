@@ -5,6 +5,7 @@ from typing import Any
 
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.llm_config import AgentLLMConfig
+from ai_platform.agents.policy import ModelGovernanceDecision
 from rag.governance import GovernancePolicy
 
 
@@ -100,6 +101,7 @@ class AgentRequest:
     tenant_id: str | None = None
     memory_namespace: str | None = None
     governance_policy: GovernancePolicy | None = None
+    model_governance: ModelGovernanceDecision | None = None
     execution_budget: ExecutionBudget | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)

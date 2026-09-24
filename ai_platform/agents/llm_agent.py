@@ -1312,10 +1312,19 @@ class LLMAgent:
                         else min(configured_max_tokens, remaining_tokens)
                     )
 
+                model_override = None
+                provider_override = None
+
+                if context.request.model_governance is not None:
+                    model_override = context.request.model_governance.effective_model
+                    provider_override = context.request.model_governance.effective_provider
+
                 result = await context.llm.generate(
                     prompt=context.request.input,
                     messages=tuple(messages),
                     tools=tuple(tools),
+                    model=model_override,
+                    provider=provider_override,
                     user_id=context.user_id,
                     metadata=context.metadata,
                     max_tokens=max_tokens,

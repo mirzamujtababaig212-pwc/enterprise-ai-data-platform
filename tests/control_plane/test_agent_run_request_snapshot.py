@@ -106,3 +106,56 @@ def test_snapshot_round_trip_preserves_unlimited_max_tokens_per_run() -> None:
 
     assert recovered.execution_budget is not None
     assert recovered.execution_budget.max_tokens_per_run is None
+
+
+def test_snapshot_round_trip_preserves_model_governance_decision() -> None:
+    from ai_platform.agents.policy import ModelGovernanceDecision
+
+    decision = ModelGovernanceDecision(
+        effective_model="gpt-5",
+        effective_provider="openai",
+        policy_id="tenant-ai-policy",
+        policy_version="v7",
+    )
+
+    request = AgentRequest(
+        input="Use the governed model.",
+        session_id="session-model-governance",
+        user_id="user-model-governance",
+        principal="principal-model-governance",
+        tenant_id="tenant-acme",
+        model_governance=decision,
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.model_governance == {
+        "effective_model": "gpt-5",
+        "effective_provider": "openai",
+        "policy_id": "tenant-ai-policy",
+        "policy_version": "v7",
+    }
+
+    recovered = snapshot.to_request(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        principal=request.principal,
+    )
+
+    assert recovered.model_governance == decision
+
+
+def test_snapshot_without_model_governance_remains_backward_compatible() -> None:
+    snapshot = AgentRunRequestSnapshot(
+        input="historical request",
+        principal="historical-principal",
+        tenant_id="tenant-acme",
+    )
+
+    recovered = snapshot.to_request(
+        session_id="historical-session",
+        user_id="historical-user",
+        principal="historical-principal",
+    )
+
+    assert recovered.model_governance is None
