@@ -104,6 +104,7 @@ class PostgreSQLToolExecutionIdempotencyStore(
 
         try:
             json.dumps(result.output)
+            json.dumps(result.metadata)
         except (TypeError, ValueError):
             await self.release(key, claim_token=claim_token)
             return
@@ -131,6 +132,7 @@ class PostgreSQLToolExecutionIdempotencyStore(
                         if result.failure_category is not None
                         else None
                     ),
+                    execution_metadata=result.metadata,
                 )
             )
 
@@ -272,4 +274,5 @@ class PostgreSQLToolExecutionIdempotencyStore(
             output=record.output,
             error=record.error,
             failure_category=failure_category,
+            metadata=dict(record.execution_metadata or {}),
         )

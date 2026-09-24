@@ -52,7 +52,7 @@ def make_run(
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
     principal: str | None = None,
-    tenant_id: str | None = None,
+    tenant_id: str | None = "tenant-acme",
     idempotency_key: str | None = None,
     status: AgentRunStatus = AgentRunStatus.PENDING,
     started_at: datetime | None = None,
@@ -2319,6 +2319,7 @@ def test_get_by_idempotency_key_returns_matching_user_run(repository) -> None:
     repository.create(run)
 
     restored = repository.get_by_idempotency_key(
+        "tenant-acme",
         "user-42",
         "request-key-42",
     )
@@ -2336,12 +2337,20 @@ def test_get_by_idempotency_key_is_scoped_to_user(repository) -> None:
     )
     repository.create(run)
 
-    assert repository.get_by_idempotency_key("user-2", "shared-key") is None
+    assert (
+        repository.get_by_idempotency_key(
+            "tenant-acme",
+            "user-2",
+            "shared-key",
+        )
+        is None
+    )
 
 
 def test_get_by_idempotency_key_returns_none_for_missing_key(repository) -> None:
     assert (
         repository.get_by_idempotency_key(
+            "tenant-acme",
             "user-1",
             "does-not-exist",
         )
@@ -2406,8 +2415,30 @@ def test_same_idempotency_key_is_allowed_for_different_users(repository) -> None
     repository.create(first)
     repository.create(second)
 
-    assert repository.get_by_idempotency_key("user-1", "same-key") == first
-    assert repository.get_by_idempotency_key("user-2", "same-key") == second
+    assert (
+        repository.get_by_idempotency_key(
+            "tenant-acme",
+            "user-1",
+            "same-key",
+        )
+        == first
+    )
+    assert (
+        repository.get_by_idempotency_key(
+            "tenant-acme",
+            "user-2",
+            "same-key",
+        )
+        == second
+    )
+    assert (
+        repository.get_by_idempotency_key(
+            "tenant-other",
+            "user-1",
+            "same-key",
+        )
+        is None
+    )
 
 
 def test_multiple_null_idempotency_keys_are_allowed(repository) -> None:

@@ -15,6 +15,7 @@ def make_run(
     run_id: str,
     *,
     agent_name: str = "enterprise-analyst",
+    tenant_id: str | None = "tenant-acme",
     session_id: str | None = None,
     user_id: str | None = None,
     idempotency_key: str | None = None,
@@ -27,6 +28,7 @@ def make_run(
     return AgentRun(
         run_id=run_id,
         agent_name=agent_name,
+        tenant_id=tenant_id,
         session_id=session_id,
         user_id=user_id,
         idempotency_key=idempotency_key,
@@ -72,6 +74,7 @@ def test_get_by_idempotency_key_returns_matching_user_run() -> None:
 
     assert (
         repository.get_by_idempotency_key(
+            "tenant-acme",
             "user-a",
             "request-123",
         )
@@ -91,6 +94,7 @@ def test_get_by_idempotency_key_is_scoped_to_user() -> None:
 
     assert (
         repository.get_by_idempotency_key(
+            "tenant-acme",
             "user-b",
             "request-123",
         )
@@ -110,6 +114,7 @@ def test_get_by_idempotency_key_returns_none_for_missing_key() -> None:
 
     assert (
         repository.get_by_idempotency_key(
+            "tenant-acme",
             "user-a",
             "missing-key",
         )
@@ -126,7 +131,14 @@ def test_multiple_null_idempotency_keys_are_allowed() -> None:
     repository.create(first)
     repository.create(second)
 
-    assert repository.get_by_idempotency_key("user-a", "request-123") is None
+    assert (
+        repository.get_by_idempotency_key(
+            "other-tenant",
+            "user-a",
+            "request-123",
+        )
+        is None
+    )
     assert repository.get("run-1") == first
     assert repository.get("run-2") == second
 

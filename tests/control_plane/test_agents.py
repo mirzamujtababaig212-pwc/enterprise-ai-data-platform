@@ -32,12 +32,20 @@ class FakeAgentRunApplicationService:
         self.events = {}
         self.event_list_calls = []
 
-    def get_run(self, run_id: str):
+    def get_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+    ):
+        del tenant_id, principal
         return self.runs.get(run_id)
 
     def list_runs(
         self,
         *,
+        tenant_id: str | None = None,
         agent_name=None,
         session_id=None,
         user_id=None,
@@ -46,6 +54,7 @@ class FakeAgentRunApplicationService:
     ):
         self.list_calls.append(
             {
+                "tenant_id": tenant_id,
                 "agent_name": agent_name,
                 "session_id": session_id,
                 "user_id": user_id,
@@ -59,8 +68,11 @@ class FakeAgentRunApplicationService:
         self,
         run_id: str,
         *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
         limit=100,
     ):
+        del tenant_id, principal
         if run_id not in self.runs:
             raise LookupError(
                 f"Agent run '{run_id}' was not found.",
@@ -113,6 +125,12 @@ def build_client(
     service: FakeAgentRunApplicationService,
 ) -> TestClient:
     app = FastAPI()
+
+    @app.middleware("http")
+    async def test_identity_middleware(request, call_next):
+        request.state.tenant_id = "tenant-acme"
+        request.state.principal = "test-principal"
+        return await call_next(request)
 
     app.include_router(router)
 
@@ -375,6 +393,7 @@ def test_list_agent_runs_returns_runs_and_applies_filters() -> None:
 
     assert service.list_calls == [
         {
+            "tenant_id": "tenant-acme",
             "agent_name": "enterprise-analyst",
             "session_id": "session-123",
             "user_id": "user-123",
@@ -394,6 +413,7 @@ def test_list_agent_runs_defaults_to_limit_100() -> None:
     assert response.json() == {"runs": []}
     assert service.list_calls == [
         {
+            "tenant_id": "tenant-acme",
             "agent_name": None,
             "session_id": None,
             "user_id": None,

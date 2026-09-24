@@ -441,6 +441,13 @@ class ToolExecutionIdempotencyRecord(Base):
         nullable=True,
     )
 
+    execution_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
