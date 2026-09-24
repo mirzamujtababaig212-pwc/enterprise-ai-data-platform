@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
+from ai_platform.agents.evaluation.policy import (
+    AgentEvaluationPolicy,
+    AgentQualityGateResult,
+)
+
+
+@dataclass(frozen=True)
+class AgentEvaluationLineage:
+    """Provenance for the agent execution being evaluated."""
+
+    evaluated_run_id: str
+    agent_name: str
+    agent_version: str | None
+    tenant_id: str | None
+
+    def __post_init__(self) -> None:
+        if not self.evaluated_run_id.strip():
+            raise ValueError("evaluated_run_id must not be empty.")
+
+        if not self.agent_name.strip():
+            raise ValueError("agent_name must not be empty.")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "evaluated_run_id": self.evaluated_run_id,
+            "agent_name": self.agent_name,
+            "agent_version": self.agent_version,
+            "tenant_id": self.tenant_id,
+        }
+
+
+@dataclass(frozen=True)
+class AgentEvaluationRun:
+    """Immutable evaluation artifact for one agent execution."""
+
+    evaluation_run_id: str
+    created_at: datetime
+    lineage: AgentEvaluationLineage
+    metrics: AgentEvaluationMetrics
+    policy: AgentEvaluationPolicy
+    quality_gate: AgentQualityGateResult
+
+    def __post_init__(self) -> None:
+        if not self.evaluation_run_id.strip():
+            raise ValueError("evaluation_run_id must not be empty.")
+
+        if self.created_at.tzinfo is None:
+            raise ValueError("created_at must be timezone-aware.")
+
+    @property
+    def passed(self) -> bool:
+        return self.quality_gate.passed
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "evaluation_run_id": self.evaluation_run_id,
+            "created_at": self.created_at.isoformat(),
+            "passed": self.passed,
+            "lineage": self.lineage.as_dict(),
+            "metrics": self.metrics.as_dict(),
+            "policy": self.policy.as_dict(),
+            "quality_gate": self.quality_gate.as_dict(),
+        }

@@ -34,6 +34,12 @@ from app.control_plane.agent_run_events.tool_authorization_observer import (
 from app.control_plane.agent_run_events.tool_governance_observer import (
     ToolGovernanceDecisionObserver,
 )
+from app.control_plane.agent_evaluations.application_service import (
+    AgentEvaluationApplicationService,
+)
+from app.control_plane.agent_evaluations.postgres_repository import (
+    PostgreSQLAgentEvaluationRunsRepository,
+)
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
@@ -461,6 +467,17 @@ async def get_agent_run_application_service(
         cancellation_registry=_agent_run_cancellation_registry,
         tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
+    )
+
+
+async def get_agent_evaluation_application_service(
+    db: Session = Depends(get_db),
+) -> AgentEvaluationApplicationService:
+    return AgentEvaluationApplicationService(
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
+        agent_run_events_repository=PostgreSQLAgentRunEventsRepository(db),
+        evaluation_repository=PostgreSQLAgentEvaluationRunsRepository(db),
     )
 
 

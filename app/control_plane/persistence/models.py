@@ -157,6 +157,70 @@ class RetrievalEvaluationReleaseDecisionRecord(Base):
     )
 
 
+class AgentEvaluationRunRecord(Base):
+    __tablename__ = "agent_evaluation_runs"
+
+    evaluation_run_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    evaluated_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    agent_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    agent_version: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    passed: Mapped[bool] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+
+    lineage: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+    metrics: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+    policy: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+    quality_gate: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
+
+
 class AgentRunRecord(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (

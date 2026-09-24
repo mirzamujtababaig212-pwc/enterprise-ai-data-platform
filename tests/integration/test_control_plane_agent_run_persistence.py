@@ -16,6 +16,7 @@ from app.control_plane.agent_runs.postgres_repository import (
 from app.control_plane.app import app
 from app.control_plane.persistence.database import SessionLocal
 from app.control_plane.persistence.models import (
+    AgentEvaluationRunRecord,
     AgentRunEventRecord,
     AgentRunRecord,
     AgentRunStepRecord,
@@ -42,6 +43,197 @@ def _deterministic_chat_response() -> dict:
         },
         "tool_calls": [],
     }
+
+
+def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
+    """Exercise production agent execution and evaluation through PostgreSQL."""
+
+    client = TestClient(app)
+    session_id = "production-evaluation-integration-session"
+
+    run_id: str | None = None
+
+    try:
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(return_value=_deterministic_chat_response()),
+        ) as mock_route_chat:
+            response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={
+                    "x-api-key": API_KEY,
+                },
+                json={
+                    "input": "Evaluate production agent execution.",
+                    "session_id": session_id,
+                    "user_id": "integration-evaluation-user",
+                    "metadata": {
+                        "test": "production-control-plane-agent-evaluation",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert mock_route_chat.await_count == 1
+
+        run_payload = response.json()
+
+        assert run_payload["run_id"]
+        assert run_payload["agent_name"] == "enterprise-analyst"
+        assert run_payload["output"] == "Deterministic integration-test response."
+        assert run_payload["session_id"] == session_id
+
+        run_id = run_payload["run_id"]
+
+        evaluation_response = client.post(
+            f"/api/v1/agents/runs/{run_id}/evaluations",
+            headers={
+                "x-api-key": API_KEY,
+            },
+            json={
+                "max_execution_time_ms": 60_000,
+                "max_steps_per_run": 10,
+                "max_invalid_tool_calls": 0,
+                "allow_governance_denials": False,
+                "require_task_completed": True,
+                "name": "production-integration-quality-gate",
+            },
+        )
+
+        assert evaluation_response.status_code == 200, evaluation_response.text
+
+        evaluation_payload = evaluation_response.json()
+
+        assert evaluation_payload["evaluation_run_id"]
+        assert evaluation_payload["passed"] is True
+
+        assert evaluation_payload["lineage"] == {
+            "evaluated_run_id": run_id,
+            "agent_name": "enterprise-analyst",
+            "agent_version": None,
+            "tenant_id": "tenant-a",
+        }
+
+        metrics = evaluation_payload["metrics"]
+
+        assert metrics["steps_total"] == 0
+        assert metrics["tool_calls_total"] == 0
+        assert metrics["tool_calls_successful"] == 0
+        assert metrics["tool_calls_failed"] == 0
+        assert metrics["invalid_tool_calls"] == 0
+        assert metrics["governance_denials"] == 0
+        assert metrics["task_completed"] is True
+        assert metrics["execution_time_ms"] >= 0
+
+        assert evaluation_payload["policy"] == {
+            "max_execution_time_ms": 60_000,
+            "max_steps_per_run": 10,
+            "max_invalid_tool_calls": 0,
+            "allow_governance_denials": False,
+            "require_task_completed": True,
+            "name": "production-integration-quality-gate",
+        }
+
+        assert evaluation_payload["quality_gate"] == {
+            "passed": True,
+            "violations": [],
+        }
+
+        evaluation_run_id = evaluation_payload["evaluation_run_id"]
+
+        with SessionLocal() as session:
+            evaluation_record = session.get(
+                AgentEvaluationRunRecord,
+                evaluation_run_id,
+            )
+
+            assert evaluation_record is not None
+            assert evaluation_record.evaluation_run_id == evaluation_run_id
+            assert evaluation_record.evaluated_run_id == run_id
+            assert evaluation_record.agent_name == "enterprise-analyst"
+            assert evaluation_record.agent_version is None
+            assert evaluation_record.tenant_id == "tenant-a"
+            assert evaluation_record.passed is True
+
+            assert evaluation_record.lineage == {
+                "evaluated_run_id": run_id,
+                "agent_name": "enterprise-analyst",
+                "agent_version": None,
+                "tenant_id": "tenant-a",
+            }
+
+            assert evaluation_record.metrics["task_completed"] is True
+            assert evaluation_record.metrics["tool_calls_total"] == 0
+            assert evaluation_record.metrics["invalid_tool_calls"] == 0
+
+            assert evaluation_record.policy == {
+                "max_execution_time_ms": 60_000,
+                "max_steps_per_run": 10,
+                "max_invalid_tool_calls": 0,
+                "allow_governance_denials": False,
+                "require_task_completed": True,
+                "name": "production-integration-quality-gate",
+            }
+
+            assert evaluation_record.quality_gate == {
+                "passed": True,
+                "violations": [],
+            }
+
+        list_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/evaluations",
+            params={"limit": 10},
+            headers={
+                "x-api-key": API_KEY,
+            },
+        )
+
+        assert list_response.status_code == 200, list_response.text
+
+        list_payload = list_response.json()
+
+        assert list_payload["limit"] == 10
+        assert len(list_payload["evaluations"]) == 1
+
+        listed_evaluation = list_payload["evaluations"][0]
+
+        assert listed_evaluation == evaluation_payload
+
+        with SessionLocal() as session:
+            run_record = session.get(AgentRunRecord, run_id)
+
+            assert run_record is not None
+            assert run_record.status == "completed"
+            assert run_record.tenant_id == "tenant-a"
+
+            evaluation_count = (
+                session.query(AgentEvaluationRunRecord)
+                .filter(AgentEvaluationRunRecord.evaluated_run_id == run_id)
+                .count()
+            )
+
+            assert evaluation_count == 1
+
+    finally:
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(AgentEvaluationRunRecord).filter(
+                    AgentEvaluationRunRecord.evaluated_run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunStepRecord).filter(
+                    AgentRunStepRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunEventRecord).filter(
+                    AgentRunEventRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                    synchronize_session=False
+                )
+
+                session.commit()
 
 
 def test_production_control_plane_persists_agent_run_events() -> None:

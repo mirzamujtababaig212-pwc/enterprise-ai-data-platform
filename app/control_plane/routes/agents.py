@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
+from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.models import AgentRequest
 
+from app.control_plane.agent_evaluations.application_service import (
+    AgentEvaluationApplicationService,
+)
+from app.control_plane.agent_evaluations.repository import (
+    DuplicateAgentEvaluationRunError,
+)
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
@@ -14,8 +21,17 @@ from app.control_plane.agent_runs.exceptions import (
 from app.control_plane.agent_run_steps.models import AgentRunStepStatus
 from app.control_plane.agent_runs.models import AgentRunStatus
 from app.control_plane.dependencies import (
+    get_agent_evaluation_application_service,
     get_agent_run_application_service,
     get_agent_run_recovery_service,
+)
+from app.control_plane.schemas.agent_evaluation import (
+    AgentEvaluationLineageResponse,
+    AgentEvaluationMetricsResponse,
+    AgentEvaluationPolicyRequest,
+    AgentEvaluationQualityGateResponse,
+    AgentEvaluationRunListResponse,
+    AgentEvaluationRunResponse,
 )
 from app.control_plane.schemas.agents import (
     AgentRunCancellationResponse,
@@ -448,6 +464,184 @@ async def get_agent_run_step(
         created_at=step.created_at,
         updated_at=step.updated_at,
         metadata=step.metadata,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/evaluations",
+    response_model=AgentEvaluationRunResponse,
+)
+async def evaluate_agent_run(
+    request: Request,
+    run_id: str,
+    payload: AgentEvaluationPolicyRequest,
+    service: AgentEvaluationApplicationService = Depends(
+        get_agent_evaluation_application_service,
+    ),
+) -> AgentEvaluationRunResponse:
+    tenant_id = getattr(request.state, "tenant_id", None)
+    principal = getattr(request.state, "principal", None)
+
+    if tenant_id is None or principal is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Both tenant_id and principal are required for evaluation.",
+        )
+
+    policy = AgentEvaluationPolicy(
+        max_execution_time_ms=payload.max_execution_time_ms,
+        max_steps_per_run=payload.max_steps_per_run,
+        max_invalid_tool_calls=payload.max_invalid_tool_calls,
+        allow_governance_denials=payload.allow_governance_denials,
+        require_task_completed=payload.require_task_completed,
+        name=payload.name,
+    )
+
+    try:
+        evaluation = service.evaluate_run(
+            run_id,
+            tenant_id=tenant_id,
+            principal=principal,
+            policy=policy,
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except DuplicateAgentEvaluationRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    return AgentEvaluationRunResponse(
+        evaluation_run_id=evaluation.evaluation_run_id,
+        created_at=evaluation.created_at,
+        passed=evaluation.passed,
+        lineage=AgentEvaluationLineageResponse(
+            evaluated_run_id=evaluation.lineage.evaluated_run_id,
+            agent_name=evaluation.lineage.agent_name,
+            agent_version=evaluation.lineage.agent_version,
+            tenant_id=evaluation.lineage.tenant_id,
+        ),
+        metrics=AgentEvaluationMetricsResponse(
+            execution_time_ms=evaluation.metrics.execution_time_ms,
+            steps_total=evaluation.metrics.steps_total,
+            tool_calls_total=evaluation.metrics.tool_calls_total,
+            tool_calls_successful=evaluation.metrics.tool_calls_successful,
+            tool_calls_failed=evaluation.metrics.tool_calls_failed,
+            invalid_tool_calls=evaluation.metrics.invalid_tool_calls,
+            governance_denials=evaluation.metrics.governance_denials,
+            task_completed=evaluation.metrics.task_completed,
+        ),
+        policy=AgentEvaluationPolicyRequest(
+            max_execution_time_ms=evaluation.policy.max_execution_time_ms,
+            max_steps_per_run=evaluation.policy.max_steps_per_run,
+            max_invalid_tool_calls=evaluation.policy.max_invalid_tool_calls,
+            allow_governance_denials=evaluation.policy.allow_governance_denials,
+            require_task_completed=evaluation.policy.require_task_completed,
+            name=evaluation.policy.name,
+        ),
+        quality_gate=AgentEvaluationQualityGateResponse(
+            passed=evaluation.quality_gate.passed,
+            violations=list(evaluation.quality_gate.violations),
+        ),
+    )
+
+
+@router.get(
+    "/runs/{run_id}/evaluations",
+    response_model=AgentEvaluationRunListResponse,
+)
+async def list_agent_run_evaluations(
+    request: Request,
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=100),
+    service: AgentEvaluationApplicationService = Depends(
+        get_agent_evaluation_application_service,
+    ),
+) -> AgentEvaluationRunListResponse:
+    tenant_id = getattr(request.state, "tenant_id", None)
+    principal = getattr(request.state, "principal", None)
+
+    if tenant_id is None or principal is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Both tenant_id and principal are required for evaluation.",
+        )
+
+    try:
+        evaluations = service.list_evaluations(
+            run_id,
+            tenant_id=tenant_id,
+            principal=principal,
+            limit=limit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    return AgentEvaluationRunListResponse(
+        evaluations=[
+            AgentEvaluationRunResponse(
+                evaluation_run_id=evaluation.evaluation_run_id,
+                created_at=evaluation.created_at,
+                passed=evaluation.passed,
+                lineage=AgentEvaluationLineageResponse(
+                    evaluated_run_id=evaluation.lineage.evaluated_run_id,
+                    agent_name=evaluation.lineage.agent_name,
+                    agent_version=evaluation.lineage.agent_version,
+                    tenant_id=evaluation.lineage.tenant_id,
+                ),
+                metrics=AgentEvaluationMetricsResponse(
+                    execution_time_ms=evaluation.metrics.execution_time_ms,
+                    steps_total=evaluation.metrics.steps_total,
+                    tool_calls_total=evaluation.metrics.tool_calls_total,
+                    tool_calls_successful=evaluation.metrics.tool_calls_successful,
+                    tool_calls_failed=evaluation.metrics.tool_calls_failed,
+                    invalid_tool_calls=evaluation.metrics.invalid_tool_calls,
+                    governance_denials=evaluation.metrics.governance_denials,
+                    task_completed=evaluation.metrics.task_completed,
+                ),
+                policy=AgentEvaluationPolicyRequest(
+                    max_execution_time_ms=evaluation.policy.max_execution_time_ms,
+                    max_steps_per_run=evaluation.policy.max_steps_per_run,
+                    max_invalid_tool_calls=evaluation.policy.max_invalid_tool_calls,
+                    allow_governance_denials=evaluation.policy.allow_governance_denials,
+                    require_task_completed=evaluation.policy.require_task_completed,
+                    name=evaluation.policy.name,
+                ),
+                quality_gate=AgentEvaluationQualityGateResponse(
+                    passed=evaluation.quality_gate.passed,
+                    violations=list(evaluation.quality_gate.violations),
+                ),
+            )
+            for evaluation in evaluations
+        ],
+        limit=limit,
     )
 
 

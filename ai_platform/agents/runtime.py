@@ -19,7 +19,7 @@ from ai_platform.agents.lifecycle import (
     AgentExecutionLifecyclePhase,
     AgentExecutionLifecycleState,
 )
-from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -98,6 +98,15 @@ class AgentRuntime:
         self._observer = observer
         self._agent_run_steps_repository_factory = agent_run_steps_repository_factory
         self._tenant_policy_engine = tenant_policy_engine
+
+    async def get_agent_definition(self, agent_name: str) -> AgentDefinition:
+        """Retrieve the AgentDefinition for a given agent name from the registry."""
+        if not agent_name.strip():
+            raise ValueError("Agent name must not be empty.")
+        agent = await self._registry.get(agent_name)
+        if agent is None:
+            raise LookupError(f"Agent '{agent_name}' is not registered.")
+        return agent.definition
 
     async def resume(
         self,

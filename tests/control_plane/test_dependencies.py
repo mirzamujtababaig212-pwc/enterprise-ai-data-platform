@@ -4,6 +4,19 @@ import pytest
 from unittest.mock import AsyncMock, Mock
 
 from app.config.settings import Settings
+from app.control_plane.agent_evaluations.application_service import (
+    AgentEvaluationApplicationService,
+)
+from app.control_plane.agent_evaluations.postgres_repository import (
+    PostgreSQLAgentEvaluationRunsRepository,
+)
+from app.control_plane.agent_run_events.postgres_repository import (
+    PostgreSQLAgentRunEventsRepository,
+)
+from app.control_plane.agent_run_steps.postgres_repository import (
+    PostgreSQLAgentRunStepsRepository,
+)
+from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.recovery_service import AgentRunRecoveryService
 from app.control_plane.dependencies import (
@@ -154,6 +167,41 @@ def test_build_rag_retriever_requires_lexical_retriever_for_hybrid_backend() -> 
             semantic_retriever=Mock(),
             backend="postgres",
         )
+
+
+@pytest.mark.asyncio
+async def test_get_agent_evaluation_application_service_uses_injected_session() -> None:
+    from app.control_plane.dependencies import get_agent_evaluation_application_service
+
+    session = Mock()
+
+    service = await get_agent_evaluation_application_service(db=session)
+
+    assert isinstance(service, AgentEvaluationApplicationService)
+
+    assert isinstance(
+        service._agent_run_repository,
+        PostgreSQLAgentRunRepository,
+    )
+    assert service._agent_run_repository._session is session
+
+    assert isinstance(
+        service._agent_run_steps_repository,
+        PostgreSQLAgentRunStepsRepository,
+    )
+    assert service._agent_run_steps_repository._session is session
+
+    assert isinstance(
+        service._agent_run_events_repository,
+        PostgreSQLAgentRunEventsRepository,
+    )
+    assert service._agent_run_events_repository._session is session
+
+    assert isinstance(
+        service._evaluation_repository,
+        PostgreSQLAgentEvaluationRunsRepository,
+    )
+    assert service._evaluation_repository._session is session
 
 
 @pytest.mark.asyncio
