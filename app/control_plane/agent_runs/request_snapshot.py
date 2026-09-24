@@ -25,7 +25,7 @@ class AgentRunRequestSnapshot(BaseModel):
     memory_namespace: str | None = None
     governance_policy: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    execution_budget: dict[str, int | float] | None = None
+    execution_budget: dict[str, int | float | None] | None = None
 
     @classmethod
     def from_request(cls, request: AgentRequest) -> "AgentRunRequestSnapshot":
@@ -48,6 +48,7 @@ class AgentRunRequestSnapshot(BaseModel):
                     "max_tool_calls": request.execution_budget.max_tool_calls,
                     "max_tool_rounds": request.execution_budget.max_tool_rounds,
                     "max_duration_seconds": request.execution_budget.max_duration_seconds,
+                    "max_tokens_per_run": request.execution_budget.max_tokens_per_run,
                 }
                 if request.execution_budget is not None
                 else None

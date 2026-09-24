@@ -13,7 +13,10 @@ from ai_platform.agents.checkpoint import (
     AgentExecutionCheckpoint,
 )
 from ai_platform.agents.execution import AgentExecutionContext
-from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
+from ai_platform.agents.exceptions import (
+    AgentExecutionOwnershipLostError,
+    AgentTokenLimitError,
+)
 from ai_platform.agents.orchestration import (
     OrchestrationStep,
     OrchestrationStepCompletionPolicy,
@@ -1287,12 +1290,41 @@ class LLMAgent:
                     )
                 )
 
+                max_tokens: int | None = None
+                max_tokens_per_run = context.execution_budget.max_tokens_per_run
+
+                if max_tokens_per_run is not None:
+                    remaining_tokens = (
+                        max_tokens_per_run - context.execution_budget_state.total_tokens
+                    )
+
+                    if remaining_tokens <= 0:
+                        raise AgentTokenLimitError(
+                            self.definition.name,
+                            max_tokens_per_run,
+                            context.execution_budget_state.total_tokens,
+                        )
+
+                    configured_max_tokens = context.llm.max_tokens
+                    max_tokens = (
+                        remaining_tokens
+                        if configured_max_tokens is None
+                        else min(configured_max_tokens, remaining_tokens)
+                    )
+
                 result = await context.llm.generate(
                     prompt=context.request.input,
                     messages=tuple(messages),
                     tools=tuple(tools),
                     user_id=context.user_id,
                     metadata=context.metadata,
+                    max_tokens=max_tokens,
+                )
+
+                context.execution_budget_state.consume_tokens(
+                    result.usage.total_tokens,
+                    context.execution_budget,
+                    self.definition.name,
                 )
 
                 context.raise_if_execution_ownership_lost()

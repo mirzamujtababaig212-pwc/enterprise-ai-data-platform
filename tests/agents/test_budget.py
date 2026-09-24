@@ -208,3 +208,59 @@ def test_execution_budget_state_rejects_invalid_elapsed_time() -> None:
 
     with pytest.raises(TypeError, match="elapsed_seconds"):
         ExecutionBudgetState.from_dict({"elapsed_seconds": "invalid"})
+
+
+def test_execution_budget_state_consumes_tokens() -> None:
+    budget = ExecutionBudget(max_tokens_per_run=10_000)
+    state = ExecutionBudgetState()
+
+    state.consume_tokens(2_500, budget, "test-agent")
+    state.consume_tokens(1_500, budget, "test-agent")
+
+    assert state.total_tokens == 4_000
+
+
+def test_execution_budget_state_rejects_excess_tokens() -> None:
+    from ai_platform.agents.exceptions import AgentTokenLimitError
+
+    budget = ExecutionBudget(max_tokens_per_run=5_000)
+    state = ExecutionBudgetState()
+
+    state.consume_tokens(4_000, budget, "test-agent")
+
+    with pytest.raises(
+        AgentTokenLimitError,
+        match=r"maximum token usage \(5000; actual: 6000\)",
+    ):
+        state.consume_tokens(2_000, budget, "test-agent")
+
+    # Actual provider-reported usage remains authoritative even when
+    # the run exceeds its configured token ceiling.
+    assert state.total_tokens == 6_000
+
+
+def test_execution_budget_state_round_trips_total_tokens() -> None:
+    state = ExecutionBudgetState(
+        llm_calls=3,
+        tool_calls=5,
+        tool_rounds=2,
+        total_tokens=7_500,
+    )
+
+    payload = state.to_dict()
+    restored = ExecutionBudgetState.from_dict(payload)
+
+    assert payload["total_tokens"] == 7_500
+    assert restored.total_tokens == 7_500
+
+
+def test_execution_budget_state_from_dict_defaults_missing_total_tokens() -> None:
+    restored = ExecutionBudgetState.from_dict(
+        {
+            "llm_calls": 2,
+            "tool_calls": 3,
+            "tool_rounds": 1,
+        }
+    )
+
+    assert restored.total_tokens == 0

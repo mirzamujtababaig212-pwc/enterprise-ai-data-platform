@@ -24,6 +24,7 @@ from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
     AgentLLMCallLimitError,
+    AgentTokenLimitError,
     AgentToolLoopLimitError,
 )
 from ai_platform.agents.execution import AgentExecutionContext
@@ -4038,6 +4039,238 @@ async def test_llm_agent_resume_rejects_completed_step_after_current_step() -> N
         match="steps after the current step must be PENDING",
     ):
         await agent.resume(context, checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_records_provider_reported_token_usage() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Track my token usage.",
+            execution_budget=ExecutionBudget(max_tokens_per_run=100),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-token-usage-1",
+    )
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    assert response.output == "Generated answer."
+    assert context.execution_budget_state.total_tokens == 15
+    assert len(gateway.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_rejects_exhausted_token_budget_before_provider_call() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Continue execution.",
+            execution_budget=ExecutionBudget(max_tokens_per_run=100),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-token-exhausted-1",
+    )
+
+    context.execution_budget_state.total_tokens = 100
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentTokenLimitError,
+        match=r"maximum token usage \(100; actual: 100\)",
+    ):
+        await agent.run(context)
+
+    assert len(gateway.requests) == 0
+    assert context.execution_budget_state.total_tokens == 100
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_passes_remaining_token_budget_to_gateway() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Use the remaining budget.",
+            execution_budget=ExecutionBudget(max_tokens_per_run=50),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-token-cap-1",
+    )
+
+    context.execution_budget_state.total_tokens = 20
+
+    agent = LLMAgent(definition)
+
+    await agent.run(context)
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["max_tokens"] == 30
+    assert context.execution_budget_state.total_tokens == 35
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_respects_lower_configured_max_tokens() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+            max_tokens=10,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Respect the configured completion limit.",
+            execution_budget=ExecutionBudget(max_tokens_per_run=50),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-token-configured-cap-1",
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent.run(context)
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["max_tokens"] == 10
+    assert context.execution_budget_state.total_tokens == 15
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_rejects_provider_usage_that_exceeds_token_budget() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Use the remaining token budget.",
+            execution_budget=ExecutionBudget(max_tokens_per_run=20),
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-token-overage-1",
+    )
+
+    context.execution_budget_state.total_tokens = 10
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentTokenLimitError,
+        match=r"maximum token usage \(20; actual: 25\)",
+    ):
+        await agent.run(context)
+
+    # The provider did execute, so its authoritative usage remains recorded.
+    assert context.execution_budget_state.total_tokens == 25
+
+    # The remaining budget was passed as the completion cap.
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0]["max_tokens"] == 10
 
 
 @pytest.mark.asyncio

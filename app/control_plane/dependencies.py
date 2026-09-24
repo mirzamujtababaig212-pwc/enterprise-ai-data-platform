@@ -446,6 +446,7 @@ async def get_agent_run_application_service(
         agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
+        tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 

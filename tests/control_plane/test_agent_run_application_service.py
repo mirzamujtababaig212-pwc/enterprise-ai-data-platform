@@ -6,8 +6,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
+from ai_platform.agents.budget import ExecutionBudget
+from ai_platform.agents.exceptions import (
+    AgentExecutionOwnershipLostError,
+)
 from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine, PolicyViolationError
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -150,6 +154,107 @@ class FailingObserver:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_max_tokens", "tenant_max_tokens", "expected_max_tokens"),
+    [
+        (100_000, 20_000, 20_000),
+        (10_000, 20_000, 10_000),
+        (None, 20_000, 20_000),
+    ],
+)
+async def test_execute_resolves_effective_token_budget_from_tenant_policy(
+    requested_max_tokens: int | None,
+    tenant_max_tokens: int,
+    expected_max_tokens: int,
+) -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            max_tokens_per_run=tenant_max_tokens,
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-budget-1",
+        user_id="user-budget-1",
+        principal="principal-budget-1",
+        tenant_id="tenant-acme",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=requested_max_tokens,
+        ),
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    pending = repository.create.call_args.args[0]
+    running = repository.update.call_args_list[0].args[0]
+
+    assert pending.request_snapshot.execution_budget["max_tokens_per_run"] == expected_max_tokens
+    assert running.request_snapshot.execution_budget["max_tokens_per_run"] == expected_max_tokens
+
+    effective_request = runtime.run.await_args.args[1]
+
+    assert effective_request.execution_budget is not None
+    assert effective_request.execution_budget.max_tokens_per_run == expected_max_tokens
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_unregistered_tenant_before_run_creation() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    tenant_policy_engine = TenantPolicyEngine()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-unregistered",
+        user_id="user-unregistered",
+        principal="principal-unregistered",
+        tenant_id="tenant-unregistered",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=10_000,
+        ),
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="No policy registered for tenant 'tenant-unregistered'",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=request,
+        )
+
+    repository.create.assert_not_called()
+    repository.update.assert_not_called()
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execute_persists_authenticated_tenant_in_run_and_snapshot() -> None:
     repository = _repository()
 
@@ -257,6 +362,7 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
             input="Explain the platform",
             session_id="session-1",
             user_id="user-1",
+            execution_budget=ExecutionBudget(),
         ),
         lease_id=running.lease_id,
         run_id=pending.run_id,
@@ -1518,6 +1624,7 @@ def _idempotent_run(
         input="Explain the platform",
         session_id="session-1",
         user_id=user_id,
+        execution_budget=ExecutionBudget(),
         metadata={"request": "same"},
     )
 

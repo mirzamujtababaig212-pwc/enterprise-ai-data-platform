@@ -44,3 +44,65 @@ def test_snapshot_with_null_tenant_remains_backward_compatible() -> None:
     assert recovered.tenant_id is None
     assert recovered.input == "historical request"
     assert recovered.principal == "historical-principal"
+
+
+def test_snapshot_round_trip_preserves_max_tokens_per_run() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    request = AgentRequest(
+        input="retrieve customer policy",
+        session_id="session-budget",
+        user_id="user-budget",
+        principal="principal-budget",
+        tenant_id="tenant-acme",
+        execution_budget=ExecutionBudget(
+            max_llm_calls=5,
+            max_tool_calls=10,
+            max_tool_rounds=2,
+            max_duration_seconds=120.0,
+            max_tokens_per_run=20_000,
+        ),
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.execution_budget is not None
+    assert snapshot.execution_budget["max_tokens_per_run"] == 20_000
+
+    recovered = snapshot.to_request(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        principal=request.principal,
+    )
+
+    assert recovered.execution_budget is not None
+    assert recovered.execution_budget.max_tokens_per_run == 20_000
+
+
+def test_snapshot_round_trip_preserves_unlimited_max_tokens_per_run() -> None:
+    from ai_platform.agents.budget import ExecutionBudget
+
+    request = AgentRequest(
+        input="historical request",
+        session_id="session-unlimited",
+        user_id="user-unlimited",
+        principal="principal-unlimited",
+        tenant_id="tenant-acme",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=None,
+        ),
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.execution_budget is not None
+    assert snapshot.execution_budget["max_tokens_per_run"] is None
+
+    recovered = snapshot.to_request(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        principal=request.principal,
+    )
+
+    assert recovered.execution_budget is not None
+    assert recovered.execution_budget.max_tokens_per_run is None

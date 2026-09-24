@@ -55,6 +55,36 @@ class AgentLLMCallLimitError(AgentExecutionBudgetError):
         )
 
 
+class AgentTokenLimitError(AgentExecutionBudgetError):
+    """
+    Raised when an agent exceeds its maximum allowed token usage.
+    """
+
+    def __init__(
+        self,
+        agent_name: str,
+        max_tokens_per_run: int,
+        total_tokens: int,
+    ) -> None:
+        if not agent_name.strip():
+            raise ValueError("Agent name must not be empty.")
+
+        if max_tokens_per_run <= 0:
+            raise ValueError("Maximum tokens per run must be greater than zero.")
+
+        if total_tokens < 0:
+            raise ValueError("Total tokens must not be negative.")
+
+        self.agent_name = agent_name
+        self.max_tokens_per_run = max_tokens_per_run
+        self.total_tokens = total_tokens
+
+        super().__init__(
+            f"Agent '{agent_name}' exceeded the maximum "
+            f"token usage ({max_tokens_per_run}; actual: {total_tokens})."
+        )
+
+
 class AgentToolCallLimitError(AgentExecutionBudgetError):
     """
     Raised when an agent exceeds its maximum allowed tool calls.

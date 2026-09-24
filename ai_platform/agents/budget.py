@@ -6,6 +6,7 @@ from time import monotonic
 from ai_platform.agents.exceptions import (
     AgentExecutionDurationLimitError,
     AgentLLMCallLimitError,
+    AgentTokenLimitError,
     AgentToolCallLimitError,
     AgentToolLoopLimitError,
 )
@@ -21,6 +22,7 @@ class ExecutionBudget:
     max_tool_calls: int = 20
     max_tool_rounds: int = 3
     max_duration_seconds: float = 300.0
+    max_tokens_per_run: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_llm_calls <= 0:
@@ -35,6 +37,9 @@ class ExecutionBudget:
         if self.max_duration_seconds <= 0:
             raise ValueError("Execution max_duration_seconds must be greater than zero.")
 
+        if self.max_tokens_per_run is not None and self.max_tokens_per_run <= 0:
+            raise ValueError("Execution max_tokens_per_run must be greater than zero.")
+
 
 @dataclass
 class ExecutionBudgetState:
@@ -46,6 +51,7 @@ class ExecutionBudgetState:
     tool_calls: int = 0
     tool_rounds: int = 0
     started_at: float = 0.0
+    total_tokens: int = 0
 
     def __post_init__(self) -> None:
         if self.llm_calls < 0:
@@ -56,6 +62,9 @@ class ExecutionBudgetState:
 
         if self.tool_rounds < 0:
             raise ValueError("Execution tool_rounds must not be negative.")
+
+        if self.total_tokens < 0:
+            raise ValueError("Execution total_tokens must not be negative.")
 
         if self.started_at == 0.0:
             self.started_at = monotonic()
@@ -69,6 +78,7 @@ class ExecutionBudgetState:
             "llm_calls": self.llm_calls,
             "tool_calls": self.tool_calls,
             "tool_rounds": self.tool_rounds,
+            "total_tokens": self.total_tokens,
             "elapsed_seconds": self.elapsed_seconds,
         }
 
@@ -95,8 +105,27 @@ class ExecutionBudgetState:
             llm_calls=int(payload.get("llm_calls", 0)),
             tool_calls=int(payload.get("tool_calls", 0)),
             tool_rounds=int(payload.get("tool_rounds", 0)),
+            total_tokens=int(payload.get("total_tokens", 0)),
             started_at=monotonic() - float(elapsed_seconds),
         )
+
+    def consume_tokens(
+        self,
+        token_count: int,
+        budget: ExecutionBudget,
+        agent_name: str,
+    ) -> None:
+        if token_count < 0:
+            raise ValueError("Token count must not be negative.")
+
+        self.total_tokens += token_count
+
+        if budget.max_tokens_per_run is not None and self.total_tokens > budget.max_tokens_per_run:
+            raise AgentTokenLimitError(
+                agent_name,
+                budget.max_tokens_per_run,
+                self.total_tokens,
+            )
 
     def check_duration(
         self,

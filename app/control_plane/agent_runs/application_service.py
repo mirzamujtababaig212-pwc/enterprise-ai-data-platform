@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -59,6 +62,7 @@ class AgentRunApplicationService:
         observer: AgentExecutionObserver | None = None,
         admission_policy: AgentRunAdmissionPolicy | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
         lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
@@ -71,6 +75,36 @@ class AgentRunApplicationService:
         )
         self._lease_seconds = lease_seconds
         self._cancellation_registry = cancellation_registry
+        self._tenant_policy_engine = tenant_policy_engine
+
+    def _resolve_effective_budget(
+        self,
+        *,
+        tenant_id: str | None,
+        requested_budget: ExecutionBudget,
+    ) -> ExecutionBudget:
+        if self._tenant_policy_engine is None or not tenant_id:
+            return requested_budget
+
+        policy = self._tenant_policy_engine.get_policy(tenant_id)
+
+        effective_max_tokens = requested_budget.max_tokens_per_run
+        if policy.max_tokens_per_run is not None:
+            if effective_max_tokens is None:
+                effective_max_tokens = policy.max_tokens_per_run
+            else:
+                effective_max_tokens = min(
+                    effective_max_tokens,
+                    policy.max_tokens_per_run,
+                )
+
+        return ExecutionBudget(
+            max_llm_calls=requested_budget.max_llm_calls,
+            max_tool_calls=requested_budget.max_tool_calls,
+            max_tool_rounds=requested_budget.max_tool_rounds,
+            max_duration_seconds=requested_budget.max_duration_seconds,
+            max_tokens_per_run=effective_max_tokens,
+        )
 
     async def _emit(
         self,
@@ -144,18 +178,27 @@ class AgentRunApplicationService:
         request: AgentRequest,
         idempotency_key: str | None = None,
     ) -> AgentRunExecutionResult:
+        effective_budget = self._resolve_effective_budget(
+            tenant_id=request.tenant_id,
+            requested_budget=request.execution_budget or ExecutionBudget(),
+        )
+        effective_request = replace(
+            request,
+            execution_budget=effective_budget,
+        )
+
         if idempotency_key is not None:
             idempotency_key = idempotency_key.strip()
 
             if not idempotency_key:
                 raise ValueError("Idempotency key must not be empty when provided.")
 
-            if request.user_id is None:
+            if effective_request.user_id is None:
                 raise ValueError("A user_id is required when an idempotency key is provided.")
 
             existing_run = self._repository.get_by_idempotency_key(
-                request.tenant_id,
-                request.user_id,
+                effective_request.tenant_id,
+                effective_request.user_id,
                 idempotency_key,
             )
 
@@ -163,31 +206,31 @@ class AgentRunApplicationService:
                 return self._resolve_existing_idempotent_run(
                     existing_run=existing_run,
                     agent_name=agent_name,
-                    request=request,
+                    request=effective_request,
                 )
 
         run = AgentRun(
             run_id=str(uuid4()),
             agent_name=agent_name,
-            session_id=request.session_id,
-            user_id=request.user_id,
-            principal=request.principal,
-            tenant_id=request.tenant_id,
+            session_id=effective_request.session_id,
+            user_id=effective_request.user_id,
+            principal=effective_request.principal,
+            tenant_id=effective_request.tenant_id,
             idempotency_key=idempotency_key,
             status=AgentRunStatus.PENDING,
-            metadata=dict(request.metadata),
-            request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            metadata=dict(effective_request.metadata),
+            request_snapshot=AgentRunRequestSnapshot.from_request(effective_request),
         )
 
         try:
             self._repository.create(run)
         except DuplicateAgentRunError:
-            if idempotency_key is None or request.user_id is None:
+            if idempotency_key is None or effective_request.user_id is None:
                 raise
 
             existing_run = self._repository.get_by_idempotency_key(
-                request.tenant_id,
-                request.user_id,
+                effective_request.tenant_id,
+                effective_request.user_id,
                 idempotency_key,
             )
 
@@ -199,12 +242,12 @@ class AgentRunApplicationService:
             return self._resolve_existing_idempotent_run(
                 existing_run=existing_run,
                 agent_name=agent_name,
-                request=request,
+                request=effective_request,
             )
 
         admission = await self._admission_policy.evaluate(
             agent_name=agent_name,
-            request=request,
+            request=effective_request,
             run=run,
         )
 
@@ -272,7 +315,7 @@ class AgentRunApplicationService:
 
             response = await self._runtime.run(
                 agent_name,
-                request,
+                effective_request,
                 lease_id=lease_id,
                 run_id=run.run_id,
                 execution_ownership_lost=ownership_lost,
