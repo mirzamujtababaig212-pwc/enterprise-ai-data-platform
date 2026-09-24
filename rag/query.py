@@ -9,6 +9,11 @@ from ai_platform.agents.policy import TenantPolicyEngine
 from rag.generation.gateway import GatewayChatService
 from rag.governance import GovernancePolicy
 from rag.models import RetrievalResult
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
 
 
 @dataclass(frozen=True)
@@ -57,10 +62,12 @@ class RAGQueryService:
         retriever: Retriever,
         chat_service: GatewayChatService,
         tenant_policy_engine: TenantPolicyEngine | None = None,
+        observer: AgentExecutionObserver | None = None,
     ) -> None:
         self.retriever = retriever
         self.chat_service = chat_service
         self.tenant_policy_engine = tenant_policy_engine
+        self.observer = observer
 
     async def query(
         self,
@@ -101,6 +108,11 @@ class RAGQueryService:
             **retrieval_kwargs,
         )
 
+        await self._emit_rag_governance_decision(
+            tenant_id=tenant_id,
+            retrieved_count=len(results),
+        )
+
         prompt = self._build_prompt(
             query,
             results,
@@ -122,6 +134,51 @@ class RAGQueryService:
             sources=sources,
             retrieved_count=len(results),
         )
+
+    async def _emit_rag_governance_decision(
+        self,
+        *,
+        tenant_id: str | None,
+        retrieved_count: int,
+    ) -> None:
+        if self.observer is None:
+            return
+
+        metadata: dict[str, object] = {
+            "governance_domain": "rag",
+            "decision": "allow",
+            "retrieved_count": retrieved_count,
+        }
+
+        if tenant_id is not None:
+            metadata["tenant_id"] = tenant_id
+
+            if self.tenant_policy_engine is not None:
+                try:
+                    policy = self.tenant_policy_engine.get_policy(tenant_id)
+                except Exception:
+                    policy = None
+
+                if policy is not None:
+                    if policy.policy_id is not None:
+                        metadata["policy_id"] = policy.policy_id
+                    if policy.policy_version is not None:
+                        metadata["policy_version"] = policy.policy_version
+
+        try:
+            await self.observer.record(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.GOVERNANCE_DECISION,
+                    agent_name="rag.query",
+                    run_id=None,
+                    session_id=None,
+                    user_id=None,
+                    metadata=metadata,
+                )
+            )
+        except Exception:
+            # Governance observability is best-effort.
+            return
 
     def _resolve_governance_policy(
         self,

@@ -6,13 +6,27 @@ from rag.contracts import Retriever
 from rag.governance import GovernancePolicy
 from tools.models import ToolDefinition
 from tools.execution.context import ToolExecutionContext
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
+from ai_platform.agents.policy import TenantPolicyEngine
 
 
 class RAGSearchTool:
     """Tool exposing semantic retrieval to agents."""
 
-    def __init__(self, retriever: Retriever) -> None:
+    def __init__(
+        self,
+        retriever: Retriever,
+        *,
+        observer: AgentExecutionObserver | None = None,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
+    ) -> None:
         self._retriever = retriever
+        self._observer = observer
+        self._tenant_policy_engine = tenant_policy_engine
 
     @property
     def definition(self) -> ToolDefinition:
@@ -66,10 +80,17 @@ class RAGSearchTool:
         self,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        return await self._execute(
+        result = await self._execute(
             arguments,
             governance_policy=None,
         )
+
+        await self._emit_rag_governance_decision(
+            context=None,
+            retrieved_count=result["retrieved_count"],
+        )
+
+        return result
 
     async def _execute(
         self,
@@ -132,7 +153,61 @@ class RAGSearchTool:
         arguments: dict[str, Any],
         context: ToolExecutionContext,
     ) -> dict[str, Any]:
-        return await self._execute(
+        result = await self._execute(
             arguments,
             governance_policy=context.governance_policy,
         )
+
+        await self._emit_rag_governance_decision(
+            context=context,
+            retrieved_count=result["retrieved_count"],
+        )
+
+        return result
+
+    async def _emit_rag_governance_decision(
+        self,
+        *,
+        context: ToolExecutionContext | None,
+        retrieved_count: int,
+    ) -> None:
+        if self._observer is None:
+            return
+
+        tenant_id = context.tenant_id if context is not None else None
+
+        metadata: dict[str, object] = {
+            "governance_domain": "rag",
+            "decision": "allow",
+            "retrieved_count": retrieved_count,
+        }
+
+        if tenant_id is not None:
+            metadata["tenant_id"] = tenant_id
+
+            if self._tenant_policy_engine is not None:
+                try:
+                    policy = self._tenant_policy_engine.get_policy(tenant_id)
+                except Exception:
+                    policy = None
+
+                if policy is not None:
+                    if policy.policy_id is not None:
+                        metadata["policy_id"] = policy.policy_id
+                    if policy.policy_version is not None:
+                        metadata["policy_version"] = policy.policy_version
+
+        try:
+            await self._observer.record(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.GOVERNANCE_DECISION,
+                    agent_name="rag.search",
+                    run_id=context.run_id if context is not None else None,
+                    session_id=context.session_id if context is not None else None,
+                    user_id=context.user_id if context is not None else None,
+                    metadata=metadata,
+                )
+            )
+        except Exception:
+            # Governance observability is best-effort.
+            return

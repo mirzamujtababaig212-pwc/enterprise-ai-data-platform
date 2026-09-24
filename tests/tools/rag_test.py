@@ -248,3 +248,194 @@ async def test_rag_search_passes_governance_policy_from_context() -> None:
     )
 
     assert retriever.calls[0][4] is policy
+
+
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events = []
+
+    async def record(self, event) -> None:
+        self.events.append(event)
+
+
+class FailingObserver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def record(self, event) -> None:
+        self.calls += 1
+        raise RuntimeError("event persistence unavailable")
+
+
+@pytest.mark.asyncio
+async def test_rag_search_emits_single_governance_event_with_tool_context() -> None:
+    from ai_platform.agents.observability import AgentExecutionEventType
+    from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+
+    retriever = FakeRetriever()
+    observer = RecordingObserver()
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            policy_id="rag-policy",
+            policy_version="v3",
+        )
+    )
+
+    tool = RAGSearchTool(
+        retriever,
+        observer=observer,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-123",
+        call_id="call-456",
+        agent_name="enterprise-analyst",
+        session_id="session-789",
+        user_id="user-001",
+        tenant_id="tenant-a",
+        governance_policy=GovernancePolicy(
+            required_metadata={"tenant_id": "tenant-a"},
+        ),
+    )
+
+    result = await tool.execute_with_context(
+        {
+            "query": "TOP SECRET CUSTOMER QUERY",
+            "top_k": 2,
+        },
+        context,
+    )
+
+    assert result["retrieved_count"] == 2
+    assert len(observer.events) == 1
+
+    event = observer.events[0]
+
+    assert event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert event.agent_name == "rag.search"
+    assert event.run_id == "run-123"
+    assert event.session_id == "session-789"
+    assert event.user_id == "user-001"
+
+    assert event.metadata == {
+        "governance_domain": "rag",
+        "decision": "allow",
+        "retrieved_count": 2,
+        "tenant_id": "tenant-a",
+        "policy_id": "rag-policy",
+        "policy_version": "v3",
+    }
+
+    serialized = str(event.metadata)
+
+    assert "TOP SECRET CUSTOMER QUERY" not in serialized
+    assert "Enterprise RAG retrieves relevant knowledge." not in serialized
+    assert "chunk-1" not in serialized
+    assert "doc-1" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_rag_search_direct_execution_emits_at_most_one_governance_event() -> None:
+    retriever = FakeRetriever()
+    observer = RecordingObserver()
+
+    tool = RAGSearchTool(
+        retriever,
+        observer=observer,
+    )
+
+    result = await tool.execute(
+        {
+            "query": "RAG",
+            "top_k": 2,
+        }
+    )
+
+    assert result["retrieved_count"] == 2
+    assert len(observer.events) == 1
+
+    event = observer.events[0]
+
+    assert event.agent_name == "rag.search"
+    assert event.run_id is None
+    assert event.session_id is None
+    assert event.user_id is None
+    assert event.metadata == {
+        "governance_domain": "rag",
+        "decision": "allow",
+        "retrieved_count": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_rag_search_governance_observer_failure_is_non_fatal() -> None:
+    retriever = FakeRetriever()
+    observer = FailingObserver()
+
+    tool = RAGSearchTool(
+        retriever,
+        observer=observer,
+    )
+
+    result = await tool.execute(
+        {
+            "query": "RAG",
+            "top_k": 2,
+        }
+    )
+
+    assert result["retrieved_count"] == 2
+    assert observer.calls == 1
+    assert len(retriever.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_search_does_not_emit_governance_event_when_retrieval_fails() -> None:
+    class FailingRetriever:
+        async def retrieve(
+            self,
+            query,
+            top_k,
+            min_score=None,
+            metadata_filter=None,
+            governance_policy=None,
+        ):
+            raise RuntimeError("retrieval unavailable")
+
+    observer = RecordingObserver()
+    tool = RAGSearchTool(
+        FailingRetriever(),
+        observer=observer,
+    )
+
+    with pytest.raises(RuntimeError, match="retrieval unavailable"):
+        await tool.execute({"query": "RAG"})
+
+    assert observer.events == []
+
+
+@pytest.mark.asyncio
+async def test_rag_search_governance_event_does_not_duplicate_for_retriever_calls() -> None:
+    retriever = FakeRetriever()
+    observer = RecordingObserver()
+
+    tool = RAGSearchTool(
+        retriever,
+        observer=observer,
+    )
+
+    await tool.execute_with_context(
+        {"query": "RAG", "top_k": 2},
+        ToolExecutionContext(
+            run_id="run-1",
+            call_id="call-1",
+            tenant_id="tenant-a",
+        ),
+    )
+
+    assert len(retriever.calls) == 1
+    assert len(observer.events) == 1

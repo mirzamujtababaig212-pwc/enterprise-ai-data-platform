@@ -263,6 +263,7 @@ _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
     chat_service=_rag_chat_service,
     tenant_policy_engine=_tenant_policy_engine,
+    observer=_agent_observer,
 )
 
 
@@ -292,7 +293,11 @@ async def _initialize_agents() -> None:
         if _agents_initialized:
             return
 
-        rag_search_tool = RAGSearchTool(_rag_retriever)
+        rag_search_tool = RAGSearchTool(
+            _rag_retriever,
+            observer=_agent_observer,
+            tenant_policy_engine=_tenant_policy_engine,
+        )
         await _tool_registry.register(rag_search_tool)
 
         vehicle_data_query_tool = VehicleDataQueryTool(

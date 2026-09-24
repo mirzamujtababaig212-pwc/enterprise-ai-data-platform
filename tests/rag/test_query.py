@@ -229,3 +229,204 @@ async def test_rag_query_honors_explicit_cross_tenant_policy() -> None:
         metadata_filter=None,
         governance_policy=requested_policy,
     )
+
+
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events = []
+
+    async def record(self, event) -> None:
+        self.events.append(event)
+
+
+class FailingObserver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def record(self, event) -> None:
+        self.calls += 1
+        raise RuntimeError("event persistence unavailable")
+
+
+@pytest.mark.asyncio
+async def test_rag_query_emits_governance_decision_after_retrieval() -> None:
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=[])
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(
+        return_value={"reply": "No relevant information was retrieved."}
+    )
+
+    observer = RecordingObserver()
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+        observer=observer,
+    )
+
+    await service.query(
+        "secret internal architecture query",
+        top_k=5,
+    )
+
+    assert len(observer.events) == 1
+
+    event = observer.events[0]
+
+    from ai_platform.agents.observability import AgentExecutionEventType
+
+    assert event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert event.agent_name == "rag.query"
+    assert event.metadata == {
+        "governance_domain": "rag",
+        "decision": "allow",
+        "retrieved_count": 0,
+    }
+
+    assert "secret internal architecture query" not in str(event.metadata)
+
+
+@pytest.mark.asyncio
+async def test_rag_query_governance_event_contains_tenant_policy_identity() -> None:
+    from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=[])
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(return_value={"reply": "safe response"})
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            policy_id="rag-policy",
+            policy_version="v7",
+        )
+    )
+
+    observer = RecordingObserver()
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+        tenant_policy_engine=tenant_policy_engine,
+        observer=observer,
+    )
+
+    await service.query(
+        "tenant private query",
+        tenant_id="tenant-a",
+    )
+
+    assert len(observer.events) == 1
+
+    metadata = observer.events[0].metadata
+
+    assert metadata == {
+        "governance_domain": "rag",
+        "decision": "allow",
+        "retrieved_count": 0,
+        "tenant_id": "tenant-a",
+        "policy_id": "rag-policy",
+        "policy_version": "v7",
+    }
+
+    assert "tenant private query" not in str(metadata)
+
+
+@pytest.mark.asyncio
+async def test_rag_query_governance_event_does_not_leak_retrieved_content() -> None:
+    retrieved = [
+        RetrievalResult(
+            chunk=DocumentChunk(
+                id="chunk-secret",
+                document_id="document-secret",
+                content="TOP SECRET CUSTOMER DATA",
+                metadata={"source": "private.md"},
+                chunk_index=0,
+            ),
+            score=0.99,
+        )
+    ]
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=retrieved)
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(return_value={"reply": "safe answer"})
+
+    observer = RecordingObserver()
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+        observer=observer,
+    )
+
+    await service.query("private query")
+
+    metadata = observer.events[0].metadata
+
+    assert metadata == {
+        "governance_domain": "rag",
+        "decision": "allow",
+        "retrieved_count": 1,
+    }
+
+    serialized = str(metadata)
+
+    assert "TOP SECRET CUSTOMER DATA" not in serialized
+    assert "chunk-secret" not in serialized
+    assert "document-secret" not in serialized
+    assert "private.md" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_rag_query_observer_failure_is_non_fatal() -> None:
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=[])
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(return_value={"reply": "safe response"})
+
+    observer = FailingObserver()
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+        observer=observer,
+    )
+
+    result = await service.query("normal query")
+
+    assert result.answer == "safe response"
+    assert result.retrieved_count == 0
+    assert observer.calls == 1
+    retriever.retrieve.assert_awaited_once()
+    chat_service.generate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rag_query_does_not_emit_governance_event_when_retrieval_fails() -> None:
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(side_effect=RuntimeError("retrieval unavailable"))
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock()
+
+    observer = RecordingObserver()
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+        observer=observer,
+    )
+
+    with pytest.raises(RuntimeError, match="retrieval unavailable"):
+        await service.query("query")
+
+    assert observer.events == []
+    chat_service.generate.assert_not_awaited()
