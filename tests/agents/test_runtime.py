@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.lifecycle import AgentExecutionLifecyclePhase
 from ai_platform.agents.llm_messages import (
     assistant_message,
     system_message,
@@ -223,6 +224,17 @@ async def test_runtime_executes_lifecycle_contract_in_order() -> None:
     assert len(agent.lifecycle_states) == 5
     assert all(state is agent.lifecycle_states[0] for state in agent.lifecycle_states)
 
+    snapshot = await agent.lifecycle_states[0].snapshot()
+    assert snapshot.phase is AgentExecutionLifecyclePhase.COMPLETED
+    assert [transition.to_phase for transition in snapshot.transitions] == [
+        AgentExecutionLifecyclePhase.PREPARING,
+        AgentExecutionLifecyclePhase.PRE_EXECUTION,
+        AgentExecutionLifecyclePhase.ORCHESTRATING,
+        AgentExecutionLifecyclePhase.EXECUTING,
+        AgentExecutionLifecyclePhase.POST_EXECUTION,
+        AgentExecutionLifecyclePhase.COMPLETED,
+    ]
+
 
 @pytest.mark.asyncio
 async def test_runtime_creates_fresh_lifecycle_state_per_run() -> None:
@@ -279,6 +291,107 @@ async def test_runtime_stops_lifecycle_when_pre_execution_fails() -> None:
     assert agent.phases == [
         "prepare_context",
         "evaluate_pre_execution",
+    ]
+
+    assert len(agent.lifecycle_states) == 1
+
+    snapshot = await agent.lifecycle_states[0].snapshot()
+    assert snapshot.phase is AgentExecutionLifecyclePhase.FAILED
+    assert [transition.to_phase for transition in snapshot.transitions] == [
+        AgentExecutionLifecyclePhase.PREPARING,
+        AgentExecutionLifecyclePhase.PRE_EXECUTION,
+        AgentExecutionLifecyclePhase.FAILED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_marks_lifecycle_failed_when_execute_boundary_fails() -> None:
+    registry = InMemoryAgentRegistry()
+
+    class FailingExecuteAgent(LifecycleRuntimeAgent):
+        async def execute_boundary(
+            self,
+            context: AgentExecutionContext,
+        ) -> AgentResponse:
+            self.phases.append("execute_boundary")
+            self.lifecycle_states.append(context.lifecycle_state)
+            raise RuntimeError("execute-boundary failure")
+
+    agent = FailingExecuteAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    with pytest.raises(RuntimeError, match="execute-boundary failure"):
+        await runtime.run(
+            "lifecycle-runtime-agent",
+            AgentRequest(input="Run lifecycle."),
+        )
+
+    assert agent.phases == [
+        "prepare_context",
+        "evaluate_pre_execution",
+        "orchestrate_step",
+        "execute_boundary",
+    ]
+    assert len(agent.lifecycle_states) == 4
+    assert all(state is agent.lifecycle_states[0] for state in agent.lifecycle_states)
+
+    snapshot = await agent.lifecycle_states[0].snapshot()
+    assert snapshot.phase is AgentExecutionLifecyclePhase.FAILED
+    assert [transition.to_phase for transition in snapshot.transitions] == [
+        AgentExecutionLifecyclePhase.PREPARING,
+        AgentExecutionLifecyclePhase.PRE_EXECUTION,
+        AgentExecutionLifecyclePhase.ORCHESTRATING,
+        AgentExecutionLifecyclePhase.EXECUTING,
+        AgentExecutionLifecyclePhase.FAILED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_marks_lifecycle_failed_when_post_execution_fails() -> None:
+    registry = InMemoryAgentRegistry()
+
+    class FailingPostExecutionAgent(LifecycleRuntimeAgent):
+        async def evaluate_post_execution(
+            self,
+            context: AgentExecutionContext,
+            response: AgentResponse,
+        ) -> AgentResponse:
+            self.phases.append("evaluate_post_execution")
+            self.lifecycle_states.append(context.lifecycle_state)
+            raise RuntimeError("post-execution failure")
+
+    agent = FailingPostExecutionAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    with pytest.raises(RuntimeError, match="post-execution failure"):
+        await runtime.run(
+            "lifecycle-runtime-agent",
+            AgentRequest(input="Run lifecycle."),
+        )
+
+    assert agent.phases == [
+        "prepare_context",
+        "evaluate_pre_execution",
+        "orchestrate_step",
+        "execute_boundary",
+        "evaluate_post_execution",
+    ]
+    assert len(agent.lifecycle_states) == 5
+    assert all(state is agent.lifecycle_states[0] for state in agent.lifecycle_states)
+
+    snapshot = await agent.lifecycle_states[0].snapshot()
+    assert snapshot.phase is AgentExecutionLifecyclePhase.FAILED
+    assert [transition.to_phase for transition in snapshot.transitions] == [
+        AgentExecutionLifecyclePhase.PREPARING,
+        AgentExecutionLifecyclePhase.PRE_EXECUTION,
+        AgentExecutionLifecyclePhase.ORCHESTRATING,
+        AgentExecutionLifecyclePhase.EXECUTING,
+        AgentExecutionLifecyclePhase.POST_EXECUTION,
+        AgentExecutionLifecyclePhase.FAILED,
     ]
 
 

@@ -15,7 +15,10 @@ from ai_platform.agents.llm_context import (
     UnavailableLLMGateway,
 )
 from ai_platform.agents.llm_messages import AgentMessage
-from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
+from ai_platform.agents.lifecycle import (
+    AgentExecutionLifecyclePhase,
+    AgentExecutionLifecycleState,
+)
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
@@ -322,14 +325,73 @@ class AgentRuntime:
             lifecycle_state=lifecycle_state,
         )
 
-        if isinstance(agent, AgentExecutionContract):
-            await agent.prepare_context(context)
-            await agent.evaluate_pre_execution(context)
-            await agent.orchestrate_step(context)
-            response = await agent.execute_boundary(context)
-            response = await agent.evaluate_post_execution(context, response)
-        else:
-            response = await agent.run(context)
+        try:
+            await lifecycle_state.transition(
+                AgentExecutionLifecyclePhase.PREPARING,
+                expected_phase=AgentExecutionLifecyclePhase.CREATED,
+            )
+
+            if isinstance(agent, AgentExecutionContract):
+                await agent.prepare_context(context)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.PRE_EXECUTION,
+                    expected_phase=AgentExecutionLifecyclePhase.PREPARING,
+                )
+                await agent.evaluate_pre_execution(context)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.ORCHESTRATING,
+                    expected_phase=AgentExecutionLifecyclePhase.PRE_EXECUTION,
+                )
+                await agent.orchestrate_step(context)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.EXECUTING,
+                    expected_phase=AgentExecutionLifecyclePhase.ORCHESTRATING,
+                )
+                response = await agent.execute_boundary(context)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.POST_EXECUTION,
+                    expected_phase=AgentExecutionLifecyclePhase.EXECUTING,
+                )
+                response = await agent.evaluate_post_execution(context, response)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.COMPLETED,
+                    expected_phase=AgentExecutionLifecyclePhase.POST_EXECUTION,
+                )
+            else:
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.PRE_EXECUTION,
+                    expected_phase=AgentExecutionLifecyclePhase.PREPARING,
+                )
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.ORCHESTRATING,
+                    expected_phase=AgentExecutionLifecyclePhase.PRE_EXECUTION,
+                )
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.EXECUTING,
+                    expected_phase=AgentExecutionLifecyclePhase.ORCHESTRATING,
+                )
+                response = await agent.run(context)
+
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.POST_EXECUTION,
+                    expected_phase=AgentExecutionLifecyclePhase.EXECUTING,
+                )
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.COMPLETED,
+                    expected_phase=AgentExecutionLifecyclePhase.POST_EXECUTION,
+                )
+        except Exception:
+            if lifecycle_state.phase is not AgentExecutionLifecyclePhase.FAILED:
+                await lifecycle_state.transition(
+                    AgentExecutionLifecyclePhase.FAILED,
+                    expected_phase=lifecycle_state.phase,
+                )
+            raise
 
         if (
             agent.definition.memory_write_enabled
