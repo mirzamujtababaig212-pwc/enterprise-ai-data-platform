@@ -130,6 +130,7 @@ class LifecycleRuntimeAgent:
             model="test-model",
         )
         self.phases: list[str] = []
+        self.lifecycle_states: list[object] = []
 
     @property
     def definition(self) -> AgentDefinition:
@@ -137,21 +138,25 @@ class LifecycleRuntimeAgent:
 
     async def prepare_context(self, context: AgentExecutionContext) -> None:
         self.phases.append("prepare_context")
+        self.lifecycle_states.append(context.lifecycle_state)
 
     async def evaluate_pre_execution(
         self,
         context: AgentExecutionContext,
     ) -> None:
         self.phases.append("evaluate_pre_execution")
+        self.lifecycle_states.append(context.lifecycle_state)
 
     async def orchestrate_step(self, context: AgentExecutionContext) -> None:
         self.phases.append("orchestrate_step")
+        self.lifecycle_states.append(context.lifecycle_state)
 
     async def execute_boundary(
         self,
         context: AgentExecutionContext,
     ) -> AgentResponse:
         self.phases.append("execute_boundary")
+        self.lifecycle_states.append(context.lifecycle_state)
         return AgentResponse(
             agent_name=self.definition.name,
             output="lifecycle output",
@@ -164,6 +169,7 @@ class LifecycleRuntimeAgent:
         response: AgentResponse,
     ) -> AgentResponse:
         self.phases.append("evaluate_post_execution")
+        self.lifecycle_states.append(context.lifecycle_state)
         return AgentResponse(
             agent_name=response.agent_name,
             output=response.output + " post-processed",
@@ -214,6 +220,37 @@ async def test_runtime_executes_lifecycle_contract_in_order() -> None:
         "evaluate_post_execution",
     ]
     assert response.output == "lifecycle output post-processed"
+    assert len(agent.lifecycle_states) == 5
+    assert all(state is agent.lifecycle_states[0] for state in agent.lifecycle_states)
+
+
+@pytest.mark.asyncio
+async def test_runtime_creates_fresh_lifecycle_state_per_run() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = LifecycleRuntimeAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    await runtime.run(
+        "lifecycle-runtime-agent",
+        AgentRequest(input="First lifecycle run."),
+    )
+    first_state = agent.lifecycle_states[0]
+
+    agent.lifecycle_states.clear()
+    agent.phases.clear()
+
+    await runtime.run(
+        "lifecycle-runtime-agent",
+        AgentRequest(input="Second lifecycle run."),
+    )
+    second_state = agent.lifecycle_states[0]
+
+    assert first_state is not second_state
+    assert len(agent.lifecycle_states) == 5
+    assert all(state is second_state for state in agent.lifecycle_states)
 
 
 @pytest.mark.asyncio

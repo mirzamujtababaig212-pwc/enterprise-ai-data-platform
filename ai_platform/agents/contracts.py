@@ -53,11 +53,11 @@ class RecoverableAgent(Protocol):
 @runtime_checkable
 class AgentExecutionContract(Protocol):
     """
-    Lifecycle capability for enterprise agent execution.
+    Optional lifecycle-hook capability for enterprise agent execution.
 
-    This contract provides explicit runtime phase boundaries without
-    replacing the existing orchestration state machine, checkpoint
-    machinery, or recovery protocol.
+    Implementations may use these hooks to participate in runtime lifecycle
+    boundaries. The hooks do not replace centralized governance, the
+    orchestration state machine, durable checkpointing, or recovery.
     """
 
     async def prepare_context(
@@ -65,7 +65,7 @@ class AgentExecutionContract(Protocol):
         context: AgentExecutionContext,
     ) -> None:
         """
-        Prepare authoritative execution context before execution begins.
+        Participate in context preparation before execution begins.
         """
         ...
 
@@ -74,7 +74,7 @@ class AgentExecutionContract(Protocol):
         context: AgentExecutionContext,
     ) -> None:
         """
-        Apply pre-execution governance and budget controls.
+        Participate in pre-execution validation or policy handling.
         """
         ...
 
@@ -83,7 +83,7 @@ class AgentExecutionContract(Protocol):
         context: AgentExecutionContext,
     ) -> None:
         """
-        Start or advance the current logical orchestration step.
+        Participate in logical orchestration before execution.
         """
         ...
 
@@ -92,7 +92,7 @@ class AgentExecutionContract(Protocol):
         context: AgentExecutionContext,
     ) -> AgentResponse:
         """
-        Execute the provider/tool continuation boundary.
+        Execute the agent's provider/tool execution boundary.
         """
         ...
 
@@ -102,7 +102,7 @@ class AgentExecutionContract(Protocol):
         response: AgentResponse,
     ) -> AgentResponse:
         """
-        Apply post-execution output governance and final evaluation.
+        Participate in post-execution evaluation or response transformation.
         """
         ...
 

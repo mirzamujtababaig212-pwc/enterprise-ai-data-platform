@@ -15,6 +15,7 @@ from ai_platform.agents.llm_context import (
     UnavailableLLMGateway,
 )
 from ai_platform.agents.llm_messages import AgentMessage
+from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
@@ -304,6 +305,8 @@ class AgentRuntime:
 
             output_evaluator = evaluate_output
 
+        lifecycle_state = AgentExecutionLifecycleState()
+
         context = AgentExecutionContext(
             request,
             output_evaluator=output_evaluator,
@@ -316,6 +319,7 @@ class AgentRuntime:
             execution_ownership_lost=execution_ownership_lost,
             orchestration_plan=orchestration_plan,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
+            lifecycle_state=lifecycle_state,
         )
 
         if isinstance(agent, AgentExecutionContract):

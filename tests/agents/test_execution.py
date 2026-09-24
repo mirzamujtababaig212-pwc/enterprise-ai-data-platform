@@ -88,6 +88,48 @@ def test_execution_context_defaults_to_empty_orchestration_state() -> None:
     assert context.orchestration_state.current_step_index is None
 
 
+def test_execution_context_creates_lifecycle_state_per_context() -> None:
+    first = make_context()
+    second = make_context()
+
+    assert first.lifecycle_state is not second.lifecycle_state
+    assert first.lifecycle_state.phase.value == "created"
+    assert second.lifecycle_state.phase.value == "created"
+
+
+def test_execution_context_preserves_supplied_lifecycle_state() -> None:
+    from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
+
+    lifecycle_state = AgentExecutionLifecycleState()
+
+    base_context = make_context()
+
+    context = AgentExecutionContext(
+        base_context.request,
+        tools=base_context.tools,
+        llm=base_context.llm,
+        lifecycle_state=lifecycle_state,
+    )
+
+    assert context.lifecycle_state is lifecycle_state
+
+
+@pytest.mark.asyncio
+async def test_execution_context_lifecycle_state_is_independent() -> None:
+    from ai_platform.agents.lifecycle import AgentExecutionLifecyclePhase
+
+    first = make_context()
+    second = make_context()
+
+    await first.lifecycle_state.transition(
+        AgentExecutionLifecyclePhase.PREPARING,
+        expected_phase=AgentExecutionLifecyclePhase.CREATED,
+    )
+
+    assert first.lifecycle_state.phase is AgentExecutionLifecyclePhase.PREPARING
+    assert second.lifecycle_state.phase is AgentExecutionLifecyclePhase.CREATED
+
+
 def test_execution_context_materializes_supplied_orchestration_plan() -> None:
     plan = build_enterprise_rag_analyst_plan()
 

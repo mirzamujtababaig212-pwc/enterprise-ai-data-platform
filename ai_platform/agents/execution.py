@@ -7,6 +7,7 @@ from typing import Callable
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.llm_context import AgentLLMContext
+from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
 from ai_platform.agents.orchestration import OrchestrationPlan, OrchestrationState
 from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
 from ai_platform.agents.llm_messages import (
@@ -53,6 +54,7 @@ class AgentExecutionContext:
         execution_ownership_lost: asyncio.Event | None = None,
         orchestration_plan: OrchestrationPlan | None = None,
         agent_run_steps_repository_factory=None,
+        lifecycle_state: AgentExecutionLifecycleState | None = None,
     ) -> None:
         self.request = request
         self._output_evaluator = output_evaluator
@@ -67,6 +69,7 @@ class AgentExecutionContext:
 
         self.execution_budget = request.execution_budget or ExecutionBudget()
         self.execution_budget_state = ExecutionBudgetState()
+        self.lifecycle_state = lifecycle_state or AgentExecutionLifecycleState()
         self.orchestration_plan = orchestration_plan
         self.orchestration_state = (
             orchestration_plan.materialize_state()
