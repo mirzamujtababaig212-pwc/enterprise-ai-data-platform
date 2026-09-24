@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
 from ai_platform.agents.execution import AgentExecutionContext
@@ -48,6 +48,63 @@ class RecoverableAgent(Protocol):
         context: AgentExecutionContext,
         checkpoint: AgentExecutionCheckpoint,
     ) -> AgentResponse: ...
+
+
+@runtime_checkable
+class AgentExecutionContract(Protocol):
+    """
+    Lifecycle capability for enterprise agent execution.
+
+    This contract provides explicit runtime phase boundaries without
+    replacing the existing orchestration state machine, checkpoint
+    machinery, or recovery protocol.
+    """
+
+    async def prepare_context(
+        self,
+        context: AgentExecutionContext,
+    ) -> None:
+        """
+        Prepare authoritative execution context before execution begins.
+        """
+        ...
+
+    async def evaluate_pre_execution(
+        self,
+        context: AgentExecutionContext,
+    ) -> None:
+        """
+        Apply pre-execution governance and budget controls.
+        """
+        ...
+
+    async def orchestrate_step(
+        self,
+        context: AgentExecutionContext,
+    ) -> None:
+        """
+        Start or advance the current logical orchestration step.
+        """
+        ...
+
+    async def execute_boundary(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentResponse:
+        """
+        Execute the provider/tool continuation boundary.
+        """
+        ...
+
+    async def evaluate_post_execution(
+        self,
+        context: AgentExecutionContext,
+        response: AgentResponse,
+    ) -> AgentResponse:
+        """
+        Apply post-execution output governance and final evaluation.
+        """
+        ...
 
 
 class AgentRegistry(Protocol):

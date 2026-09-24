@@ -121,6 +121,57 @@ class RuntimeToolAgent:
         )
 
 
+class LifecycleRuntimeAgent:
+    def __init__(self) -> None:
+        self._definition = AgentDefinition(
+            name="lifecycle-runtime-agent",
+            description="Lifecycle contract test agent.",
+            system_prompt="You are a lifecycle test agent.",
+            model="test-model",
+        )
+        self.phases: list[str] = []
+
+    @property
+    def definition(self) -> AgentDefinition:
+        return self._definition
+
+    async def prepare_context(self, context: AgentExecutionContext) -> None:
+        self.phases.append("prepare_context")
+
+    async def evaluate_pre_execution(
+        self,
+        context: AgentExecutionContext,
+    ) -> None:
+        self.phases.append("evaluate_pre_execution")
+
+    async def orchestrate_step(self, context: AgentExecutionContext) -> None:
+        self.phases.append("orchestrate_step")
+
+    async def execute_boundary(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentResponse:
+        self.phases.append("execute_boundary")
+        return AgentResponse(
+            agent_name=self.definition.name,
+            output="lifecycle output",
+            session_id=context.session_id,
+        )
+
+    async def evaluate_post_execution(
+        self,
+        context: AgentExecutionContext,
+        response: AgentResponse,
+    ) -> AgentResponse:
+        self.phases.append("evaluate_post_execution")
+        return AgentResponse(
+            agent_name=response.agent_name,
+            output=response.output + " post-processed",
+            session_id=response.session_id,
+            metadata=response.metadata,
+        )
+
+
 class RuntimeTestTool:
     def __init__(self) -> None:
         self._definition = ToolDefinition(
@@ -139,6 +190,59 @@ class RuntimeTestTool:
             "status": "success",
             "arguments": arguments,
         }
+
+
+@pytest.mark.asyncio
+async def test_runtime_executes_lifecycle_contract_in_order() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = LifecycleRuntimeAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    response = await runtime.run(
+        "lifecycle-runtime-agent",
+        AgentRequest(input="Run lifecycle."),
+    )
+
+    assert agent.phases == [
+        "prepare_context",
+        "evaluate_pre_execution",
+        "orchestrate_step",
+        "execute_boundary",
+        "evaluate_post_execution",
+    ]
+    assert response.output == "lifecycle output post-processed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_stops_lifecycle_when_pre_execution_fails() -> None:
+    registry = InMemoryAgentRegistry()
+
+    class FailingLifecycleAgent(LifecycleRuntimeAgent):
+        async def evaluate_pre_execution(
+            self,
+            context: AgentExecutionContext,
+        ) -> None:
+            self.phases.append("evaluate_pre_execution")
+            raise RuntimeError("pre-execution failure")
+
+    agent = FailingLifecycleAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    with pytest.raises(RuntimeError, match="pre-execution failure"):
+        await runtime.run(
+            "lifecycle-runtime-agent",
+            AgentRequest(input="Run lifecycle."),
+        )
+
+    assert agent.phases == [
+        "prepare_context",
+        "evaluate_pre_execution",
+    ]
 
 
 @pytest.mark.asyncio

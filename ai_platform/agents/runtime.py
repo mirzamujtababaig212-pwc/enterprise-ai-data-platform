@@ -4,7 +4,10 @@ import asyncio
 import time
 
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
-from ai_platform.agents.contracts import AgentRegistry
+from ai_platform.agents.contracts import (
+    AgentExecutionContract,
+    AgentRegistry,
+)
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import (
     AgentLLMContext,
@@ -315,7 +318,14 @@ class AgentRuntime:
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
         )
 
-        response = await agent.run(context)
+        if isinstance(agent, AgentExecutionContract):
+            await agent.prepare_context(context)
+            await agent.evaluate_pre_execution(context)
+            await agent.orchestrate_step(context)
+            response = await agent.execute_boundary(context)
+            response = await agent.evaluate_post_execution(context, response)
+        else:
+            response = await agent.run(context)
 
         if (
             agent.definition.memory_write_enabled
