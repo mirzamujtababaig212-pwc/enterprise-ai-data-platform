@@ -78,6 +78,72 @@ class AgentRunApplicationService:
         self._cancellation_registry = cancellation_registry
         self._tenant_policy_engine = tenant_policy_engine
 
+    async def _emit_governance_decision(
+        self,
+        *,
+        run: AgentRun,
+        governance_domain: str,
+        decision: str,
+        reason: str | None = None,
+        policy_id: str | None = None,
+        policy_version: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        if self._observer is None:
+            return
+
+        metadata: dict[str, object] = {
+            "governance_domain": governance_domain,
+            "decision": decision,
+        }
+
+        if run.tenant_id is not None:
+            metadata["tenant_id"] = run.tenant_id
+
+        if reason is not None:
+            metadata["reason"] = reason
+
+        if policy_id is not None:
+            metadata["policy_id"] = policy_id
+
+        if policy_version is not None:
+            metadata["policy_version"] = policy_version
+
+        if details:
+            metadata["details"] = dict(details)
+
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.GOVERNANCE_DECISION,
+                agent_name=run.agent_name,
+                run_id=run.run_id,
+                session_id=run.session_id,
+                user_id=run.user_id,
+                metadata=metadata,
+            )
+        )
+
+    async def _emit_model_governance_decision(
+        self,
+        *,
+        run: AgentRun,
+        decision,
+    ) -> None:
+        if decision is None:
+            return
+
+        await self._emit_governance_decision(
+            run=run,
+            governance_domain="model",
+            decision="allow",
+            policy_id=decision.policy_id,
+            policy_version=decision.policy_version,
+            details={
+                "effective_model": decision.effective_model,
+                "effective_provider": decision.effective_provider,
+            },
+        )
+
     async def _resolve_model_governance(
         self,
         *,
@@ -306,10 +372,23 @@ class AgentRunApplicationService:
                 request=effective_request,
             )
 
+        await self._emit_model_governance_decision(
+            run=run,
+            decision=effective_model_governance,
+        )
+
         admission = await self._admission_policy.evaluate(
             agent_name=agent_name,
             request=effective_request,
             run=run,
+        )
+
+        admission_reason = admission.reason
+        await self._emit_governance_decision(
+            run=run,
+            governance_domain="admission",
+            decision="allow" if admission.allowed else "deny",
+            reason=admission_reason,
         )
 
         if not admission.allowed:

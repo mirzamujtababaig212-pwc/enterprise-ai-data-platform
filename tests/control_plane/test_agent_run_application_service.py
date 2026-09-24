@@ -252,10 +252,13 @@ async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
         )
     )
 
+    observer = RecordingObserver()
+
     service = AgentRunApplicationService(
         runtime=runtime,
         repository=repository,
         tenant_policy_engine=tenant_policy_engine,
+        observer=observer,
     )
 
     request = AgentRequest(
@@ -293,6 +296,116 @@ async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
         "policy_version": "v7",
     }
     assert running.request_snapshot.model_governance == (pending.request_snapshot.model_governance)
+
+    assert len(observer.events) == 2
+
+    model_event = observer.events[0]
+    assert model_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert model_event.run_id == pending.run_id
+    assert model_event.agent_name == "enterprise-analyst"
+    assert model_event.metadata == {
+        "governance_domain": "model",
+        "decision": "allow",
+        "tenant_id": "tenant-acme",
+        "policy_id": "enterprise-model-policy",
+        "policy_version": "v7",
+        "details": {
+            "effective_model": "gpt-5",
+            "effective_provider": None,
+        },
+    }
+
+    admission_event = observer.events[1]
+    assert admission_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert admission_event.metadata == {
+        "governance_domain": "admission",
+        "decision": "allow",
+        "tenant_id": "tenant-acme",
+    }
+
+    serialized_event = repr(model_event.metadata)
+    assert "Explain the platform" not in serialized_event
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_pinned_model_governance_without_reauthorization() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_models=frozenset({"claude-sonnet-4"}),
+            policy_id="current-model-policy",
+            policy_version="v8",
+        )
+    )
+
+    pinned_decision = ModelGovernanceDecision(
+        effective_model="gpt-5",
+        effective_provider="openai",
+        policy_id="enterprise-model-policy",
+        policy_version="v7",
+    )
+
+    observer = RecordingObserver()
+
+    authorize_model = Mock(wraps=tenant_policy_engine.authorize_model)
+    tenant_policy_engine.authorize_model = authorize_model
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+        observer=observer,
+    )
+
+    request = AgentRequest(
+        input="Resume the platform analysis",
+        session_id="session-model-recovery-1",
+        user_id="user-model-recovery-1",
+        principal="principal-model-recovery-1",
+        tenant_id="tenant-acme",
+        model_governance=pinned_decision,
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    runtime.get_agent_definition.assert_not_called()
+
+    effective_request = runtime.run.await_args.args[1]
+
+    tenant_policy_engine.authorize_model.assert_not_called()
+    assert effective_request.model_governance is pinned_decision
+
+    pending = repository.create.call_args.args[0]
+    assert pending.request_snapshot.model_governance == {
+        "effective_model": "gpt-5",
+        "effective_provider": "openai",
+        "policy_id": "enterprise-model-policy",
+        "policy_version": "v7",
+    }
+
+    model_event = observer.events[0]
+    assert model_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert model_event.run_id == pending.run_id
+    assert model_event.metadata == {
+        "governance_domain": "model",
+        "decision": "allow",
+        "tenant_id": "tenant-acme",
+        "policy_id": "enterprise-model-policy",
+        "policy_version": "v7",
+        "details": {
+            "effective_model": "gpt-5",
+            "effective_provider": "openai",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -1169,10 +1282,13 @@ async def test_execute_rejects_run_before_runtime_when_admission_denied() -> Non
         )
     )
 
+    observer = RecordingObserver()
+
     service = AgentRunApplicationService(
         runtime=runtime,
         repository=repository,
         admission_policy=admission_policy,
+        observer=observer,
     )
 
     with pytest.raises(
@@ -1208,6 +1324,17 @@ async def test_execute_rejects_run_before_runtime_when_admission_denied() -> Non
         "reason": "agent is not approved for this environment",
     }
 
+    assert len(observer.events) == 1
+    governance_event = observer.events[0]
+    assert governance_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert governance_event.run_id == pending.run_id
+    assert governance_event.agent_name == "enterprise-analyst"
+    assert governance_event.metadata == {
+        "governance_domain": "admission",
+        "decision": "deny",
+        "reason": "agent is not approved for this environment",
+    }
+
     admission_policy.evaluate.assert_awaited_once()
     call = admission_policy.evaluate.await_args
 
@@ -1231,10 +1358,13 @@ async def test_execute_allows_run_when_admission_policy_allows() -> None:
         )
     )
 
+    observer = RecordingObserver()
+
     service = AgentRunApplicationService(
         runtime=runtime,
         repository=repository,
         admission_policy=admission_policy,
+        observer=observer,
     )
 
     result = await service.execute(
@@ -1244,6 +1374,16 @@ async def test_execute_allows_run_when_admission_policy_allows() -> None:
 
     assert result.response.output == "completed"
     runtime.run.assert_awaited_once()
+
+    assert len(observer.events) == 1
+    governance_event = observer.events[0]
+    assert governance_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert governance_event.run_id is not None
+    assert governance_event.agent_name == "enterprise-analyst"
+    assert governance_event.metadata == {
+        "governance_domain": "admission",
+        "decision": "allow",
+    }
 
     assert repository.create.call_count == 1
     assert repository.update.call_count == 1
@@ -1487,11 +1627,26 @@ async def test_execute_persists_cancelled_run_and_emits_audit_event() -> None:
     repository.fail_if_owner.assert_not_called()
     repository.complete_if_owner.assert_not_called()
 
-    assert len(observer.events) == 1
+    assert len(observer.events) == 2
 
-    event = observer.events[0]
+    governance_event = next(
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    )
+    assert governance_event.run_id == running.run_id
+    assert governance_event.agent_name == running.agent_name
+    assert governance_event.metadata == {
+        "governance_domain": "admission",
+        "decision": "allow",
+    }
 
-    assert event.event_type is AgentExecutionEventType.AGENT_CANCELLED
+    event = next(
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.AGENT_CANCELLED
+    )
+
     assert event.agent_name == running.agent_name
     assert event.run_id == running.run_id
     assert event.session_id == running.session_id
@@ -1554,7 +1709,16 @@ async def test_execute_cancellation_does_not_emit_event_after_ownership_loss() -
         await execution_task
 
     repository.cancel_if_owner.assert_called_once()
-    assert observer.events == []
+
+    assert len(observer.events) == 1
+    governance_event = observer.events[0]
+    assert governance_event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+    assert governance_event.run_id == running.run_id
+    assert governance_event.agent_name == running.agent_name
+    assert governance_event.metadata == {
+        "governance_domain": "admission",
+        "decision": "allow",
+    }
 
 
 @pytest.mark.asyncio
@@ -1609,7 +1773,7 @@ async def test_execute_cancellation_continues_when_observer_fails() -> None:
 
     cancelled = repository.cancelled_run
     assert cancelled.status == AgentRunStatus.CANCELLED
-    assert observer.calls == 1
+    assert observer.calls == 2
 
 
 def test_cancel_raises_lookup_error_for_missing_run() -> None:
