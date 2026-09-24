@@ -135,6 +135,7 @@ class PostgreSQLAgentRunStepsRepository:
         output=None,
         error: str | None = None,
         failure_category: str | None = None,
+        metadata: dict[str, object] | None = None,
         commit: bool = True,
     ) -> AgentRunStep | None:
         try:
@@ -176,6 +177,9 @@ class PostgreSQLAgentRunStepsRepository:
 
             record.error = error
             record.failure_category = failure_category
+
+            if metadata is not None:
+                record.step_metadata = metadata
 
             self._session.flush()
 

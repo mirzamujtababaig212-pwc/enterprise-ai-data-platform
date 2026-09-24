@@ -78,6 +78,25 @@ class LLMAgent:
         """
         return self._definition
 
+    @classmethod
+    def _tool_execution_metadata(
+        cls,
+        tool_name: str,
+        output: object,
+        execution_metadata: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Merge bounded execution and tool-specific provenance metadata."""
+        metadata: dict[str, object] = {}
+
+        if execution_metadata:
+            metadata.update(execution_metadata)
+
+        rag_metadata = cls._tool_provenance_metadata(tool_name, output)
+        if rag_metadata:
+            metadata.update(rag_metadata)
+
+        return metadata
+
     async def _emit(
         self,
         event: AgentExecutionEvent,
@@ -302,9 +321,10 @@ class LLMAgent:
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
-                        metadata=self._tool_provenance_metadata(
+                        metadata=self._tool_execution_metadata(
                             tool_call.name,
                             tool_result.output,
+                            tool_result.metadata,
                         ),
                     )
                 )
@@ -353,6 +373,11 @@ class LLMAgent:
                                 failure_category=failure_category,
                             )
 
+                failure_metadata = dict(tool_result.metadata)
+
+                if tool_result.failure_category is not None:
+                    failure_metadata["failure_category"] = tool_result.failure_category.value
+
                 await self._emit(
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_FAILED,
@@ -363,13 +388,7 @@ class LLMAgent:
                         tool_round=tool_round,
                         tool_name=tool_call.name,
                         call_id=tool_call.call_id,
-                        metadata=(
-                            {
-                                "failure_category": tool_result.failure_category.value,
-                            }
-                            if tool_result.failure_category is not None
-                            else {}
-                        ),
+                        metadata=failure_metadata,
                     )
                 )
 
@@ -848,6 +867,11 @@ class LLMAgent:
 
             now = datetime.now(UTC)
 
+            step_result = context.orchestration_state.get_step_result(step.step_id)
+            metadata = (
+                dict(step_result.metadata) if step_result is not None else dict(step.metadata)
+            )
+
             repository.transition(
                 context.run_id,
                 step.step_id,
@@ -855,6 +879,7 @@ class LLMAgent:
                 updated_at=now,
                 completed_at=now,
                 output=output,
+                metadata=metadata,
             )
         finally:
             repository.close()
@@ -1088,9 +1113,10 @@ class LLMAgent:
         if not tool_result.success:
             return
 
-        metadata = self._tool_provenance_metadata(
+        metadata = self._tool_execution_metadata(
             tool_call.name,
             tool_result.output,
+            tool_result.metadata,
         )
 
         state.set_step_result(

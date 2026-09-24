@@ -62,3 +62,4 @@ class ToolExecutionResult:
     output: Any = None
     error: str | None = None
     failure_category: ToolExecutionFailureCategory | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)

@@ -45,6 +45,7 @@ class AgentRunStepsRepository(Protocol):
         output=None,
         error: str | None = None,
         failure_category: str | None = None,
+        metadata: dict[str, object] | None = None,
         commit: bool = True,
     ) -> AgentRunStep | None: ...
 

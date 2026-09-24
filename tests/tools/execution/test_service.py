@@ -43,6 +43,17 @@ class RecordingToolAuthorizer:
         )
 
 
+class ProvenanceToolAuthorizer:
+    async def authorize(self, request):
+        return ToolAuthorizationResult(
+            principal=request.principal,
+            tool_name=request.tool_name,
+            allowed=True,
+            policy_id="policy-enterprise-tools",
+            policy_version="v7",
+        )
+
+
 class FakeTool:
     def __init__(
         self,
@@ -813,6 +824,73 @@ async def test_execution_authorization_receives_tool_metadata():
     assert authorizer.requests[0].principal == "agent:research"
     assert authorizer.requests[0].tool_name == "test_tool"
     assert authorizer.requests[0].metadata == tool.definition.metadata
+
+
+@pytest.mark.asyncio
+async def test_execution_result_contains_bounded_execution_provenance() -> None:
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+
+    tool._definition = ToolDefinition(
+        name="test_tool",
+        description="A provenance test tool.",
+        metadata={
+            "source": "internal_registry",
+            "mcp_server": "finance-mcp",
+            "sensitive_context": "must-not-be-captured",
+        },
+    )
+
+    await registry.register(tool)
+
+    authorization_service = ToolAuthorizationService(ProvenanceToolAuthorizer())
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-provenance-001",
+        call_id="call-provenance-001",
+        tenant_id="tenant-acme",
+        principal="agent:research",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {
+            "customer_id": "customer-secret",
+            "amount": 12345,
+        },
+        principal="agent:research",
+        execution_context=context,
+    )
+
+    assert result.success is True
+
+    assert result.metadata == {
+        "execution_provenance": {
+            "tool_source": "internal_registry",
+            "mcp_server": "finance-mcp",
+            "tenant_id": "tenant-acme",
+            "authorization_decision": True,
+            "authorization_policy_id": "policy-enterprise-tools",
+            "authorization_policy_version": "v7",
+            "idempotency_key": ("deldai:run-provenance-001:" "call-provenance-001:test_tool"),
+            "execution_status": "completed",
+        },
+    }
+
+    provenance = result.metadata["execution_provenance"]
+
+    assert "customer_id" not in provenance
+    assert "amount" not in provenance
+    assert "status" not in provenance
+    assert "arguments" not in provenance
+    assert "sensitive_context" not in provenance
 
 
 class RecordingAuthorizationAuditSink:

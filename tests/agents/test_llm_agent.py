@@ -13,6 +13,7 @@ from tests.tools.execution.test_service import (
     FakeTool,
     FailingTool,
     OwnershipLosingTool,
+    ProvenanceToolAuthorizer,
 )
 from ai_platform.agents.contracts import Agent
 from ai_platform.agents.checkpoint import (
@@ -55,6 +56,7 @@ from tools.rag.search import RAGSearchTool
 from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
 from tools.execution.service import ToolExecutionService
 from tools.execution.context import ToolExecutionContext
+from tools.authorization.service import ToolAuthorizationService
 from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
 from ai_platform.agents.llm_agent import LLMAgent
@@ -2317,6 +2319,111 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_propagates_execution_provenance_to_event_and_durable_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    rag_tool = FakeRAGTool()
+    rag_tool._definition = ToolDefinition(
+        name="rag.search",
+        description="A test RAG search tool.",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "research-mcp",
+        },
+    )
+    await tool_registry.register(rag_tool)
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=ToolAuthorizationService(
+            ProvenanceToolAuthorizer(),
+        ),
+        idempotency_store=InMemoryToolExecutionIdempotencyStore(),
+    )
+
+    plan = build_enterprise_rag_analyst_plan()
+    repository = InMemoryAgentRunStepsRepository()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-provenance",
+            principal="agent:research",
+            tenant_id="tenant-acme",
+            session_id="session-provenance",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+            execution_service=execution_service,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id="run-provenance",
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    observer = FakeAgentExecutionObserver()
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    await agent.run(context)
+
+    completed_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.TOOL_CALL_COMPLETED
+    ]
+
+    assert len(completed_events) == 1
+
+    event_provenance = completed_events[0].metadata["execution_provenance"]
+
+    expected_provenance = {
+        "tool_source": "mcp",
+        "mcp_server": "research-mcp",
+        "tenant_id": "tenant-acme",
+        "authorization_decision": True,
+        "authorization_policy_id": "policy-enterprise-tools",
+        "authorization_policy_version": "v7",
+        "idempotency_key": "deldai:run-provenance:call-123:rag.search",
+        "execution_status": "completed",
+    }
+
+    assert event_provenance == expected_provenance
+
+    step = repository.get(
+        "run-provenance",
+        "retrieve_evidence",
+    )
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.metadata["execution_provenance"] == expected_provenance
+    assert step.metadata["rag_provenance"]["retrieved_count"] == 2
+
+    assert "query" not in event_provenance
+    assert "content" not in event_provenance
+    assert "classification" not in event_provenance
+    assert "arguments" not in event_provenance
+    assert "output" not in event_provenance
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_never_executes_tool_for_completed_durable_step() -> None:
     definition = AgentDefinition(
         name="enterprise-rag-analyst",
@@ -2889,6 +2996,9 @@ async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
     assert completed.tool_name == "rag.search"
     assert completed.call_id == "call-123"
     assert completed.metadata == {
+        "execution_provenance": {
+            "execution_status": "completed",
+        },
         "rag_provenance": {
             "retrieved_count": 2,
             "sources": [
@@ -2903,7 +3013,7 @@ async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
                     "score": 0.83,
                 },
             ],
-        }
+        },
     }
 
     serialized = str(completed.metadata)
@@ -3019,6 +3129,9 @@ async def test_llm_agent_failed_tool_event_includes_failure_category() -> None:
     failed_event = failed_events[0]
 
     assert failed_event.metadata == {
+        "execution_provenance": {
+            "execution_status": "failed",
+        },
         "failure_category": "execution_error",
     }
     assert "simulated tool failure" not in str(failed_event.metadata)

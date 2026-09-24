@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from tools.models import ToolExecutionFailureCategory
@@ -53,6 +53,7 @@ class AgentToolResult:
     output: Any = None
     error: str | None = None
     failure_category: ToolExecutionFailureCategory | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.call_id.strip():

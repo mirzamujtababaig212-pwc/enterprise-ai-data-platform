@@ -22,6 +22,7 @@ from tools.execution.idempotency import (
     ToolExecutionIdempotencyKey,
     ToolExecutionIdempotencyStore,
     ToolIdempotencyClaimStatus,
+    build_external_idempotency_key,
 )
 from tools.models import (
     ToolExecutionFailureCategory,
@@ -32,6 +33,61 @@ logger = logging.getLogger(__name__)
 
 
 class ToolExecutionService:
+    @staticmethod
+    def _build_execution_metadata(
+        *,
+        tool_definition=None,
+        execution_context: ToolExecutionContext | None = None,
+        authorization_decision: bool | None = None,
+        authorization_policy_id: str | None = None,
+        authorization_policy_version: str | None = None,
+        idempotency_key: ToolExecutionIdempotencyKey | None = None,
+        execution_status: str | None = None,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+
+        execution_provenance: dict[str, Any] = {}
+
+        if tool_definition is not None:
+            tool_metadata = tool_definition.metadata
+
+            source = tool_metadata.get("source")
+            if isinstance(source, str) and source.strip():
+                execution_provenance["tool_source"] = source
+
+            mcp_server = tool_metadata.get("mcp_server")
+            if isinstance(mcp_server, str) and mcp_server.strip():
+                execution_provenance["mcp_server"] = mcp_server
+
+        if execution_context is not None:
+            tenant_id = execution_context.tenant_id
+            if isinstance(tenant_id, str) and tenant_id.strip():
+                execution_provenance["tenant_id"] = tenant_id
+
+        if authorization_decision is not None:
+            execution_provenance["authorization_decision"] = authorization_decision
+
+            if authorization_policy_id is not None:
+                execution_provenance["authorization_policy_id"] = authorization_policy_id
+
+            if authorization_policy_version is not None:
+                execution_provenance["authorization_policy_version"] = authorization_policy_version
+
+        if idempotency_key is not None:
+            execution_provenance["idempotency_key"] = build_external_idempotency_key(
+                idempotency_key.run_id,
+                idempotency_key.call_id,
+                idempotency_key.tool_name,
+            )
+
+        if execution_status is not None:
+            execution_provenance["execution_status"] = execution_status
+
+        if execution_provenance:
+            metadata["execution_provenance"] = execution_provenance
+
+        return metadata
+
     def __init__(
         self,
         registry: ToolRegistry,
@@ -274,6 +330,27 @@ class ToolExecutionService:
                         tool_name=tool_name,
                         success=True,
                         output=output,
+                        metadata=self._build_execution_metadata(
+                            tool_definition=tool.definition,
+                            execution_context=execution_context,
+                            authorization_decision=(
+                                authorization.allowed
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_id=(
+                                authorization.policy_id
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_version=(
+                                authorization.policy_version
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            idempotency_key=idempotency_key,
+                            execution_status="completed",
+                        ),
                     )
 
                     if idempotency_key is not None:
@@ -313,6 +390,27 @@ class ToolExecutionService:
                             f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"
                         ),
                         failure_category=ToolExecutionFailureCategory.TIMEOUT,
+                        metadata=self._build_execution_metadata(
+                            tool_definition=tool.definition,
+                            execution_context=execution_context,
+                            authorization_decision=(
+                                authorization.allowed
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_id=(
+                                authorization.policy_id
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_version=(
+                                authorization.policy_version
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            idempotency_key=idempotency_key,
+                            execution_status="timeout",
+                        ),
                     )
 
                 except Exception as exc:
@@ -321,6 +419,27 @@ class ToolExecutionService:
                         success=False,
                         error=f"{type(exc).__name__}: {exc}",
                         failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
+                        metadata=self._build_execution_metadata(
+                            tool_definition=tool.definition,
+                            execution_context=execution_context,
+                            authorization_decision=(
+                                authorization.allowed
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_id=(
+                                authorization.policy_id
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            authorization_policy_version=(
+                                authorization.policy_version
+                                if self.authorization_service is not None
+                                else None
+                            ),
+                            idempotency_key=idempotency_key,
+                            execution_status="failed",
+                        ),
                     )
 
                 should_retry = (

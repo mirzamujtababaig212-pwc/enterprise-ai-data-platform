@@ -83,6 +83,7 @@ class InMemoryAgentRunStepsRepository:
         output=None,
         error: str | None = None,
         failure_category: str | None = None,
+        metadata: dict[str, object] | None = None,
         commit: bool = True,
     ) -> AgentRunStep | None:
         del commit
@@ -115,6 +116,7 @@ class InMemoryAgentRunStepsRepository:
                     "output": output if output is not None else step.output,
                     "error": error,
                     "failure_category": failure_category,
+                    "metadata": (dict(metadata) if metadata is not None else step.metadata),
                 }
             )
 
