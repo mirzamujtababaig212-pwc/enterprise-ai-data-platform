@@ -85,6 +85,25 @@ class AgentTokenLimitError(AgentExecutionBudgetError):
         )
 
 
+class AgentOutputPolicyError(RuntimeError):
+    """Raised when model output is blocked by tenant output governance."""
+
+    def __init__(
+        self,
+        policy_id: str | None,
+        policy_version: str | None,
+    ) -> None:
+        self.policy_id = policy_id
+        self.policy_version = policy_version
+
+        policy_label = policy_id or "unknown"
+        version_label = policy_version or "unknown"
+
+        super().__init__(
+            f"Agent output blocked by policy '{policy_label}' " f"(version {version_label})."
+        )
+
+
 class AgentToolCallLimitError(AgentExecutionBudgetError):
     """
     Raised when an agent exceeds its maximum allowed tool calls.

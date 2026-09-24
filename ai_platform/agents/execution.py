@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from typing import Callable
+
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.llm_context import AgentLLMContext
@@ -18,6 +20,7 @@ from ai_platform.agents.tool_calls import (
     AgentToolResult,
 )
 from ai_platform.agents.models import AgentRequest
+from ai_platform.agents.policy import OutputGovernanceDecision
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.models import ToolExecutionResult
 from rag.governance import GovernancePolicy
@@ -39,6 +42,7 @@ class AgentExecutionContext:
     def __init__(
         self,
         request: AgentRequest,
+        output_evaluator: Callable[[str], OutputGovernanceDecision] | None = None,
         *,
         tools: AgentToolContext,
         llm: AgentLLMContext,
@@ -51,6 +55,7 @@ class AgentExecutionContext:
         agent_run_steps_repository_factory=None,
     ) -> None:
         self.request = request
+        self._output_evaluator = output_evaluator
         self.tools = tools
         self.llm = llm
         self.history = history
@@ -201,6 +206,29 @@ class AgentExecutionContext:
     def tenant_id(self) -> str | None:
         """Return the authenticated tenant identity for this execution."""
         return self.request.tenant_id
+
+    def evaluate_output(self, text: str) -> OutputGovernanceDecision:
+        """
+        Evaluate model output at the agent response boundary.
+
+        Direct/unit-test execution contexts without a configured evaluator
+        retain the existing behavior and allow the original output.
+        """
+        if not isinstance(text, str):
+            raise TypeError("Output text must be a string.")
+
+        if self._output_evaluator is None:
+            return OutputGovernanceDecision(
+                allowed=True,
+                redacted_output=text,
+            )
+
+        decision = self._output_evaluator(text)
+
+        if not isinstance(decision, OutputGovernanceDecision):
+            raise TypeError("Output evaluator must return an OutputGovernanceDecision.")
+
+        return decision
 
     @property
     def metadata(self) -> dict[str, object]:

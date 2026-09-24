@@ -15,6 +15,7 @@ from ai_platform.agents.checkpoint import (
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
+    AgentOutputPolicyError,
     AgentTokenLimitError,
 )
 from ai_platform.agents.orchestration import (
@@ -1373,9 +1374,19 @@ class LLMAgent:
                             )
                         )
 
+                    output_governance = context.evaluate_output(result.text or "")
+
+                    if not output_governance.allowed:
+                        raise AgentOutputPolicyError(
+                            policy_id=output_governance.policy_id,
+                            policy_version=output_governance.policy_version,
+                        )
+
+                    safe_output = output_governance.redacted_output
+
                     response = AgentResponse(
                         agent_name=self.definition.name,
-                        output=result.text,
+                        output=safe_output,
                         session_id=context.session_id,
                         metadata={
                             "provider": result.provider,

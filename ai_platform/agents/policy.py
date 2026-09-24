@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import FrozenSet
+import re
+from typing import Any, FrozenSet, Mapping
 
 
 class PolicyViolationError(RuntimeError):
@@ -72,6 +73,28 @@ class ModelGovernanceDecision:
 
 
 @dataclass(frozen=True)
+class OutputGovernanceDecision:
+    """Immutable output governance decision for an agent response."""
+
+    allowed: bool
+    redacted_output: str
+    policy_id: str | None = None
+    policy_version: str | None = None
+    governance_metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.redacted_output, str):
+            raise TypeError("redacted_output must be a string.")
+
+        for field_name, value in (
+            ("policy_id", self.policy_id),
+            ("policy_version", self.policy_version),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must not be empty when provided")
+
+
+@dataclass(frozen=True)
 class TenantPolicy:
     """Immutable execution policy for a single tenant."""
 
@@ -83,6 +106,9 @@ class TenantPolicy:
     allow_cross_tenant_data: bool = False
     allowed_models: FrozenSet[str] | None = None
     allowed_providers: FrozenSet[str] | None = None
+    output_governance_enabled: bool = False
+    blocked_output_patterns: FrozenSet[str] = field(default_factory=frozenset)
+    redact_output_patterns: FrozenSet[str] = field(default_factory=frozenset)
     policy_id: str | None = None
     policy_version: str | None = None
 
@@ -107,6 +133,21 @@ class TenantPolicy:
             if value is not None and not value.strip():
                 raise ValueError(f"{field_name} must not be empty when provided")
 
+        for field_name, patterns in (
+            ("blocked_output_patterns", self.blocked_output_patterns),
+            ("redact_output_patterns", self.redact_output_patterns),
+        ):
+            if any(not isinstance(pattern, str) or not pattern.strip() for pattern in patterns):
+                raise ValueError(f"{field_name} must contain only non-empty strings")
+
+            for pattern in patterns:
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    raise ValueError(
+                        f"{field_name} contains invalid regex pattern: {pattern!r}"
+                    ) from exc
+
 
 class TenantPolicyEngine:
     """Evaluates tenant-scoped policy before tool execution."""
@@ -122,6 +163,62 @@ class TenantPolicyEngine:
             return self._policies[tenant_id]
         except KeyError as exc:
             raise PolicyViolationError(f"No policy registered for tenant '{tenant_id}'") from exc
+
+    def evaluate_output(
+        self,
+        tenant_id: str | None,
+        text: str,
+    ) -> OutputGovernanceDecision:
+        """Evaluate and sanitize model output under tenant policy."""
+
+        if not isinstance(text, str):
+            raise TypeError("Output text must be a string.")
+
+        if tenant_id is None or self._policies.get(tenant_id) is None:
+            return OutputGovernanceDecision(
+                allowed=True,
+                redacted_output=text,
+            )
+
+        policy = self._policies[tenant_id]
+
+        if not policy.output_governance_enabled:
+            return OutputGovernanceDecision(
+                allowed=True,
+                redacted_output=text,
+                policy_id=policy.policy_id,
+                policy_version=policy.policy_version,
+            )
+
+        for pattern in policy.blocked_output_patterns:
+            if re.search(pattern, text):
+                return OutputGovernanceDecision(
+                    allowed=False,
+                    redacted_output="",
+                    policy_id=policy.policy_id,
+                    policy_version=policy.policy_version,
+                    governance_metadata={
+                        "blocked": True,
+                        "rule_type": "blocked_output_pattern",
+                    },
+                )
+
+        safe_text = text
+
+        for pattern in policy.redact_output_patterns:
+            safe_text = re.sub(pattern, "********", safe_text)
+
+        return OutputGovernanceDecision(
+            allowed=True,
+            redacted_output=safe_text,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+            governance_metadata={
+                "blocked": False,
+                "redacted": safe_text != text,
+                "rule_type": ("redact_output_pattern" if safe_text != text else None),
+            },
+        )
 
     def authorize_model(
         self,

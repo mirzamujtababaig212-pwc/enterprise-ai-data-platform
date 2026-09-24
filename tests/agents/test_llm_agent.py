@@ -24,12 +24,16 @@ from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
     AgentLLMCallLimitError,
+    AgentOutputPolicyError,
     AgentTokenLimitError,
     AgentToolLoopLimitError,
 )
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
-from ai_platform.agents.policy import ModelGovernanceDecision
+from ai_platform.agents.policy import (
+    ModelGovernanceDecision,
+    OutputGovernanceDecision,
+)
 from ai_platform.agents.llm_config import AgentLLMConfig
 from ai_platform.agents.llm_messages import (
     AgentMessageRole,
@@ -393,6 +397,163 @@ async def test_llm_agent_run_completes_current_agent_response_orchestration_step
 
     result = state.get_completed_step_result("answer")
     assert result.output == "Generated answer."
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_persists_redacted_output_in_orchestration_state() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    context, gateway = make_context(
+        request=AgentRequest(
+            input="Generate the answer.",
+            session_id="session-output-redaction",
+        ),
+    )
+
+    raw_output = "The answer contains secret=abc123."
+    safe_output = "The answer contains ********."
+
+    context._output_evaluator = lambda text: (
+        OutputGovernanceDecision(
+            allowed=True,
+            redacted_output=safe_output,
+            policy_id="policy-output",
+            policy_version="v3",
+            governance_metadata={
+                "blocked": False,
+                "redacted": True,
+                "rule_type": "redact_output_pattern",
+            },
+        )
+        if text == raw_output
+        else OutputGovernanceDecision(
+            allowed=True,
+            redacted_output=text,
+        )
+    )
+
+    context.orchestration_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    # Make the fake provider return the sensitive raw output.
+    async def route_chat(request: dict[str, Any]) -> dict[str, Any]:
+        gateway.requests.append(request)
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": raw_output,
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+    gateway.route_chat = route_chat
+
+    agent = LLMAgent(definition)
+
+    response = await agent.run(context)
+
+    assert response.output == safe_output
+    assert raw_output not in response.output
+
+    step_result = context.orchestration_state.get_completed_step_result("answer")
+
+    assert step_result is not None
+    assert step_result.output == safe_output
+    assert raw_output not in step_result.output
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_blocks_output_without_leaking_raw_text() -> None:
+    definition = AgentDefinition(
+        name="production-llm-agent",
+        description="Production LLM agent.",
+        system_prompt="You are a production LLM agent.",
+        model="mock-gpt",
+    )
+
+    context, gateway = make_context(
+        request=AgentRequest(
+            input="Generate the answer.",
+            session_id="session-output-block",
+        ),
+    )
+
+    raw_output = "FORBIDDEN secret=TOP_SECRET_VALUE"
+
+    context._output_evaluator = lambda text: OutputGovernanceDecision(
+        allowed=False,
+        redacted_output="",
+        policy_id="policy-output",
+        policy_version="v9",
+        governance_metadata={
+            "blocked": True,
+            "rule_type": "blocked_output_pattern",
+        },
+    )
+
+    context.orchestration_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    async def route_chat(request: dict[str, Any]) -> dict[str, Any]:
+        gateway.requests.append(request)
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": raw_output,
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+    gateway.route_chat = route_chat
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentOutputPolicyError,
+        match=r"policy-output.*version v9",
+    ) as exc_info:
+        await agent.run(context)
+
+    assert raw_output not in str(exc_info.value)
+
+    step = context.orchestration_state.steps[0]
+    assert step.status is OrchestrationStepStatus.FAILED
+
+    step_result = context.orchestration_state.get_step_result("answer")
+
+    if step_result is not None:
+        assert raw_output not in str(step_result.output)
 
 
 @pytest.mark.asyncio

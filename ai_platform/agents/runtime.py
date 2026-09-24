@@ -13,6 +13,7 @@ from ai_platform.agents.llm_context import (
 )
 from ai_platform.agents.llm_messages import AgentMessage
 from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -69,6 +70,7 @@ class AgentRuntime:
         memory_service: MemoryService | None = None,
         observer: AgentExecutionObserver | None = None,
         agent_run_steps_repository_factory=None,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
     ) -> None:
         self._registry = registry
         self._tool_registry = tool_registry
@@ -88,6 +90,7 @@ class AgentRuntime:
         self._memory_service = memory_service
         self._observer = observer
         self._agent_run_steps_repository_factory = agent_run_steps_repository_factory
+        self._tenant_policy_engine = tenant_policy_engine
 
     async def resume(
         self,
@@ -176,8 +179,20 @@ class AgentRuntime:
             agent.definition.llm_config,
         )
 
+        output_evaluator = None
+        if self._tenant_policy_engine is not None:
+
+            def evaluate_output(text: str):
+                return self._tenant_policy_engine.evaluate_output(
+                    request.tenant_id,
+                    text,
+                )
+
+            output_evaluator = evaluate_output
+
         context = AgentExecutionContext(
             request,
+            output_evaluator=output_evaluator,
             tools=tool_context,
             llm=llm_context,
             history=checkpoint.messages,
@@ -275,8 +290,20 @@ class AgentRuntime:
             agent.definition.llm_config,
         )
 
+        output_evaluator = None
+        if self._tenant_policy_engine is not None:
+
+            def evaluate_output(text: str):
+                return self._tenant_policy_engine.evaluate_output(
+                    request.tenant_id,
+                    text,
+                )
+
+            output_evaluator = evaluate_output
+
         context = AgentExecutionContext(
             request,
+            output_evaluator=output_evaluator,
             tools=tool_context,
             llm=llm_context,
             history=history,

@@ -1,6 +1,9 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from ai_platform.agents.policy import (
+    OutputGovernanceDecision,
     PolicyViolationError,
     TenantPolicy,
     TenantPolicyEngine,
@@ -195,3 +198,103 @@ def test_agent_request_carries_model_governance_decision() -> None:
 
     assert request.model_governance == decision
     assert request.model_governance.effective_model == "gpt-5"
+
+
+def test_output_governance_decision_is_immutable() -> None:
+    decision = OutputGovernanceDecision(
+        allowed=True,
+        redacted_output="safe output",
+        policy_id="policy-output",
+        policy_version="v1",
+    )
+
+    assert decision.redacted_output == "safe output"
+
+    with pytest.raises(FrozenInstanceError):
+        decision.redacted_output = "changed"
+
+
+def test_tenant_policy_output_governance_defaults_disabled() -> None:
+    policy = TenantPolicy(tenant_id="tenant-a")
+
+    assert policy.output_governance_enabled is False
+    assert policy.blocked_output_patterns == frozenset()
+    assert policy.redact_output_patterns == frozenset()
+
+
+def test_tenant_policy_engine_blocks_output_before_redaction() -> None:
+    engine = TenantPolicyEngine()
+
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            policy_id="policy-output",
+            policy_version="v3",
+            output_governance_enabled=True,
+            blocked_output_patterns=frozenset({r"FORBIDDEN"}),
+            redact_output_patterns=frozenset({r"secret=[A-Za-z0-9_]+"}),
+        )
+    )
+
+    decision = engine.evaluate_output(
+        "tenant-a",
+        "FORBIDDEN secret=abc123",
+    )
+
+    assert decision.allowed is False
+    assert decision.redacted_output == ""
+    assert decision.policy_id == "policy-output"
+    assert decision.policy_version == "v3"
+
+
+def test_tenant_policy_engine_redacts_allowed_output() -> None:
+    engine = TenantPolicyEngine()
+
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            policy_id="policy-output",
+            policy_version="v3",
+            output_governance_enabled=True,
+            redact_output_patterns=frozenset({r"secret=[A-Za-z0-9_]+"}),
+        )
+    )
+
+    raw_output = "The result is secret=abc123."
+
+    decision = engine.evaluate_output("tenant-a", raw_output)
+
+    assert decision.allowed is True
+    assert decision.redacted_output == "The result is ********."
+    assert decision.governance_metadata["redacted"] is True
+    assert "abc123" not in decision.redacted_output
+
+
+def test_tenant_policy_engine_preserves_output_when_governance_disabled() -> None:
+    engine = TenantPolicyEngine()
+
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            output_governance_enabled=False,
+            redact_output_patterns=frozenset({r"secret=\S+"}),
+        )
+    )
+
+    raw_output = "secret=abc123"
+
+    decision = engine.evaluate_output("tenant-a", raw_output)
+
+    assert decision.allowed is True
+    assert decision.redacted_output == raw_output
+
+
+def test_tenant_policy_engine_allows_unmapped_tenant() -> None:
+    engine = TenantPolicyEngine()
+
+    raw_output = "secret=abc123"
+
+    decision = engine.evaluate_output("unknown-tenant", raw_output)
+
+    assert decision.allowed is True
+    assert decision.redacted_output == raw_output

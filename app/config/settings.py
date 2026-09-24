@@ -164,6 +164,32 @@ class Settings:
                             "Tenant policy allow_cross_tenant_data " "must be a boolean."
                         )
 
+                    output_governance_enabled = policy.get(
+                        "output_governance_enabled",
+                        False,
+                    )
+
+                    if not isinstance(output_governance_enabled, bool):
+                        raise ValueError(
+                            "Tenant policy output_governance_enabled must be a boolean."
+                        )
+
+                    blocked_output_patterns = policy.get(
+                        "blocked_output_patterns",
+                        [],
+                    )
+
+                    if not isinstance(blocked_output_patterns, list):
+                        raise ValueError("Tenant policy blocked_output_patterns must be an array.")
+
+                    redact_output_patterns = policy.get(
+                        "redact_output_patterns",
+                        [],
+                    )
+
+                    if not isinstance(redact_output_patterns, list):
+                        raise ValueError("Tenant policy redact_output_patterns must be an array.")
+
                     parsed_policies.append(
                         TenantPolicy(
                             tenant_id=tenant_id,
@@ -178,6 +204,9 @@ class Settings:
                             allowed_providers=(
                                 None if allowed_providers is None else frozenset(allowed_providers)
                             ),
+                            output_governance_enabled=output_governance_enabled,
+                            blocked_output_patterns=frozenset(blocked_output_patterns),
+                            redact_output_patterns=frozenset(redact_output_patterns),
                             policy_id=policy.get("policy_id"),
                             policy_version=policy.get("policy_version"),
                         )
