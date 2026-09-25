@@ -320,18 +320,20 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
         assert rag_completed_event.session_id == "session-cross-backend-rag-123"
         assert rag_completed_event.call_id
 
-        assert rag_completed_event.metadata == {
-            "rag_provenance": {
-                "retrieved_count": len(expected_results),
-                "sources": [
-                    {
-                        "chunk_id": item.chunk.id,
-                        "document_id": item.chunk.document_id,
-                        "score": item.score,
-                    }
-                    for item in expected_results
-                ],
-            }
+        assert rag_completed_event.metadata["execution_provenance"] == {
+            "execution_status": "completed",
+        }
+
+        assert rag_completed_event.metadata["rag_provenance"] == {
+            "retrieved_count": len(expected_results),
+            "sources": [
+                {
+                    "chunk_id": item.chunk.id,
+                    "document_id": item.chunk.document_id,
+                    "score": item.score,
+                }
+                for item in expected_results
+            ],
         }
 
         semantic_results = await semantic_retriever.retrieve(
