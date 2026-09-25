@@ -1456,6 +1456,408 @@ def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> N
                 session.commit()
 
 
+@pytest.mark.asyncio
+async def test_production_mcp_agent_run_recovers_from_postgres_checkpoint() -> None:
+    """Exercise durable MCP execution recovery through the production stack."""
+
+    import json
+    import sys
+    from pathlib import Path
+
+    import httpx
+
+    from ai_platform.agents.checkpoint import AgentCheckpointPosition
+    from ai_platform.agents.llm_agent import LLMAgent
+    from ai_platform.agents.models import AgentDefinition
+    from ai_platform.agents.tool_calls import AgentToolCall
+    from ai_platform.llm_gateway.config.settings import settings
+    from app.control_plane.auth import principal_from_api_key
+    from app.control_plane.persistence.models import (
+        AgentRunCheckpointRecord,
+        ToolExecutionIdempotencyRecord,
+    )
+    import app.control_plane.dependencies as dependencies
+    from tools.mcp.sdk_client import MCPPythonSDKClient
+
+    transport = httpx.ASGITransport(app=app)
+    client = httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    )
+
+    agent_name = "enterprise-mcp-recovery-test-agent"
+    session_id = "production-mcp-recovery-integration-session"
+    call_id = "call-mcp-recovery-1"
+
+    run_id: str | None = None
+
+    original_checkpoint_save = dependencies._agent_checkpoint_handler.save
+    original_idempotency_complete = dependencies._tool_idempotency_store.complete
+    original_idempotency_release = dependencies._tool_idempotency_store.release
+    original_mcp_call_tool = MCPPythonSDKClient.call_tool
+    original_mcp_servers = os.environ.get("MCP_SERVERS")
+
+    checkpoint_save_count = 0
+    mcp_invocations: list[dict] = []
+
+    authenticated_principal = principal_from_api_key(API_KEY)
+
+    async def _failing_checkpoint_save(checkpoint, *, lease_id=None):
+        nonlocal checkpoint_save_count
+
+        checkpoint_save_count += 1
+
+        # BEFORE_TOOL_EXECUTION must survive so recovery has a durable
+        # replay point. Fail only when the runtime attempts to persist
+        # AFTER_TOOL_EXECUTION.
+        if checkpoint.position == AgentCheckpointPosition.AFTER_TOOL_EXECUTION:
+            raise RuntimeError("deterministic MCP checkpoint persistence failure")
+
+        return await original_checkpoint_save(
+            checkpoint,
+            lease_id=lease_id,
+        )
+
+    async def _failing_idempotency_complete(
+        key,
+        result,
+        *,
+        claim_token=None,
+    ):
+        # The real MCP call has already completed at this point. Failing
+        # completion deliberately leaves the durable claim unresolved.
+        raise RuntimeError("deterministic MCP idempotency completion failure")
+
+    async def _preserve_claim_on_release(
+        key,
+        *,
+        claim_token=None,
+    ):
+        # Model the crash window: the execution claim cannot be released
+        # after the external MCP call has already happened.
+        return None
+
+    async def _counting_mcp_call_tool(
+        self,
+        name,
+        arguments,
+        *,
+        meta=None,
+    ):
+        mcp_invocations.append(
+            {
+                "name": name,
+                "arguments": dict(arguments),
+                "meta": meta,
+            }
+        )
+        return await original_mcp_call_tool(
+            self,
+            name,
+            arguments,
+            meta=meta,
+        )
+
+    try:
+        # Ensure the normal production agents exist first.
+        await dependencies._initialize_agents()
+
+        # The repository .env intentionally has no MCP_SERVERS configured.
+        # For this integration test, provide the real MCP fixture through
+        # the same production MCP_SERVERS configuration path.
+        search_server = (
+            Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures" / "test_server.py"
+        )
+
+        assert search_server.exists(), search_server
+
+        mcp_servers_payload = [
+            {
+                "name": "document-server",
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(search_server)],
+            }
+        ]
+
+        # Reset any MCP initialization that may have happened earlier
+        # with the repository's normal empty MCP configuration.
+        await dependencies.close_mcp_servers()
+
+        os.environ["MCP_SERVERS"] = json.dumps(mcp_servers_payload)
+
+        # This is the real production initialization/discovery path.
+        await dependencies.initialize_mcp_servers()
+
+        mcp_tool = await dependencies._tool_registry.get("search_documents")
+
+        assert mcp_tool is not None
+        assert mcp_tool.definition.name == "search_documents"
+
+        # Use a dedicated test agent so production agent capabilities are
+        # not changed merely to exercise this integration path.
+        test_definition = AgentDefinition(
+            name=agent_name,
+            description="Production MCP durable-recovery integration test agent.",
+            system_prompt=(
+                "You are an enterprise document analysis agent. "
+                "Use search_documents when document evidence is requested. "
+                "After receiving tool results, provide a concise final answer."
+            ),
+            model=settings.DEFAULT_CHAT_MODEL,
+            temperature=0.0,
+            max_tokens=1024,
+            tool_names=("search_documents",),
+        )
+
+        awaitable_agent = LLMAgent(
+            test_definition,
+            observer=dependencies._agent_observer,
+            checkpoint_handler=dependencies._agent_checkpoint_handler,
+        )
+
+        await dependencies._agent_registry.register(awaitable_agent)
+
+        await dependencies._tool_authorizer.allow(
+            authenticated_principal,
+            "search_documents",
+        )
+
+        responses = [
+            {
+                "reply": "",
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id=call_id,
+                        name="search_documents",
+                        arguments={"query": "enterprise AI"},
+                    )
+                ],
+            },
+            {
+                "reply": (
+                    "The MCP document search returned enterprise AI " "architecture evidence."
+                ),
+                "provider": "integration-test",
+                "model": "integration-test-model",
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 12,
+                    "total_tokens": 32,
+                },
+                "tool_calls": [],
+            },
+        ]
+
+        async def _deterministic_route_chat(request: dict) -> dict:
+            assert responses, "Unexpected additional LLM request."
+            return responses.pop(0)
+
+        # The first real MCP invocation succeeds. The durable idempotency
+        # completion then fails, while release is suppressed so the claim
+        # remains CLAIMED. The subsequent AFTER_TOOL checkpoint also fails,
+        # causing the control-plane run to become FAILED with a durable
+        # BEFORE_TOOL checkpoint.
+        with (
+            patch(
+                "app.control_plane.dependencies._llm_router.route_chat",
+                new=AsyncMock(side_effect=_deterministic_route_chat),
+            ) as mock_route_chat,
+            patch.object(
+                dependencies._agent_checkpoint_handler,
+                "save",
+                new=AsyncMock(side_effect=_failing_checkpoint_save),
+            ),
+            patch.object(
+                dependencies._tool_idempotency_store,
+                "complete",
+                new=AsyncMock(side_effect=_failing_idempotency_complete),
+            ),
+            patch.object(
+                dependencies._tool_idempotency_store,
+                "release",
+                new=AsyncMock(side_effect=_preserve_claim_on_release),
+            ),
+            patch.object(
+                MCPPythonSDKClient,
+                "call_tool",
+                new=_counting_mcp_call_tool,
+            ),
+        ):
+            response = await client.post(
+                f"/api/v1/agents/{agent_name}/run",
+                headers={
+                    "x-api-key": API_KEY,
+                },
+                json={
+                    "input": "Search enterprise AI architecture documents.",
+                    "session_id": session_id,
+                    "user_id": "integration-mcp-recovery-user",
+                    "metadata": {
+                        "test": "production-mcp-agent-run-recovery",
+                    },
+                },
+            )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "deterministic MCP checkpoint persistence failure"
+
+        assert mock_route_chat.await_count == 1
+        assert len(responses) == 1
+
+        assert len(mcp_invocations) == 1
+        assert mcp_invocations[0]["name"] == "search_documents"
+        assert mcp_invocations[0]["arguments"] == {
+            "query": "enterprise AI",
+        }
+
+        external_meta = mcp_invocations[0]["meta"]
+
+        assert external_meta is not None
+        assert external_meta["deldai"]["idempotency_key"].startswith("deldai:")
+
+        with SessionLocal() as session:
+            run_record = session.scalar(
+                select(AgentRunRecord)
+                .where(
+                    AgentRunRecord.agent_name == agent_name,
+                    AgentRunRecord.session_id == session_id,
+                )
+                .order_by(AgentRunRecord.started_at.desc())
+            )
+
+            assert run_record is not None
+            run_id = run_record.run_id
+
+            checkpoints = list(
+                session.scalars(
+                    select(AgentRunCheckpointRecord)
+                    .where(AgentRunCheckpointRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunCheckpointRecord.created_at.asc(),
+                        AgentRunCheckpointRecord.id.asc(),
+                    )
+                )
+            )
+
+            idempotency_record = session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == call_id,
+                    ToolExecutionIdempotencyRecord.tool_name == "search_documents",
+                )
+            )
+
+        assert run_record.status == "failed"
+
+        assert len(checkpoints) == 1
+        assert checkpoints[0].position == AgentCheckpointPosition.BEFORE_TOOL_EXECUTION.value
+
+        assert idempotency_record is not None
+        assert idempotency_record.status == "claimed"
+
+        # Restore the real durability behavior before invoking recovery.
+        dependencies._tool_idempotency_store.complete = original_idempotency_complete
+        dependencies._tool_idempotency_store.release = original_idempotency_release
+
+        # Recovery is deliberately built from the production dependency
+        # factory, including the real PostgreSQL idempotency store.
+        with SessionLocal() as session:
+            recovery_service = await dependencies.build_agent_run_recovery_service(session)
+
+            with patch(
+                "app.control_plane.dependencies._llm_router.route_chat",
+                new=AsyncMock(side_effect=_deterministic_route_chat),
+            ) as recovery_route_chat:
+                recovered = await recovery_service.recover(run_id)
+
+            assert recovery_route_chat.await_count == 1
+
+        assert recovered is not None
+        assert recovered.response.output == (
+            "The MCP document search returned enterprise AI " "architecture evidence."
+        )
+
+        # Recovery must not cross the external MCP boundary again.
+        assert len(mcp_invocations) == 1
+
+        # The second LLM response was consumed only after recovery resumed
+        # from BEFORE_TOOL_EXECUTION and received the durable ambiguity result.
+        assert mock_route_chat.await_count == 1
+        assert recovery_route_chat.await_count == 1
+        assert responses == []
+
+        with SessionLocal() as session:
+            final_run = session.scalar(
+                select(AgentRunRecord).where(
+                    AgentRunRecord.run_id == run_id,
+                )
+            )
+
+            final_idempotency_record = session.scalar(
+                select(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                    ToolExecutionIdempotencyRecord.call_id == call_id,
+                    ToolExecutionIdempotencyRecord.tool_name == "search_documents",
+                )
+            )
+
+        assert final_run is not None
+        assert final_run.status == "completed"
+
+        assert final_idempotency_record is not None
+        assert final_idempotency_record.status == "ambiguous"
+
+    finally:
+        # Shut down the real MCP stdio server before restoring configuration.
+        await dependencies.close_mcp_servers()
+        await client.aclose()
+
+        if original_mcp_servers is None:
+            os.environ.pop("MCP_SERVERS", None)
+        else:
+            os.environ["MCP_SERVERS"] = original_mcp_servers
+
+        # Restore any patched production dependency methods if the test
+        # fails before the explicit restoration above.
+        dependencies._agent_checkpoint_handler.save = original_checkpoint_save
+        dependencies._tool_idempotency_store.complete = original_idempotency_complete
+        dependencies._tool_idempotency_store.release = original_idempotency_release
+
+        await dependencies._agent_registry.remove(agent_name)
+
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(ToolExecutionIdempotencyRecord).filter(
+                    ToolExecutionIdempotencyRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunCheckpointRecord).filter(
+                    AgentRunCheckpointRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunStepRecord).filter(
+                    AgentRunStepRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunEventRecord).filter(
+                    AgentRunEventRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                    synchronize_session=False
+                )
+
+                session.commit()
+
+
 def test_production_agent_run_recovers_from_postgres_checkpoint() -> None:
     """Recover a failed agent run from its real PostgreSQL checkpoint."""
 

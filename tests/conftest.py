@@ -9,8 +9,8 @@ os.environ["CONTROL_PLANE_API_KEY_TENANTS"] = "tenant-a=super-secret-key"
 os.environ["TENANT_POLICY_ENFORCEMENT_ENABLED"] = "true"
 os.environ["TENANT_POLICIES"] = (
     '[{"tenant_id":"tenant-a",'
-    '"allowed_tools":["rag.search","vehicle.data.query"],'
-    '"blocked_tools":[],"allowed_mcp_servers":[]}]'
+    '"allowed_tools":["rag.search","vehicle.data.query","search_documents"],'
+    '"blocked_tools":[],"allowed_mcp_servers":["document-server"]}]'
 )
 
 import pytest  # noqa: E402
