@@ -19,14 +19,22 @@ from ai_platform.agents.observer import AgentExecutionObserver
 @dataclass(frozen=True)
 class RAGSource:
     """
-    Citation information exposed to callers of the RAG system.
+    Structured evidence exposed to callers of the RAG system.
+
+    The existing source fields remain backward compatible while adding
+    stable evidence identity, retrieval ordering, canonical source
+    identity, and an optional source locator.
     """
 
+    evidence_id: str
     chunk_id: str
     document_id: str
     score: float
+    retrieval_rank: int
     content: str
     metadata: dict[str, Any]
+    source_ref: dict[str, Any] | None = None
+    locator: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -127,7 +135,13 @@ class RAGQueryService:
 
         answer = str(response.get("reply", ""))
 
-        sources = tuple(self._to_source(result) for result in results)
+        sources = tuple(
+            self._to_source(
+                result,
+                retrieval_rank=index,
+            )
+            for index, result in enumerate(results, start=1)
+        )
 
         return RAGQueryResult(
             answer=answer,
@@ -253,11 +267,27 @@ class RAGQueryService:
     @staticmethod
     def _to_source(
         result: RetrievalResult,
+        *,
+        retrieval_rank: int,
     ) -> RAGSource:
+        metadata = dict(result.chunk.metadata)
+
+        source_ref = metadata.get("source_ref")
+        if not isinstance(source_ref, dict):
+            source_ref = None
+
+        locator = metadata.get("locator")
+        if not isinstance(locator, dict):
+            locator = None
+
         return RAGSource(
+            evidence_id=f"evidence:{result.chunk.id}",
             chunk_id=result.chunk.id,
             document_id=result.chunk.document_id,
             score=result.score,
+            retrieval_rank=retrieval_rank,
             content=result.chunk.content,
-            metadata=dict(result.chunk.metadata),
+            metadata=metadata,
+            source_ref=dict(source_ref) if source_ref is not None else None,
+            locator=dict(locator) if locator is not None else None,
         )

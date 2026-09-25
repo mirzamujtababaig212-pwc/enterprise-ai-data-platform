@@ -409,6 +409,17 @@ def test_control_plane_rag_query_executes() -> None:
                 metadata={
                     "tenant_id": "tenant-a",
                     "source": "architecture.md",
+                    "source_ref": {
+                        "platform": "snowflake",
+                        "object_type": "table",
+                        "object_name": "ANALYTICS.CUSTOMERS",
+                        "namespace": "ANALYTICS",
+                        "environment": "prod",
+                    },
+                    "locator": {
+                        "type": "document_section",
+                        "value": "customer_overview",
+                    },
                 },
             )
         )
@@ -443,6 +454,21 @@ def test_control_plane_rag_query_executes() -> None:
     assert source["content"] == ("Enterprise AI Platform supports RAG and model routing.")
     assert source["metadata"]["source"] == "architecture.md"
     assert 0.0 <= source["score"] <= 1.0
+    assert source["evidence_id"] == "evidence:doc-query:chunk:0"
+    assert source["retrieval_rank"] == 1
+    assert source["source_ref"] == {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "ANALYTICS.CUSTOMERS",
+        "namespace": "ANALYTICS",
+        "environment": "prod",
+    }
+    assert source["locator"] == {
+        "type": "document_section",
+        "value": "customer_overview",
+    }
+    assert source["metadata"]["source_ref"] == source["source_ref"]
+    assert source["metadata"]["locator"] == source["locator"]
 
 
 def test_control_plane_rag_query_rejects_invalid_top_k() -> None:

@@ -67,6 +67,15 @@ async def test_rag_query_returns_answer_and_sources():
     assert result.sources[0].document_id == "doc-1"
     assert result.sources[0].chunk_id == "doc-1:chunk:0"
     assert result.sources[0].score == 0.95
+    assert result.sources[0].evidence_id == "evidence:doc-1:chunk:0"
+    assert result.sources[0].retrieval_rank == 1
+    assert result.sources[0].source_ref is None
+    assert result.sources[0].locator is None
+
+    assert result.sources[1].evidence_id == "evidence:doc-2:chunk:0"
+    assert result.sources[1].retrieval_rank == 2
+    assert result.sources[1].source_ref is None
+    assert result.sources[1].locator is None
 
     retriever.retrieve.assert_awaited_once_with(
         "What does the platform support?",
@@ -430,3 +439,63 @@ async def test_rag_query_does_not_emit_governance_event_when_retrieval_fails() -
 
     assert observer.events == []
     chat_service.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rag_query_propagates_source_ref_and_locator_to_evidence() -> None:
+    source_ref = {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "ANALYTICS.CUSTOMERS",
+        "namespace": "ANALYTICS",
+        "environment": "prod",
+    }
+    locator = {
+        "type": "document_section",
+        "value": "customer_overview",
+    }
+
+    retrieved = [
+        RetrievalResult(
+            chunk=DocumentChunk(
+                id="customer-doc:chunk:0",
+                document_id="customer-doc",
+                content="Customer data is stored in the analytics platform.",
+                metadata={
+                    "source_ref": source_ref,
+                    "locator": locator,
+                },
+                chunk_index=0,
+            ),
+            score=0.97,
+        ),
+    ]
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=retrieved)
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(
+        return_value={
+            "reply": "Customer data is stored in the analytics platform.",
+        }
+    )
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+    )
+
+    result = await service.query(
+        "Where is customer data stored?",
+        top_k=1,
+    )
+
+    source = result.sources[0]
+
+    assert source.evidence_id == "evidence:customer-doc:chunk:0"
+    assert source.retrieval_rank == 1
+    assert source.source_ref == source_ref
+    assert source.locator == locator
+    assert source.metadata["source_ref"] == source_ref
+    assert source.metadata["locator"] == locator

@@ -122,11 +122,15 @@ async def query_rag(
             answer=result.answer,
             sources=[
                 RAGSourceResponse(
+                    evidence_id=source.evidence_id,
                     chunk_id=source.chunk_id,
                     document_id=source.document_id,
                     score=source.score,
+                    retrieval_rank=source.retrieval_rank,
                     content=source.content,
                     metadata=source.metadata,
+                    source_ref=source.source_ref,
+                    locator=source.locator,
                 )
                 for source in result.sources
             ],

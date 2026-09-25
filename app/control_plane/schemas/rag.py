@@ -27,11 +27,15 @@ class RAGQueryRequest(BaseModel):
 
 
 class RAGSourceResponse(BaseModel):
+    evidence_id: str
     chunk_id: str
     document_id: str
     score: float
+    retrieval_rank: int
     content: str
     metadata: dict[str, Any]
+    source_ref: dict[str, Any] | None = None
+    locator: dict[str, Any] | None = None
 
 
 class RAGQueryResponse(BaseModel):
