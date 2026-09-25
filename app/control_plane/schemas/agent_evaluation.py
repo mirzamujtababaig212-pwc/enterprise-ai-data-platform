@@ -19,6 +19,10 @@ class AgentEvaluationLineageResponse(BaseModel):
     agent_name: str
     agent_version: str | None = None
     tenant_id: str | None = None
+    effective_model: str | None = None
+    effective_provider: str | None = None
+    model_policy_id: str | None = None
+    model_policy_version: str | None = None
 
 
 class AgentEvaluationMetricsResponse(BaseModel):

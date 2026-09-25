@@ -534,6 +534,10 @@ async def evaluate_agent_run(
             agent_name=evaluation.lineage.agent_name,
             agent_version=evaluation.lineage.agent_version,
             tenant_id=evaluation.lineage.tenant_id,
+            effective_model=evaluation.lineage.effective_model,
+            effective_provider=evaluation.lineage.effective_provider,
+            model_policy_id=evaluation.lineage.model_policy_id,
+            model_policy_version=evaluation.lineage.model_policy_version,
         ),
         metrics=AgentEvaluationMetricsResponse(
             execution_time_ms=evaluation.metrics.execution_time_ms,
@@ -615,6 +619,10 @@ async def list_agent_run_evaluations(
                     agent_name=evaluation.lineage.agent_name,
                     agent_version=evaluation.lineage.agent_version,
                     tenant_id=evaluation.lineage.tenant_id,
+                    effective_model=evaluation.lineage.effective_model,
+                    effective_provider=evaluation.lineage.effective_provider,
+                    model_policy_id=evaluation.lineage.model_policy_id,
+                    model_policy_version=evaluation.lineage.model_policy_version,
                 ),
                 metrics=AgentEvaluationMetricsResponse(
                     execution_time_ms=evaluation.metrics.execution_time_ms,

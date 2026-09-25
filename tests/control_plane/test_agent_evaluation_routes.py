@@ -180,6 +180,10 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
         "agent_name": "vehicle-agent",
         "agent_version": "1.2.3",
         "tenant_id": "tenant-1",
+        "effective_model": None,
+        "effective_provider": None,
+        "model_policy_id": None,
+        "model_policy_version": None,
     }
     assert body["metrics"]["steps_total"] == 3
     assert body["metrics"]["tool_calls_total"] == 2

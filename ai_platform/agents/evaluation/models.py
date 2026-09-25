@@ -23,6 +23,10 @@ class AgentRunEvidence:
     tool_calls_failed: int
     invalid_tool_calls: int
     governance_denials: int
+    effective_model: str | None = None
+    effective_provider: str | None = None
+    model_policy_id: str | None = None
+    model_policy_version: str | None = None
     error_type: str | None = None
     error_message: str | None = None
 

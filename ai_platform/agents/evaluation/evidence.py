@@ -70,6 +70,21 @@ def extract_evidence(
         )
     )
 
+    model_governance = (
+        run.request_snapshot.model_governance if run.request_snapshot is not None else None
+    )
+
+    effective_model = None
+    effective_provider = None
+    model_policy_id = None
+    model_policy_version = None
+
+    if model_governance is not None:
+        effective_model = model_governance.get("effective_model")
+        effective_provider = model_governance.get("effective_provider")
+        model_policy_id = model_governance.get("policy_id")
+        model_policy_version = model_governance.get("policy_version")
+
     return AgentRunEvidence(
         run_id=run.run_id,
         agent_name=run.agent_name,
@@ -85,6 +100,10 @@ def extract_evidence(
         tool_calls_failed=tool_calls_failed,
         invalid_tool_calls=invalid_tool_calls,
         governance_denials=governance_denials,
+        effective_model=effective_model,
+        effective_provider=effective_provider,
+        model_policy_id=model_policy_id,
+        model_policy_version=model_policy_version,
         error_type=run.error_type,
         error_message=run.error_message,
     )

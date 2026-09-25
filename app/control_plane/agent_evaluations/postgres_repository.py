@@ -162,6 +162,10 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 agent_name=lineage_data["agent_name"],
                 agent_version=lineage_data.get("agent_version"),
                 tenant_id=lineage_data.get("tenant_id"),
+                effective_model=lineage_data.get("effective_model"),
+                effective_provider=lineage_data.get("effective_provider"),
+                model_policy_id=lineage_data.get("model_policy_id"),
+                model_policy_version=lineage_data.get("model_policy_version"),
             ),
             metrics=AgentEvaluationMetrics(
                 execution_time_ms=metrics_data["execution_time_ms"],

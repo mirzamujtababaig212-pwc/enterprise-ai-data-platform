@@ -112,6 +112,10 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "agent_name": "enterprise-analyst",
             "agent_version": None,
             "tenant_id": "tenant-a",
+            "effective_model": "gpt-4.1-mini",
+            "effective_provider": None,
+            "model_policy_id": None,
+            "model_policy_version": None,
         }
 
         metrics = evaluation_payload["metrics"]
@@ -160,6 +164,10 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "agent_name": "enterprise-analyst",
                 "agent_version": None,
                 "tenant_id": "tenant-a",
+                "effective_model": "gpt-4.1-mini",
+                "effective_provider": None,
+                "model_policy_id": None,
+                "model_policy_version": None,
             }
 
             assert evaluation_record.metrics["task_completed"] is True
