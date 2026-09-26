@@ -1,3 +1,9 @@
+from .action import (
+    DRIFT_ACTION_POLICY_SCHEMA_VERSION,
+    DriftAction,
+    DriftActionDecision,
+    DriftActionPolicy,
+)
 from .drift import (
     DRIFT_EVALUATION_SCHEMA_VERSION,
     DriftEvaluation,
@@ -20,6 +26,10 @@ from .observation_window import (
 )
 
 __all__ = [
+    "DRIFT_ACTION_POLICY_SCHEMA_VERSION",
+    "DriftAction",
+    "DriftActionDecision",
+    "DriftActionPolicy",
     "DRIFT_EVALUATION_SCHEMA_VERSION",
     "DriftEvaluation",
     "build_drift_evaluation",
