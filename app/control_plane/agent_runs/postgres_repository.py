@@ -251,6 +251,48 @@ class PostgreSQLAgentRunRepository:
 
         return self.get(run_id)
 
+    def reject_waiting_for_approval(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+        commit: bool = True,
+    ) -> AgentRun | None:
+        statement = (
+            update(AgentRunRecord)
+            .where(
+                AgentRunRecord.run_id == run_id,
+                AgentRunRecord.status == AgentRunStatus.WAITING_FOR_APPROVAL.value,
+                AgentRunRecord.cancellation_requested.is_(False),
+            )
+            .values(
+                status=AgentRunStatus.REJECTED.value,
+                completed_at=completed_at,
+                error_type=error_type,
+                error_message=error_message,
+                lease_id=None,
+                lease_expires_at=None,
+            )
+        )
+
+        try:
+            result = self._session.execute(statement)
+
+            if result.rowcount != 1:
+                self._session.rollback()
+                return None
+
+            if commit:
+                self._session.commit()
+        except Exception:
+            if commit:
+                self._session.rollback()
+            raise
+
+        return self.get(run_id)
+
     def heartbeat(
         self,
         run_id: str,

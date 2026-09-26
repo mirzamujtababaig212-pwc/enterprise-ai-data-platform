@@ -55,6 +55,16 @@ class AgentRunRepository(Protocol):
         lease_expires_at: datetime,
     ) -> AgentRun | None: ...
 
+    def reject_waiting_for_approval(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+        commit: bool = True,
+    ) -> AgentRun | None: ...
+
     def heartbeat(
         self,
         run_id: str,

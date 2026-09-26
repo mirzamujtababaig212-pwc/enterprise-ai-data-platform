@@ -49,6 +49,14 @@ from app.control_plane.agent_runs.recovery_service import (
 from app.control_plane.agent_run_steps.postgres_repository import (
     PostgreSQLAgentRunStepsRepository,
 )
+from app.control_plane.approvals.continuation_service import (
+    AgentRunApprovalContinuationService,
+)
+from app.control_plane.approvals.coordinator import ControlPlaneApprovalCoordinator
+from app.control_plane.approvals.policy import SideEffectApprovalPolicy
+from app.control_plane.approvals.postgres_repository import (
+    PostgreSQLApprovalRequestRepository,
+)
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
 from app.control_plane.evaluation_service import EvaluationExecutionService
 from app.control_plane.mcp_management_service import MCPManagementService
@@ -152,6 +160,24 @@ def _agent_run_steps_repository_factory():
     return PostgreSQLAgentRunStepsRepository(SessionLocal())
 
 
+def _approval_request_repository_factory():
+    return PostgreSQLApprovalRequestRepository(SessionLocal())
+
+
+def _build_approval_coordinator() -> ControlPlaneApprovalCoordinator:
+    app_settings = Settings.from_environment()
+
+    return ControlPlaneApprovalCoordinator(
+        policy=SideEffectApprovalPolicy(
+            approval_risk_tiers=app_settings.approval_risk_tiers,
+        ),
+        repository_factory=_approval_request_repository_factory,
+    )
+
+
+_approval_coordinator = _build_approval_coordinator()
+
+
 _tool_execution_service = ToolExecutionService(
     _tool_registry,
     authorization_service=_tool_authorization_service,
@@ -159,6 +185,7 @@ _tool_execution_service = ToolExecutionService(
     governance_sink=_tool_governance_decision_sink,
     idempotency_store=_tool_idempotency_store,
     tenant_policy_engine=_tenant_policy_engine,
+    approval_coordinator=_approval_coordinator,
 )
 
 _vehicle_data_service = VehicleDataService()
@@ -478,6 +505,23 @@ async def get_agent_evaluation_application_service(
         agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
         agent_run_events_repository=PostgreSQLAgentRunEventsRepository(db),
         evaluation_repository=PostgreSQLAgentEvaluationRunsRepository(db),
+    )
+
+
+async def get_agent_run_approval_continuation_service(
+    db: Session = Depends(get_db),
+) -> AgentRunApprovalContinuationService:
+    await _initialize_agents()
+    app_settings = Settings.from_environment()
+
+    return AgentRunApprovalContinuationService(
+        runtime=_agent_runtime,
+        approval_repository=PostgreSQLApprovalRequestRepository(db),
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
+        checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
+        cancellation_registry=_agent_run_cancellation_registry,
+        lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 
 

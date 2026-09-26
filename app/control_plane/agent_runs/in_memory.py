@@ -144,6 +144,40 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = claimed
             return claimed
 
+    def reject_waiting_for_approval(
+        self,
+        run_id: str,
+        *,
+        completed_at: datetime,
+        error_type: str,
+        error_message: str,
+        commit: bool = True,
+    ) -> AgentRun | None:
+        del commit
+
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.WAITING_FOR_APPROVAL
+                or run.cancellation_requested
+            ):
+                return None
+
+            rejected = run.transition_to(AgentRunStatus.REJECTED).model_copy(
+                update={
+                    "completed_at": completed_at,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = rejected
+            return rejected
+
     def heartbeat(
         self,
         run_id: str,

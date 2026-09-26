@@ -465,6 +465,71 @@ def test_claim_waiting_for_approval_is_single_use() -> None:
     assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
 
 
+def test_reject_waiting_for_approval_marks_run_rejected() -> None:
+    repository = InMemoryAgentRunRepository()
+    waiting = make_run(
+        "run-approval-rejected",
+        status=AgentRunStatus.WAITING_FOR_APPROVAL,
+    )
+    repository.create(waiting)
+
+    completed_at = datetime(2026, 9, 19, 12, 3, tzinfo=UTC)
+
+    rejected = repository.reject_waiting_for_approval(
+        waiting.run_id,
+        completed_at=completed_at,
+        error_type="ApprovalRejected",
+        error_message="Payment approval was rejected.",
+    )
+
+    assert rejected is not None
+    assert rejected.status is AgentRunStatus.REJECTED
+    assert rejected.completed_at == completed_at
+    assert rejected.error_type == "ApprovalRejected"
+    assert rejected.error_message == "Payment approval was rejected."
+    assert rejected.lease_id is None
+    assert rejected.lease_expires_at is None
+    assert repository.get(waiting.run_id) == rejected
+
+
+def test_reject_waiting_for_approval_rejects_non_waiting_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    run = make_run(
+        "run-approval-reject-wrong-status",
+        status=AgentRunStatus.RUNNING,
+    )
+    repository.create(run)
+
+    result = repository.reject_waiting_for_approval(
+        run.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        error_type="ApprovalRejected",
+        error_message="Payment approval was rejected.",
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_reject_waiting_for_approval_rejects_cancelled_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    waiting = make_run(
+        "run-approval-reject-cancelled",
+        status=AgentRunStatus.WAITING_FOR_APPROVAL,
+    ).model_copy(update={"cancellation_requested": True})
+    repository.create(waiting)
+
+    result = repository.reject_waiting_for_approval(
+        waiting.run_id,
+        completed_at=datetime(2026, 9, 19, 12, 3, tzinfo=UTC),
+        error_type="ApprovalRejected",
+        error_message="Payment approval was rejected.",
+    )
+
+    assert result is None
+    assert repository.get(waiting.run_id) == waiting
+
+
 def test_claim_for_recovery_rejects_exhausted_run() -> None:
     repository = InMemoryAgentRunRepository()
     failed = make_run(

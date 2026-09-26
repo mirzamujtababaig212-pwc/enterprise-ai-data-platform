@@ -87,6 +87,15 @@ def test_agent_run_allows_pending_to_rejected_transition() -> None:
     assert rejected.status is AgentRunStatus.REJECTED
 
 
+def test_agent_run_allows_waiting_for_approval_to_rejected_transition() -> None:
+    run = make_run(status=AgentRunStatus.WAITING_FOR_APPROVAL)
+
+    rejected = run.transition_to(AgentRunStatus.REJECTED)
+
+    assert run.status is AgentRunStatus.WAITING_FOR_APPROVAL
+    assert rejected.status is AgentRunStatus.REJECTED
+
+
 def test_agent_run_allows_failed_to_running_for_recovery() -> None:
     run = make_run(status=AgentRunStatus.FAILED)
 

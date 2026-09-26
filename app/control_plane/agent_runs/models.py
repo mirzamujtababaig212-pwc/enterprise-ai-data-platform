@@ -42,6 +42,7 @@ _ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] 
             AgentRunStatus.RUNNING,
             AgentRunStatus.CANCELLED,
             AgentRunStatus.FAILED,
+            AgentRunStatus.REJECTED,
         }
     ),
     AgentRunStatus.COMPLETED: frozenset(),
