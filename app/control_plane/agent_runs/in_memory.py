@@ -244,6 +244,35 @@ class InMemoryAgentRunRepository:
             key=lambda run: (run.lease_expires_at, run.run_id),
         )[:limit]
 
+    def transition_to_waiting_for_approval_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        updated_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.lease_id != lease_id
+                or run.lease_expires_at is None
+                or run.lease_expires_at <= updated_at
+            ):
+                return None
+
+            waiting = run.transition_to(AgentRunStatus.WAITING_FOR_APPROVAL).model_copy(
+                update={
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                }
+            )
+
+            self._runs[run_id] = waiting
+            return waiting
+
     def complete_if_owner(
         self,
         run_id: str,

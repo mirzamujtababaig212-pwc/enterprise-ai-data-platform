@@ -996,3 +996,101 @@ def test_cancelled_run_is_terminal() -> None:
 
     with pytest.raises(Exception):
         cancelled.transition_to(AgentRunStatus.RUNNING)
+
+
+def test_transition_to_waiting_for_approval_if_owner_clears_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-approval-wait").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    updated_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.transition_to_waiting_for_approval_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        updated_at=updated_at,
+    )
+
+    assert result is not None
+    assert result.status is AgentRunStatus.WAITING_FOR_APPROVAL
+    assert result.completed_at is None
+    assert result.lease_id is None
+    assert result.lease_expires_at is None
+
+    restored = repository.get(run.run_id)
+    assert restored == result
+
+
+def test_transition_to_waiting_for_approval_if_owner_rejects_wrong_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-approval-wait-wrong-lease").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 5, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.transition_to_waiting_for_approval_if_owner(
+        run.run_id,
+        lease_id="lease-b",
+        updated_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_transition_to_waiting_for_approval_if_owner_rejects_expired_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-approval-wait-expired").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    result = repository.transition_to_waiting_for_approval_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        updated_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run
+
+
+def test_transition_to_waiting_for_approval_if_owner_rejects_exact_expiry() -> None:
+    repository = InMemoryAgentRunRepository()
+
+    run = make_run("run-approval-wait-exact-expiry").model_copy(
+        update={
+            "status": AgentRunStatus.RUNNING,
+            "lease_id": "lease-a",
+            "lease_expires_at": datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+        }
+    )
+    repository.create(run)
+
+    updated_at = datetime(2026, 9, 19, 12, 2, tzinfo=UTC)
+
+    result = repository.transition_to_waiting_for_approval_if_owner(
+        run.run_id,
+        lease_id="lease-a",
+        updated_at=updated_at,
+    )
+
+    assert result is None
+    assert repository.get(run.run_id) == run

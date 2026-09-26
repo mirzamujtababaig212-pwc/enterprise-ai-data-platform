@@ -15,6 +15,7 @@ from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapsho
 class AgentRunStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -33,6 +34,14 @@ _ALLOWED_AGENT_RUN_TRANSITIONS: dict[AgentRunStatus, frozenset[AgentRunStatus]] 
             AgentRunStatus.COMPLETED,
             AgentRunStatus.FAILED,
             AgentRunStatus.CANCELLED,
+            AgentRunStatus.WAITING_FOR_APPROVAL,
+        }
+    ),
+    AgentRunStatus.WAITING_FOR_APPROVAL: frozenset(
+        {
+            AgentRunStatus.RUNNING,
+            AgentRunStatus.CANCELLED,
+            AgentRunStatus.FAILED,
         }
     ),
     AgentRunStatus.COMPLETED: frozenset(),

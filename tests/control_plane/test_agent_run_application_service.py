@@ -9,6 +9,7 @@ import pytest
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
+    AgentExecutionWaitingForApprovalError,
 )
 from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
 from ai_platform.agents.policy import (
@@ -134,9 +135,30 @@ def _repository() -> Mock:
         repository.cancelled_run = cancelled
         return cancelled
 
+    def transition_to_waiting_for_approval_if_owner(
+        run_id: str,
+        *,
+        lease_id: str,
+        updated_at,
+    ) -> AgentRun:
+        running = repository.update.call_args_list[0].args[0]
+        waiting = running.transition_to(
+            AgentRunStatus.WAITING_FOR_APPROVAL,
+        ).model_copy(
+            update={
+                "lease_id": None,
+                "lease_expires_at": None,
+            }
+        )
+        repository.waiting_for_approval_run = waiting
+        return waiting
+
     repository.complete_if_owner.side_effect = complete_if_owner
     repository.fail_if_owner.side_effect = fail_if_owner
     repository.cancel_if_owner.side_effect = cancel_if_owner
+    repository.transition_to_waiting_for_approval_if_owner.side_effect = (
+        transition_to_waiting_for_approval_if_owner
+    )
 
     return repository
 
@@ -801,6 +823,66 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
         run_id=pending.run_id,
         execution_ownership_lost=runtime.run.await_args.kwargs["execution_ownership_lost"],
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_waiting_for_approval_lifecycle() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(
+        side_effect=AgentExecutionWaitingForApprovalError(
+            "Agent execution is waiting for human approval."
+        ),
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        AgentExecutionWaitingForApprovalError,
+        match="waiting for human approval",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input="Execute the approved workflow",
+                session_id="session-approval-1",
+                user_id="user-approval-1",
+            ),
+        )
+
+    assert repository.create.call_count == 1
+    assert repository.update.call_count == 1
+
+    pending = repository.create.call_args.args[0]
+    running = repository.update.call_args_list[0].args[0]
+    waiting = repository.waiting_for_approval_run
+
+    assert pending.status == AgentRunStatus.PENDING
+    assert running.status == AgentRunStatus.RUNNING
+    assert waiting.run_id == pending.run_id
+    assert waiting.status == AgentRunStatus.WAITING_FOR_APPROVAL
+    assert waiting.started_at == running.started_at
+    assert waiting.completed_at is None
+    assert waiting.error_type is None
+    assert waiting.error_message is None
+    assert waiting.lease_id is None
+    assert waiting.lease_expires_at is None
+
+    repository.transition_to_waiting_for_approval_if_owner.assert_called_once()
+    transition_call = repository.transition_to_waiting_for_approval_if_owner.call_args
+
+    assert transition_call.args[0] == running.run_id
+    assert transition_call.kwargs["lease_id"] == running.lease_id
+    assert transition_call.kwargs["updated_at"] is not None
+
+    repository.fail_if_owner.assert_not_called()
+    repository.cancel_if_owner.assert_not_called()
+    repository.complete_if_owner.assert_not_called()
+    runtime.run.assert_awaited_once()
 
 
 @pytest.mark.asyncio

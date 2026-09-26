@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.budget import ExecutionBudget
-from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
+from ai_platform.agents.exceptions import (
+    AgentExecutionControlSignal,
+    AgentExecutionOwnershipLostError,
+)
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
 from rag.governance import GovernancePolicy
@@ -501,6 +504,21 @@ class AgentRunApplicationService:
 
             raise
         except AgentExecutionOwnershipLostError:
+            raise
+        except AgentExecutionControlSignal:
+            paused_at = datetime.now(UTC)
+
+            paused_run = self._repository.transition_to_waiting_for_approval_if_owner(
+                run.run_id,
+                lease_id=lease_id,
+                updated_at=paused_at,
+            )
+
+            if paused_run is None:
+                raise RuntimeError(
+                    f"Agent run '{run.run_id}' lost lease ownership while pausing for approval."
+                )
+
             raise
         except Exception as exc:
             failed_at = datetime.now(UTC)

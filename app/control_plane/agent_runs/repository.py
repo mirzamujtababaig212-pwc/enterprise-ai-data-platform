@@ -83,6 +83,14 @@ class AgentRunRepository(Protocol):
         limit: int = 100,
     ) -> list[AgentRun]: ...
 
+    def transition_to_waiting_for_approval_if_owner(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        updated_at: datetime,
+    ) -> AgentRun | None: ...
+
     def complete_if_owner(
         self,
         run_id: str,
