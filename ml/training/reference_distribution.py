@@ -43,6 +43,36 @@ class ReferenceFeatureStatistics:
             },
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ReferenceFeatureStatistics":
+        if not isinstance(payload, dict):
+            raise TypeError("reference feature statistics payload must be a dict")
+
+        histogram = payload.get("histogram")
+        if not isinstance(histogram, dict):
+            raise ValueError("reference feature statistics histogram must be a dict")
+
+        quantiles = payload.get("quantiles")
+        if not isinstance(quantiles, dict):
+            raise ValueError("reference feature statistics quantiles must be a dict")
+
+        edges = histogram.get("edges")
+        counts = histogram.get("counts")
+        if not isinstance(edges, list) or not isinstance(counts, list):
+            raise ValueError("reference feature statistics histogram must contain lists")
+
+        return cls(
+            count=int(payload["count"]),
+            missing_count=int(payload["missing_count"]),
+            min=None if payload["min"] is None else float(payload["min"]),
+            max=None if payload["max"] is None else float(payload["max"]),
+            mean=None if payload["mean"] is None else float(payload["mean"]),
+            std=None if payload["std"] is None else float(payload["std"]),
+            quantiles={name: float(value) for name, value in quantiles.items()},
+            histogram_edges=tuple(float(value) for value in edges),
+            histogram_counts=tuple(int(value) for value in counts),
+        )
+
 
 @dataclass(frozen=True)
 class ReferenceFeatureDistribution:
@@ -70,6 +100,46 @@ class ReferenceFeatureDistribution:
             "feature_names": list(self.feature_names),
             "features": {name: statistics.as_dict() for name, statistics in self.features.items()},
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ReferenceFeatureDistribution":
+        if not isinstance(payload, dict):
+            raise TypeError("reference feature distribution payload must be a dict")
+
+        schema_version = payload.get("schema_version")
+        if schema_version != REFERENCE_DISTRIBUTION_SCHEMA_VERSION:
+            raise ValueError(
+                "unsupported reference distribution schema version: " f"{schema_version!r}"
+            )
+
+        feature_names = payload.get("feature_names")
+        features = payload.get("features")
+
+        if not isinstance(feature_names, list):
+            raise ValueError("reference feature distribution feature_names must be a list")
+
+        if not isinstance(features, dict):
+            raise ValueError("reference feature distribution features must be a dict")
+
+        missing_features = [name for name in feature_names if name not in features]
+        if missing_features:
+            raise ValueError(
+                "reference feature distribution is missing features: " + ", ".join(missing_features)
+            )
+
+        return cls(
+            schema_version=schema_version,
+            dataset_name=str(payload["dataset_name"]),
+            dataset_version=str(payload["dataset_version"]),
+            feature_contract_name=str(payload["feature_contract_name"]),
+            feature_contract_version=str(payload["feature_contract_version"]),
+            training_run_id=str(payload["training_run_id"]),
+            model_name=str(payload["model_name"]),
+            feature_names=tuple(feature_names),
+            features={
+                name: ReferenceFeatureStatistics.from_dict(features[name]) for name in feature_names
+            },
+        )
 
 
 def build_reference_distribution(

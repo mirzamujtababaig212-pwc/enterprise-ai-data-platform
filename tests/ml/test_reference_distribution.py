@@ -222,3 +222,91 @@ def test_reference_distribution_serializes_to_json_compatible_dict() -> None:
     assert payload["features"]["feature_a"]["count"] == 4
     assert len(payload["features"]["feature_a"]["histogram"]["edges"]) == 11
     assert len(payload["features"]["feature_a"]["histogram"]["counts"]) == 10
+
+
+def test_reference_distribution_round_trips_through_dict() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    original = build_reference_distribution(
+        dataframe,
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    )
+
+    restored = type(original).from_dict(original.as_dict())
+
+    assert restored == original
+    assert restored.features["feature_a"].histogram_edges == (
+        original.features["feature_a"].histogram_edges
+    )
+    assert restored.features["feature_a"].histogram_counts == (
+        original.features["feature_a"].histogram_counts
+    )
+
+
+def test_reference_distribution_from_dict_rejects_unsupported_schema() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    payload = build_reference_distribution(
+        dataframe,
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    ).as_dict()
+
+    payload["schema_version"] = "v2"
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported reference distribution schema version",
+    ):
+        build_reference_distribution(
+            dataframe,
+            _contract(),
+            dataset_name="test-dataset",
+            dataset_version="v1",
+            training_run_id="run-123",
+            model_name="TestModel",
+        ).from_dict(payload)
+
+
+def test_reference_distribution_from_dict_rejects_missing_feature() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    original = build_reference_distribution(
+        dataframe,
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    )
+
+    payload = original.as_dict()
+    del payload["features"]["feature_b"]
+
+    with pytest.raises(
+        ValueError,
+        match="reference feature distribution is missing features: feature_b",
+    ):
+        type(original).from_dict(payload)
