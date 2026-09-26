@@ -34,6 +34,8 @@ class VehicleRiskPrediction:
     risk_probability: float | None
     model_name: str
     model_alias: str
+    model_version: str
+    training_run_id: str
 
 
 class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]):
@@ -71,13 +73,31 @@ class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]
         self.model_uri = f"models:/{self.model_name}@{self.model_alias}"
 
         self.model = None
+        self.model_version: str | None = None
+        self.training_run_id: str | None = None
 
     def load(self) -> None:
         """
         Load the model referenced by the configured MLflow alias.
         """
 
-        self.model = mlflow.sklearn.load_model(self.model_uri)
+        model_version = mlflow.MlflowClient().get_model_version_by_alias(
+            name=self.model_name,
+            alias=self.model_alias,
+        )
+
+        self.model_version = str(model_version.version)
+
+        source_run_id = model_version.tags.get("source_run_id")
+        if not source_run_id:
+            raise ValueError(
+                f"Model '{self.model_name}' version '{self.model_version}' " "has no source_run_id"
+            )
+
+        self.training_run_id = source_run_id
+
+        resolved_model_uri = f"models:/{self.model_name}/{self.model_version}"
+        self.model = mlflow.sklearn.load_model(resolved_model_uri)
 
     def predict(
         self,
@@ -191,6 +211,8 @@ class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]
                     risk_probability=probability,
                     model_name=self.model_name,
                     model_alias=self.model_alias,
+                    model_version=self._require_model_version(),
+                    training_run_id=self._require_training_run_id(),
                 )
 
             except Exception as exc:
@@ -266,7 +288,21 @@ class VehicleRiskPredictor(InferenceService[pd.DataFrame, VehicleRiskPrediction]
 
         result["model_alias"] = self.model_alias
 
+        result["model_version"] = self._require_model_version()
+
+        result["training_run_id"] = self._require_training_run_id()
+
         return result
+
+    def _require_model_version(self) -> str:
+        if self.model_version is None:
+            raise RuntimeError("Model version is unavailable before model load")
+        return self.model_version
+
+    def _require_training_run_id(self) -> str:
+        if self.training_run_id is None:
+            raise RuntimeError("Training run ID is unavailable before model load")
+        return self.training_run_id
 
     @staticmethod
     def _validate_features(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mlflow
 import pandas as pd
 import pytest
 
@@ -60,6 +61,15 @@ def test_champion_model_inference(
 
     assert result.model_alias == "champion"
 
+    client = mlflow.MlflowClient()
+    champion = client.get_model_version_by_alias(
+        name="VehicleRiskModel",
+        alias="champion",
+    )
+
+    assert result.model_version == str(champion.version)
+    assert result.training_run_id == champion.tags["source_run_id"]
+
     if result.risk_probability is not None:
         assert 0.0 <= result.risk_probability <= 1.0
 
@@ -81,6 +91,11 @@ def test_batch_inference(
     assert "model_name" in result.columns
 
     assert "model_alias" in result.columns
+    assert "model_version" in result.columns
+    assert "training_run_id" in result.columns
+
+    assert result["model_version"].notna().all()
+    assert result["training_run_id"].notna().all()
 
 
 def test_missing_feature_rejected() -> None:
