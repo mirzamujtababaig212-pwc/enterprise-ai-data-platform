@@ -8,6 +8,7 @@ import pandas as pd
 from ai_platform.mlflow.client import MLflowManager
 from ml.contracts import FeatureContract, FeatureDefinition
 from ml.monitoring import (
+    DriftActionPolicy,
     DriftEvaluator,
     DriftPolicy,
     ObservationWindow,
@@ -259,12 +260,14 @@ def test_persist_drift_decision_end_to_end() -> None:
         evaluation.feature_psi,
         DriftPolicy(name="integration-default"),
     )
+    action_decision = DriftActionPolicy.evaluate(decision)
 
     manager = MLflowManager()
 
     run_id = persist_drift_decision(
         evaluation,
         decision,
+        action_decision,
         mlflow_manager=manager,
     )
 
@@ -287,6 +290,7 @@ def test_persist_drift_decision_end_to_end() -> None:
     assert run.data.tags["window_start"] == evaluation.window_start.isoformat()
     assert run.data.tags["window_end"] == evaluation.window_end.isoformat()
     assert run.data.tags["drift_overall_status"] == decision.overall_status.value
+    assert run.data.tags["drift_action"] == action_decision.action.value
 
     experiment = manager.client.get_experiment(run.info.experiment_id)
 
@@ -304,4 +308,5 @@ def test_persist_drift_decision_end_to_end() -> None:
     assert persisted_decision == {
         "evaluation": evaluation.as_dict(),
         "decision": decision.as_dict(),
+        "action": action_decision.as_dict(),
     }

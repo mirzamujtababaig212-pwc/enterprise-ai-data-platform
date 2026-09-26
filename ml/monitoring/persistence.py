@@ -4,6 +4,7 @@ import mlflow
 
 from ai_platform.mlflow.client import MLflowManager
 
+from .action import DriftActionDecision
 from .drift import DriftEvaluation
 from .observation_window import ObservationWindow
 from .policy import DriftDecision
@@ -111,6 +112,7 @@ def drift_decision_artifact_path(evaluation: DriftEvaluation) -> str:
 def persist_drift_decision(
     evaluation: DriftEvaluation,
     decision: DriftDecision,
+    action_decision: DriftActionDecision,
     *,
     mlflow_manager: MLflowManager | None = None,
 ) -> str:
@@ -119,6 +121,7 @@ def persist_drift_decision(
     payload = {
         "evaluation": evaluation.as_dict(),
         "decision": decision.as_dict(),
+        "action": action_decision.as_dict(),
     }
 
     tags: dict[str, str] = {
@@ -134,6 +137,7 @@ def persist_drift_decision(
         "window_start": evaluation.window_start.isoformat(),
         "window_end": evaluation.window_end.isoformat(),
         "drift_overall_status": decision.overall_status.value,
+        "drift_action": action_decision.action.value,
     }
 
     with manager.start_run(
