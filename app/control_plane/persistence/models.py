@@ -457,6 +457,116 @@ class AgentRunStepRecord(Base):
     )
 
 
+class ApprovalRequestRecord(Base):
+    __tablename__ = "approval_requests"
+
+    approval_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    step_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    call_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    tool_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    policy_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    policy_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    risk_tier: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    requested_action: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    policy_metadata: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    resolution_reason: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "step_id",
+            "call_id",
+            name="uq_approval_requests_run_step_call",
+        ),
+        Index(
+            "ix_approval_requests_run_step",
+            "run_id",
+            "step_id",
+        ),
+    )
+
+
 class ToolExecutionIdempotencyRecord(Base):
     __tablename__ = "tool_execution_idempotency"
 
