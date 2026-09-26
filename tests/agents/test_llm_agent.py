@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from app.control_plane.agent_run_steps.in_memory import InMemoryAgentRunStepsRepository
 from app.control_plane.agent_run_steps.models import AgentRunStep, AgentRunStepStatus
+from app.control_plane.approvals.coordinator import ControlPlaneApprovalCoordinator
+from app.control_plane.approvals.in_memory import InMemoryApprovalRequestRepository
+from app.control_plane.approvals.models import ApprovalStatus
+from app.control_plane.approvals.policy import SideEffectApprovalPolicy
 
 import asyncio
 
@@ -23,6 +27,7 @@ from ai_platform.agents.checkpoint import (
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
+    AgentExecutionWaitingForApprovalError,
     AgentLLMCallLimitError,
     AgentOutputPolicyError,
     AgentTokenLimitError,
@@ -2479,6 +2484,113 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
     assert step.output["query"] == "RAG"
     assert step.output["retrieved_count"] == 2
     assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_pauses_durable_tool_step_for_pending_approval() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    rag_tool = FakeRAGTool()
+    rag_tool._definition = ToolDefinition(
+        name="rag.search",
+        description="A test RAG search tool.",
+        metadata={
+            "source": "mcp",
+            "mcp_server": "research-mcp",
+            "risk_tier": "high",
+            "side_effect": True,
+            "capability": "enterprise_retrieval",
+            "permission_scope": "retrieval:execute",
+        },
+    )
+    await tool_registry.register(rag_tool)
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=ToolAuthorizationService(
+            ProvenanceToolAuthorizer(),
+        ),
+        idempotency_store=InMemoryToolExecutionIdempotencyStore(),
+        approval_coordinator=ControlPlaneApprovalCoordinator(
+            policy=SideEffectApprovalPolicy(
+                approval_risk_tiers={"high", "critical"},
+            ),
+            repository_factory=lambda: approval_repository,
+        ),
+    )
+
+    plan = build_enterprise_rag_analyst_plan()
+    repository = InMemoryAgentRunStepsRepository()
+    approval_repository = InMemoryApprovalRequestRepository()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-approval",
+            principal="agent:research",
+            tenant_id="tenant-acme",
+            session_id="session-approval",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+            execution_service=execution_service,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id="run-approval",
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        AgentExecutionWaitingForApprovalError,
+        match="waiting for human approval",
+    ):
+        await agent.run(context)
+
+    step = repository.get(
+        "run-approval",
+        "retrieve_evidence",
+    )
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.RUNNING
+    assert step.tool_name == "rag.search"
+    assert step.call_id == "call-123"
+    assert step.input == {"query": "RAG"}
+    assert step.output is None
+    assert step.completed_at is None
+
+    approvals = approval_repository.list_by_run("run-approval")
+
+    assert len(approvals) == 1
+
+    approval = approvals[0]
+
+    assert approval.status is ApprovalStatus.PENDING
+    assert approval.run_id == "run-approval"
+    assert approval.step_id == "retrieve_evidence"
+    assert approval.call_id == "call-123"
+    assert approval.tool_name == "rag.search"
+    assert approval.risk_tier == "high"
+    assert approval.policy_name == "side-effect-requires-approval"
+    assert approval.requested_action == "Execute side-effecting tool 'rag.search'"
+
+    assert rag_tool.execute_count == 0
 
 
 @pytest.mark.asyncio

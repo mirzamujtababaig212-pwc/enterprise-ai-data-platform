@@ -21,7 +21,15 @@ from tools.governance.audit import (
     ToolGovernanceDecisionRecord,
     ToolGovernanceDecisionSink,
 )
-from tools.execution.exceptions import ToolExecutionOwnershipLostError
+from tools.execution.approval import (
+    ToolApprovalCoordinator,
+    ToolApprovalDisposition,
+    ToolApprovalRequest,
+)
+from tools.execution.exceptions import (
+    ToolExecutionOwnershipLostError,
+    ToolExecutionWaitingForApprovalError,
+)
 from tools.execution.idempotency import (
     ToolExecutionIdempotencyKey,
     ToolExecutionIdempotencyStore,
@@ -101,6 +109,7 @@ class ToolExecutionService:
         governance_sink: ToolGovernanceDecisionSink | None = None,
         idempotency_store: ToolExecutionIdempotencyStore | None = None,
         tenant_policy_engine: TenantPolicyEngine | None = None,
+        approval_coordinator: ToolApprovalCoordinator | None = None,
         default_timeout_seconds: float = 30.0,
     ):
         if default_timeout_seconds <= 0:
@@ -112,6 +121,7 @@ class ToolExecutionService:
         self.governance_sink = governance_sink
         self.idempotency_store = idempotency_store
         self.tenant_policy_engine = tenant_policy_engine
+        self.approval_coordinator = approval_coordinator
         self.default_timeout_seconds = default_timeout_seconds
 
     async def _record_governance_decision(
@@ -161,6 +171,7 @@ class ToolExecutionService:
         principal: str | None = None,
         timeout_seconds: float | None = None,
         execution_context: ToolExecutionContext | dict[str, Any] | None = None,
+        step_id: str | None = None,
     ) -> ToolExecutionResult:
         execution_context = self._normalize_execution_context(execution_context)
 
@@ -355,6 +366,60 @@ class ToolExecutionService:
                     "enforcement_layer": governance_enforcement_layer,
                 },
             )
+
+        approval_decision = None
+
+        if (
+            self.approval_coordinator is not None
+            and step_id is not None
+            and execution_context is not None
+            and execution_context.run_id is not None
+            and execution_context.call_id is not None
+        ):
+            approval_decision = await self.approval_coordinator.evaluate(
+                ToolApprovalRequest(
+                    tool_name=tool_name,
+                    tool_metadata=tool.definition.metadata,
+                    arguments=arguments,
+                    run_id=execution_context.run_id,
+                    step_id=step_id,
+                    call_id=execution_context.call_id,
+                    agent_name=execution_context.agent_name,
+                    session_id=execution_context.session_id,
+                    user_id=execution_context.user_id,
+                    principal=principal,
+                    tenant_id=execution_context.tenant_id,
+                )
+            )
+
+            if approval_decision.disposition is ToolApprovalDisposition.PENDING:
+                approval_id = approval_decision.approval_id or "unknown"
+                raise ToolExecutionWaitingForApprovalError(
+                    f"Tool execution requires approval: "
+                    f"approval_id={approval_id}, "
+                    f"tool_name={tool_name}, "
+                    f"run_id={execution_context.run_id}, "
+                    f"step_id={step_id}, "
+                    f"call_id={execution_context.call_id}."
+                )
+
+            if approval_decision.disposition is ToolApprovalDisposition.REJECTED:
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=("Tool execution was rejected by the approval policy."),
+                    failure_category=ToolExecutionFailureCategory.APPROVAL_REJECTED,
+                    metadata={
+                        "approval": {
+                            "approval_id": approval_decision.approval_id,
+                            "disposition": approval_decision.disposition.value,
+                            "policy_name": approval_decision.policy_name,
+                            "policy_version": approval_decision.policy_version,
+                            "risk_tier": approval_decision.risk_tier,
+                            "requested_action": approval_decision.requested_action,
+                        }
+                    },
+                )
 
         idempotency_key = None
         claim_token = None

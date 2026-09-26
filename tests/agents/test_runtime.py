@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.lifecycle import AgentExecutionLifecyclePhase
 from ai_platform.agents.llm_messages import (
     assistant_message,
@@ -301,6 +302,49 @@ async def test_runtime_stops_lifecycle_when_pre_execution_fails() -> None:
         AgentExecutionLifecyclePhase.PREPARING,
         AgentExecutionLifecyclePhase.PRE_EXECUTION,
         AgentExecutionLifecyclePhase.FAILED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_mark_lifecycle_failed_for_approval_signal() -> None:
+    registry = InMemoryAgentRegistry()
+
+    class WaitingForApprovalAgent(LifecycleRuntimeAgent):
+        async def evaluate_pre_execution(
+            self,
+            context: AgentExecutionContext,
+        ) -> None:
+            self.phases.append("evaluate_pre_execution")
+            self.lifecycle_states.append(context.lifecycle_state)
+            raise AgentExecutionWaitingForApprovalError("approval required before tool execution")
+
+    agent = WaitingForApprovalAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    with pytest.raises(
+        AgentExecutionWaitingForApprovalError,
+        match="approval required before tool execution",
+    ):
+        await runtime.run(
+            "lifecycle-runtime-agent",
+            AgentRequest(input="Run lifecycle."),
+        )
+
+    assert agent.phases == [
+        "prepare_context",
+        "evaluate_pre_execution",
+    ]
+
+    assert len(agent.lifecycle_states) == 2
+    assert all(state is agent.lifecycle_states[0] for state in agent.lifecycle_states)
+
+    snapshot = await agent.lifecycle_states[0].snapshot()
+    assert snapshot.phase is AgentExecutionLifecyclePhase.PRE_EXECUTION
+    assert [transition.to_phase for transition in snapshot.transitions] == [
+        AgentExecutionLifecyclePhase.PREPARING,
+        AgentExecutionLifecyclePhase.PRE_EXECUTION,
     ]
 
 

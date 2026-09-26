@@ -4,7 +4,10 @@ import asyncio
 
 import pytest
 
-from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
+from ai_platform.agents.exceptions import (
+    AgentExecutionOwnershipLostError,
+    AgentExecutionWaitingForApprovalError,
+)
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.models import AgentDefinition, AgentRequest
@@ -17,6 +20,7 @@ from ai_platform.agents.tool_calls import (
 )
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.execution.context import ToolExecutionContext
+from tools.execution.exceptions import ToolExecutionWaitingForApprovalError
 from tools.models import ToolExecutionFailureCategory
 from ai_platform.agents.llm_messages import (
     assistant_message,
@@ -779,6 +783,66 @@ class FakeToolExecutionService:
                 "status": "healthy",
             },
         }
+
+
+class ApprovalWaitingToolExecutionService:
+    async def execute(
+        self,
+        tool_name: str,
+        arguments: dict,
+        *,
+        principal: str | None = None,
+        timeout_seconds: float | None = None,
+        execution_context: ToolExecutionContext | None = None,
+        step_id: str | None = None,
+    ) -> dict:
+        raise ToolExecutionWaitingForApprovalError("Tool execution requires approval.")
+
+
+@pytest.mark.asyncio
+async def test_execution_context_maps_tool_approval_wait_to_agent_signal() -> None:
+    definition = make_definition(
+        tool_names=("search",),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+        execution_service=ApprovalWaitingToolExecutionService(),
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Retrieve evidence.",
+            session_id="session-123",
+            user_id="user-456",
+            principal="api_key:test",
+            tenant_id="tenant-acme",
+        ),
+        tools=tools,
+        llm=AgentLLMContext(
+            FakeGateway(),
+            definition.llm_config,
+        ),
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+        run_id="run-789",
+    )
+
+    context.orchestration_state.start_step(0)
+
+    with pytest.raises(
+        AgentExecutionWaitingForApprovalError,
+        match="waiting for human approval",
+    ):
+        await context.execute_tool_calls(
+            (
+                AgentToolCall(
+                    call_id="call-123",
+                    name="search",
+                    arguments={"query": "RAG"},
+                ),
+            )
+        )
 
 
 @pytest.mark.asyncio

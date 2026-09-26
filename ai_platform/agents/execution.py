@@ -5,7 +5,10 @@ import asyncio
 from typing import Callable
 
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
-from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
+from ai_platform.agents.exceptions import (
+    AgentExecutionOwnershipLostError,
+    AgentExecutionWaitingForApprovalError,
+)
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
 from ai_platform.agents.orchestration import OrchestrationPlan, OrchestrationState
@@ -26,7 +29,10 @@ from ai_platform.agents.tool_context import AgentToolContext
 from tools.models import ToolExecutionResult
 from rag.governance import GovernancePolicy
 from tools.execution.context import ToolExecutionContext
-from tools.execution.exceptions import ToolExecutionOwnershipLostError
+from tools.execution.exceptions import (
+    ToolExecutionOwnershipLostError,
+    ToolExecutionWaitingForApprovalError,
+)
 
 
 class AgentExecutionContext:
@@ -263,13 +269,14 @@ class AgentExecutionContext:
 
         results: list[AgentToolResult] = []
 
+        current_step = self.orchestration_state.current_step
+        step_id = current_step.step_id if current_step is not None else None
+
         for tool_call in tool_calls:
             try:
-                result = await self.tools.execute(
-                    tool_call.name,
-                    tool_call.arguments,
-                    principal=self.principal,
-                    execution_context=ToolExecutionContext(
+                tool_execution_kwargs = {
+                    "principal": self.principal,
+                    "execution_context": ToolExecutionContext(
                         run_id=self.run_id,
                         call_id=tool_call.call_id,
                         governance_policy=self.governance_policy,
@@ -281,7 +288,21 @@ class AgentExecutionContext:
                         request_metadata=self.metadata,
                         execution_ownership_lost=self.execution_ownership_lost,
                     ),
+                }
+
+                if step_id is not None:
+                    tool_execution_kwargs["step_id"] = step_id
+
+                result = await self.tools.execute(
+                    tool_call.name,
+                    tool_call.arguments,
+                    **tool_execution_kwargs,
                 )
+            except ToolExecutionWaitingForApprovalError as exc:
+                raise AgentExecutionWaitingForApprovalError(
+                    "Agent execution is waiting for human approval."
+                ) from exc
+
             except ToolExecutionOwnershipLostError as exc:
                 raise AgentExecutionOwnershipLostError(
                     "Agent execution lost durable run ownership during tool execution."

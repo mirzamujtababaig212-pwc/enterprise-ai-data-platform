@@ -2439,3 +2439,224 @@ async def test_execute_continues_when_governance_sink_fails():
         "arguments": {"value": 42},
     }
     assert tool.execution_count == 1
+
+
+class RecordingApprovalCoordinator:
+    def __init__(self, decision) -> None:
+        self.decision = decision
+        self.requests = []
+
+    async def evaluate(self, request):
+        self.requests.append(request)
+        return self.decision
+
+
+@pytest.mark.asyncio
+async def test_approval_pending_stops_before_idempotency_and_tool_execution():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    from tools.execution.approval import (
+        ToolApprovalDecision,
+        ToolApprovalDisposition,
+    )
+    from tools.execution.exceptions import ToolExecutionWaitingForApprovalError
+
+    coordinator = RecordingApprovalCoordinator(
+        ToolApprovalDecision(
+            disposition=ToolApprovalDisposition.PENDING,
+            approval_id="approval-001",
+            policy_name="high-risk-tools",
+            policy_version="v1",
+            risk_tier="high",
+            requested_action="execute_tool",
+        )
+    )
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    service = ToolExecutionService(
+        registry,
+        approval_coordinator=coordinator,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-approval-001",
+        call_id="call-approval-001",
+        agent_name="test-agent",
+        session_id="session-001",
+        user_id="user-001",
+        principal="principal-001",
+        tenant_id="tenant-001",
+    )
+
+    with pytest.raises(ToolExecutionWaitingForApprovalError) as exc_info:
+        await service.execute(
+            "test_tool",
+            {"value": 1},
+            execution_context=context,
+            step_id="step-001",
+        )
+
+    assert "approval-001" in str(exc_info.value)
+    assert tool.execution_count == 0
+    assert len(coordinator.requests) == 1
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-approval-001",
+        call_id="call-approval-001",
+        tool_name="test_tool",
+    )
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.CLAIMED
+
+
+@pytest.mark.asyncio
+async def test_approval_approved_proceeds_to_tool_execution():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    from tools.execution.approval import (
+        ToolApprovalDecision,
+        ToolApprovalDisposition,
+    )
+
+    coordinator = RecordingApprovalCoordinator(
+        ToolApprovalDecision(
+            disposition=ToolApprovalDisposition.APPROVED,
+            approval_id="approval-002",
+            policy_name="high-risk-tools",
+            policy_version="v1",
+            risk_tier="high",
+            requested_action="execute_tool",
+        )
+    )
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    service = ToolExecutionService(
+        registry,
+        approval_coordinator=coordinator,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-approval-002",
+        call_id="call-approval-002",
+        agent_name="test-agent",
+        principal="principal-001",
+        tenant_id="tenant-001",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 2},
+        execution_context=context,
+        step_id="step-002",
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+    assert len(coordinator.requests) == 1
+    assert coordinator.requests[0].step_id == "step-002"
+
+
+@pytest.mark.asyncio
+async def test_approval_rejected_stops_before_idempotency_and_tool_execution():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    from tools.execution.approval import (
+        ToolApprovalDecision,
+        ToolApprovalDisposition,
+    )
+
+    coordinator = RecordingApprovalCoordinator(
+        ToolApprovalDecision(
+            disposition=ToolApprovalDisposition.REJECTED,
+            approval_id="approval-003",
+            policy_name="high-risk-tools",
+            policy_version="v1",
+            risk_tier="critical",
+            requested_action="execute_tool",
+        )
+    )
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    service = ToolExecutionService(
+        registry,
+        approval_coordinator=coordinator,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-approval-003",
+        call_id="call-approval-003",
+        agent_name="test-agent",
+        principal="principal-001",
+        tenant_id="tenant-001",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 3},
+        execution_context=context,
+        step_id="step-003",
+    )
+
+    assert result.success is False
+    assert result.failure_category is ToolExecutionFailureCategory.APPROVAL_REJECTED
+    assert result.metadata["approval"]["approval_id"] == "approval-003"
+    assert result.metadata["approval"]["disposition"] == "rejected"
+    assert tool.execution_count == 0
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-approval-003",
+        call_id="call-approval-003",
+        tool_name="test_tool",
+    )
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.CLAIMED
+
+
+@pytest.mark.asyncio
+async def test_approval_not_required_proceeds_normally():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    from tools.execution.approval import (
+        ToolApprovalDecision,
+        ToolApprovalDisposition,
+    )
+
+    coordinator = RecordingApprovalCoordinator(
+        ToolApprovalDecision(
+            disposition=ToolApprovalDisposition.NOT_REQUIRED,
+        )
+    )
+
+    service = ToolExecutionService(
+        registry,
+        approval_coordinator=coordinator,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-approval-004",
+        call_id="call-approval-004",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 4},
+        execution_context=context,
+        step_id="step-004",
+    )
+
+    assert result.success is True
+    assert tool.execution_count == 1
+    assert len(coordinator.requests) == 1

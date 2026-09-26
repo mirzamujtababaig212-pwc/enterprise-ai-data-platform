@@ -98,6 +98,7 @@ class AgentToolContext:
         principal: str | None = None,
         timeout_seconds: float | None = None,
         execution_context: ToolExecutionContext | None = None,
+        step_id: str | None = None,
     ):
         """
         Execute an agent-declared tool through ToolExecutionService.
@@ -122,10 +123,17 @@ class AgentToolContext:
                 f"Tool '{name}' is not declared for agent " f"'{self._definition.name}'."
             )
 
+        execution_kwargs = {
+            "principal": principal,
+            "timeout_seconds": timeout_seconds,
+            "execution_context": execution_context,
+        }
+
+        if step_id is not None:
+            execution_kwargs["step_id"] = step_id
+
         return await self._execution_service.execute(
             name,
             arguments,
-            principal=principal,
-            timeout_seconds=timeout_seconds,
-            execution_context=execution_context,
+            **execution_kwargs,
         )

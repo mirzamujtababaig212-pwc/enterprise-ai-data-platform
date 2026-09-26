@@ -153,5 +153,13 @@ class AgentExecutionDurationLimitError(AgentExecutionBudgetError):
         )
 
 
+class AgentExecutionControlSignal(RuntimeError):
+    """Base exception for non-failure execution control signals."""
+
+
+class AgentExecutionWaitingForApprovalError(AgentExecutionControlSignal):
+    """Raised when agent execution must pause for human approval."""
+
+
 class AgentExecutionOwnershipLostError(RuntimeError):
     """Raised when an agent execution loses ownership of its durable run."""

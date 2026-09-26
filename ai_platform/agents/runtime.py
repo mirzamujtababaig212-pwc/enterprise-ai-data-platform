@@ -9,6 +9,7 @@ from ai_platform.agents.contracts import (
     AgentRegistry,
 )
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.exceptions import AgentExecutionControlSignal
 from ai_platform.agents.llm_context import (
     AgentLLMContext,
     LLMGateway,
@@ -394,6 +395,8 @@ class AgentRuntime:
                     AgentExecutionLifecyclePhase.COMPLETED,
                     expected_phase=AgentExecutionLifecyclePhase.POST_EXECUTION,
                 )
+        except AgentExecutionControlSignal:
+            raise
         except Exception:
             if lifecycle_state.phase is not AgentExecutionLifecyclePhase.FAILED:
                 await lifecycle_state.transition(
