@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 
 from ml.contracts import FeatureContract
+from ml.training.reference_distribution import ReferenceFeatureDistribution
 
 
-OBSERVATION_WINDOW_SCHEMA_VERSION = "v1"
+OBSERVATION_WINDOW_SCHEMA_VERSION = "v2"
 OBSERVATION_HISTOGRAM_BINS = 10
 
 
@@ -27,6 +28,7 @@ class ObservationFeatureStatistics:
     quantiles: dict[str, float]
     histogram_edges: tuple[float, ...]
     histogram_counts: tuple[int, ...]
+    reference_histogram_counts: tuple[int, ...]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +43,7 @@ class ObservationFeatureStatistics:
                 "edges": list(self.histogram_edges),
                 "counts": list(self.histogram_counts),
             },
+            "reference_histogram_counts": list(self.reference_histogram_counts),
         }
 
 
@@ -121,6 +124,7 @@ def build_observation_window(
     model_version: str,
     model_alias: str,
     training_run_id: str,
+    reference_distribution: ReferenceFeatureDistribution | None = None,
 ) -> ObservationWindow:
     """Build a deterministic aggregate from production inference observations."""
 
@@ -180,6 +184,26 @@ def build_observation_window(
                 f"observations contain inconsistent {column}; " f"expected '{expected_value}'"
             )
 
+    if reference_distribution is not None:
+        if reference_distribution.model_name != model_name:
+            raise ValueError("reference distribution model_name does not match observation window")
+
+        if (
+            reference_distribution.feature_contract_name != feature_contract.name
+            or reference_distribution.feature_contract_version != feature_contract.version
+        ):
+            raise ValueError(
+                "reference distribution feature contract does not match observation window"
+            )
+
+        if reference_distribution.training_run_id != training_run_id:
+            raise ValueError(
+                "reference distribution training_run_id does not match observation window"
+            )
+
+        if reference_distribution.feature_names != feature_names:
+            raise ValueError("reference distribution features do not match observation window")
+
     features: dict[str, ObservationFeatureStatistics] = {}
 
     for feature in feature_contract.features:
@@ -205,6 +229,7 @@ def build_observation_window(
                 quantiles={},
                 histogram_edges=(),
                 histogram_counts=(),
+                reference_histogram_counts=(),
             )
         else:
             minimum = float(np.min(valid_values))
@@ -240,6 +265,28 @@ def build_observation_window(
                 histogram_edges = tuple(float(value) for value in histogram_edges_array)
                 histogram_counts = tuple(int(value) for value in histogram_counts_array)
 
+            reference_histogram_counts: tuple[int, ...] = ()
+
+            if reference_distribution is not None:
+                reference_statistics = reference_distribution.features[feature.name]
+                reference_edges = reference_statistics.histogram_edges
+
+                if reference_edges:
+                    reference_edges_array = np.asarray(reference_edges, dtype=float)
+                    reference_counts_array, _ = np.histogram(
+                        valid_values,
+                        bins=reference_edges_array,
+                    )
+
+                    underflow_count = int(np.sum(valid_values < reference_edges_array[0]))
+                    overflow_count = int(np.sum(valid_values > reference_edges_array[-1]))
+
+                    reference_histogram_counts = (
+                        underflow_count,
+                        *(int(value) for value in reference_counts_array),
+                        overflow_count,
+                    )
+
             statistics = ObservationFeatureStatistics(
                 count=count,
                 missing_count=missing_count,
@@ -250,6 +297,7 @@ def build_observation_window(
                 quantiles=quantiles,
                 histogram_edges=histogram_edges,
                 histogram_counts=histogram_counts,
+                reference_histogram_counts=reference_histogram_counts,
             )
 
         features[feature.name] = statistics

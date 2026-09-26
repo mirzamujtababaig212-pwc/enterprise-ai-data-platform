@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from ml.contracts import FeatureContract, FeatureDefinition
+from ml.training.reference_distribution import build_reference_distribution
 from ml.monitoring.observation_window import (
     OBSERVATION_HISTOGRAM_BINS,
     OBSERVATION_WINDOW_SCHEMA_VERSION,
@@ -45,6 +46,22 @@ def _observations() -> pd.DataFrame:
     )
 
 
+def _reference_distribution():
+    return build_reference_distribution(
+        pd.DataFrame(
+            {
+                "feature_a": [1.0, 2.0, 3.0, 4.0],
+                "feature_b": [10, 20, 30, 40],
+            }
+        ),
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    )
+
+
 def _window() -> object:
     return build_observation_window(
         _observations(),
@@ -56,6 +73,22 @@ def _window() -> object:
         model_version="2",
         model_alias="champion",
         training_run_id="run-123",
+        reference_distribution=_reference_distribution(),
+    )
+
+
+def _window_with_reference(observations: pd.DataFrame) -> object:
+    return build_observation_window(
+        observations,
+        _contract(),
+        window_id="window-001",
+        window_start=datetime(2026, 9, 25, tzinfo=UTC),
+        window_end=datetime(2026, 9, 26, tzinfo=UTC),
+        model_name="TestModel",
+        model_version="2",
+        model_alias="champion",
+        training_run_id="run-123",
+        reference_distribution=_reference_distribution(),
     )
 
 
@@ -98,6 +131,42 @@ def test_build_observation_window_calculates_feature_statistics() -> None:
     assert len(statistics.histogram_edges) == OBSERVATION_HISTOGRAM_BINS + 1
     assert len(statistics.histogram_counts) == OBSERVATION_HISTOGRAM_BINS
     assert sum(statistics.histogram_counts) == 4
+    assert statistics.reference_histogram_counts == (
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+    )
+
+
+def test_reference_histogram_counts_preserve_out_of_range_values() -> None:
+    observations = _observations().copy()
+    observations["feature_a"] = [0.0, 1.0, 2.0, 5.0]
+
+    result = _window_with_reference(observations)
+
+    assert result.features["feature_a"].reference_histogram_counts == (
+        1,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+    )
 
 
 def test_build_observation_window_calculates_prediction_statistics() -> None:
@@ -202,7 +271,7 @@ def test_observation_window_serializes_to_json_compatible_dict() -> None:
 
     payload = result.as_dict()
 
-    assert payload["schema_version"] == "v1"
+    assert payload["schema_version"] == "v2"
     assert payload["window_id"] == "window-001"
     assert payload["window_start"] == "2026-09-25T00:00:00+00:00"
     assert payload["window_end"] == "2026-09-26T00:00:00+00:00"
@@ -210,6 +279,20 @@ def test_observation_window_serializes_to_json_compatible_dict() -> None:
     assert payload["features"]["feature_a"]["count"] == 4
     assert len(payload["features"]["feature_a"]["histogram"]["edges"]) == 11
     assert len(payload["features"]["feature_a"]["histogram"]["counts"]) == 10
+    assert payload["features"]["feature_a"]["reference_histogram_counts"] == [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+    ]
     assert payload["predictions"]["class_counts"] == {
         "0": 2,
         "1": 2,
