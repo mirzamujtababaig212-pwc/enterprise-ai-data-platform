@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import mlflow.sklearn
 import pandas as pd
 import pytest
@@ -226,6 +228,34 @@ def test_vehicle_risk_training_end_to_end() -> None:
     assert run.info.status == "FINISHED"
 
     assert run.data.metrics["validation_accuracy"] == result.metrics["validation_accuracy"]
+
+    artifact_path = manager.client.download_artifacts(
+        result.run_id,
+        "reference/reference_feature_distribution.json",
+    )
+
+    with open(artifact_path, encoding="utf-8") as artifact_file:
+        reference_distribution = json.load(artifact_file)
+
+    assert reference_distribution["schema_version"] == "v1"
+    assert reference_distribution["dataset_name"] == "vehicle-risk-integration"
+    assert reference_distribution["dataset_version"] == "v1"
+    assert reference_distribution["feature_contract_name"] == "vehicle-risk"
+    assert reference_distribution["feature_contract_version"] == "v1"
+    assert reference_distribution["training_run_id"] == result.run_id
+    assert reference_distribution["model_name"] == MODEL_NAME
+    assert reference_distribution["feature_names"] == list(FEATURE_COLUMNS)
+    assert set(reference_distribution["features"]) == set(FEATURE_COLUMNS)
+
+    for feature_name in FEATURE_COLUMNS:
+        statistics = reference_distribution["features"][feature_name]
+        assert statistics["count"] == result.training_samples
+        assert statistics["missing_count"] == 0
+        assert statistics["min"] is not None
+        assert statistics["max"] is not None
+        assert statistics["mean"] is not None
+        assert statistics["std"] is not None
+        assert len(statistics["histogram"]["counts"]) in {1, 10}
 
 
 def test_vehicle_risk_training_rejects_missing_columns() -> None:

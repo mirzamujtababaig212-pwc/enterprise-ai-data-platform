@@ -1,0 +1,5 @@
+FROM ghcr.io/mlflow/mlflow:v3.15.2
+
+RUN pip install --no-cache-dir \
+    boto3==1.43.51 \
+    botocore==1.43.51

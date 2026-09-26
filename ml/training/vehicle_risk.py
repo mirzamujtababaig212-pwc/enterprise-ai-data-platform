@@ -28,6 +28,10 @@ from ml.models.vehicle_risk_features import (
     VEHICLE_RISK_FEATURE_CONTRACT,
 )
 
+from .reference_distribution import (
+    REFERENCE_DISTRIBUTION_ARTIFACT_PATH,
+    build_reference_distribution,
+)
 from .schemas import (
     TrainingConfig,
     TrainingResult,
@@ -141,6 +145,20 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
             )
 
             persist_evaluation_lineage(lineage)
+
+            reference_distribution = build_reference_distribution(
+                X_train=X_train,
+                feature_contract=VEHICLE_RISK_FEATURE_CONTRACT,
+                dataset_name=config.dataset_name,
+                dataset_version=config.dataset_version,
+                training_run_id=run.info.run_id,
+                model_name=MODEL_NAME,
+            )
+
+            mlflow.log_dict(
+                reference_distribution.as_dict(),
+                REFERENCE_DISTRIBUTION_ARTIFACT_PATH,
+            )
 
             mlflow.set_tag(
                 "quality_gate_enforced",
