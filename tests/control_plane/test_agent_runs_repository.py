@@ -372,6 +372,99 @@ def test_claim_for_recovery_assigns_lease() -> None:
     assert claimed.lease_expires_at == lease_expires_at
 
 
+def test_claim_waiting_for_approval_assigns_fresh_lease() -> None:
+    repository = InMemoryAgentRunRepository()
+    waiting = make_run(
+        "run-approval-continuation",
+        status=AgentRunStatus.WAITING_FOR_APPROVAL,
+        recovery_attempts=2,
+    )
+    repository.create(waiting)
+
+    lease_expires_at = datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+    claimed = repository.claim_waiting_for_approval(
+        waiting.run_id,
+        lease_id="approval-lease-1",
+        lease_expires_at=lease_expires_at,
+    )
+
+    assert claimed is not None
+    assert claimed.status is AgentRunStatus.RUNNING
+    assert claimed.started_at == waiting.started_at
+    assert claimed.recovery_attempts == waiting.recovery_attempts
+    assert claimed.lease_id == "approval-lease-1"
+    assert claimed.lease_expires_at == lease_expires_at
+    assert claimed.completed_at is None
+    assert claimed.error_type is None
+    assert claimed.error_message is None
+
+
+def test_claim_waiting_for_approval_rejects_non_waiting_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    run = make_run(
+        "run-approval-wrong-status",
+        status=AgentRunStatus.RUNNING,
+    )
+    repository.create(run)
+
+    claimed = repository.claim_waiting_for_approval(
+        run.run_id,
+        lease_id="approval-lease-2",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+
+    assert claimed is None
+    assert repository.get(run.run_id) == run
+
+
+def test_claim_waiting_for_approval_rejects_cancelled_run() -> None:
+    repository = InMemoryAgentRunRepository()
+    waiting = make_run(
+        "run-approval-cancelled",
+        status=AgentRunStatus.WAITING_FOR_APPROVAL,
+    ).model_copy(update={"cancellation_requested": True})
+    repository.create(waiting)
+
+    claimed = repository.claim_waiting_for_approval(
+        waiting.run_id,
+        lease_id="approval-lease-3",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+
+    assert claimed is None
+    assert repository.get(waiting.run_id) == waiting
+
+
+def test_claim_waiting_for_approval_is_single_use() -> None:
+    repository = InMemoryAgentRunRepository()
+    waiting = make_run(
+        "run-approval-single-use",
+        status=AgentRunStatus.WAITING_FOR_APPROVAL,
+    )
+    repository.create(waiting)
+
+    first = repository.claim_waiting_for_approval(
+        waiting.run_id,
+        lease_id="approval-lease-4",
+        lease_expires_at=datetime(2026, 9, 19, 12, 1, tzinfo=UTC),
+    )
+    second = repository.claim_waiting_for_approval(
+        waiting.run_id,
+        lease_id="approval-lease-5",
+        lease_expires_at=datetime(2026, 9, 19, 12, 2, tzinfo=UTC),
+    )
+
+    assert first is not None
+    assert second is None
+
+    restored = repository.get(waiting.run_id)
+    assert restored is not None
+    assert restored.status is AgentRunStatus.RUNNING
+    assert restored.lease_id == "approval-lease-4"
+    assert restored.lease_expires_at == datetime(2026, 9, 19, 12, 1, tzinfo=UTC)
+
+
 def test_claim_for_recovery_rejects_exhausted_run() -> None:
     repository = InMemoryAgentRunRepository()
     failed = make_run(

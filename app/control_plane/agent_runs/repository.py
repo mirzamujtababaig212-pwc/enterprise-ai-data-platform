@@ -47,6 +47,14 @@ class AgentRunRepository(Protocol):
         max_recovery_attempts: int,
     ) -> AgentRun | None: ...
 
+    def claim_waiting_for_approval(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None: ...
+
     def heartbeat(
         self,
         run_id: str,

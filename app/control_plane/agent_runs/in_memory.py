@@ -117,6 +117,33 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = claimed
             return claimed
 
+    def claim_waiting_for_approval(
+        self,
+        run_id: str,
+        *,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.WAITING_FOR_APPROVAL
+                or run.cancellation_requested
+            ):
+                return None
+
+            claimed = run.transition_to(AgentRunStatus.RUNNING).model_copy(
+                update={
+                    "lease_id": lease_id,
+                    "lease_expires_at": lease_expires_at,
+                }
+            )
+
+            self._runs[run_id] = claimed
+            return claimed
+
     def heartbeat(
         self,
         run_id: str,
