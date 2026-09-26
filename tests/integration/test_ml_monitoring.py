@@ -8,12 +8,16 @@ import pandas as pd
 from ai_platform.mlflow.client import MLflowManager
 from ml.contracts import FeatureContract, FeatureDefinition
 from ml.monitoring import (
+    DriftEvaluator,
+    DriftPolicy,
     ObservationWindow,
     build_observation_window,
 )
 from ml.monitoring.persistence import (
     MONITORING_EXPERIMENT_NAME,
+    drift_decision_artifact_path,
     observation_artifact_path,
+    persist_drift_decision,
     persist_observation_window,
 )
 
@@ -197,3 +201,107 @@ def test_persist_drift_evaluation_end_to_end() -> None:
         persisted_evaluation = json.load(artifact_file)
 
     assert persisted_evaluation == evaluation.as_dict()
+
+
+def test_persist_drift_decision_end_to_end() -> None:
+    from ml.monitoring.drift import build_drift_evaluation
+    from ml.training.reference_distribution import build_reference_distribution
+
+    training = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    observations = pd.DataFrame(
+        {
+            "feature_a": [0.0, 1.0, 2.0, 5.0],
+            "feature_b": [10, 20, 30, 40],
+            "risk": [0, 0, 1, 1],
+            "risk_probability": [0.1, 0.2, 0.8, 0.9],
+            "model_name": ["IntegrationModel"] * 4,
+            "model_version": ["7"] * 4,
+            "model_alias": ["champion"] * 4,
+            "training_run_id": ["training-run-123"] * 4,
+        }
+    )
+
+    reference = build_reference_distribution(
+        training,
+        _contract(),
+        dataset_name="integration-dataset",
+        dataset_version="v1",
+        training_run_id="training-run-123",
+        model_name="IntegrationModel",
+    )
+
+    window = build_observation_window(
+        observations,
+        _contract(),
+        window_id="integration-decision-window-001",
+        model_name="IntegrationModel",
+        model_version="7",
+        model_alias="champion",
+        training_run_id="training-run-123",
+        window_start=datetime(2026, 9, 25, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 26, tzinfo=timezone.utc),
+        reference_distribution=reference,
+    )
+
+    evaluation = build_drift_evaluation(
+        reference_distribution=reference,
+        observation_window=window,
+        evaluation_id="integration-decision-001",
+    )
+
+    decision = DriftEvaluator.evaluate(
+        evaluation.feature_psi,
+        DriftPolicy(name="integration-default"),
+    )
+
+    manager = MLflowManager()
+
+    run_id = persist_drift_decision(
+        evaluation,
+        decision,
+        mlflow_manager=manager,
+    )
+
+    assert run_id
+
+    run = manager.get_run(run_id)
+
+    assert run.info.status == "FINISHED"
+    assert run.info.run_name == "drift-decision-integration-decision-001"
+
+    assert run.data.tags["monitoring_type"] == "drift_decision"
+    assert run.data.tags["drift_evaluation_id"] == evaluation.evaluation_id
+    assert run.data.tags["model_name"] == evaluation.model_name
+    assert run.data.tags["model_version"] == evaluation.model_version
+    assert run.data.tags["model_alias"] == evaluation.model_alias
+    assert run.data.tags["training_run_id"] == evaluation.training_run_id
+    assert run.data.tags["observation_window_id"] == evaluation.observation_window_id
+    assert run.data.tags["feature_contract_name"] == evaluation.feature_contract_name
+    assert run.data.tags["feature_contract_version"] == evaluation.feature_contract_version
+    assert run.data.tags["window_start"] == evaluation.window_start.isoformat()
+    assert run.data.tags["window_end"] == evaluation.window_end.isoformat()
+    assert run.data.tags["drift_overall_status"] == decision.overall_status.value
+
+    experiment = manager.client.get_experiment(run.info.experiment_id)
+
+    assert experiment is not None
+    assert experiment.name == MONITORING_EXPERIMENT_NAME
+
+    artifact_path = manager.client.download_artifacts(
+        run_id,
+        drift_decision_artifact_path(evaluation),
+    )
+
+    with open(artifact_path, encoding="utf-8") as artifact_file:
+        persisted_decision = json.load(artifact_file)
+
+    assert persisted_decision == {
+        "evaluation": evaluation.as_dict(),
+        "decision": decision.as_dict(),
+    }
