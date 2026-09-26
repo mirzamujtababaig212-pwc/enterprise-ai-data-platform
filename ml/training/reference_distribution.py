@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -140,6 +142,22 @@ class ReferenceFeatureDistribution:
                 name: ReferenceFeatureStatistics.from_dict(features[name]) for name in feature_names
             },
         )
+
+
+def load_reference_distribution(
+    artifact_path: str | Path,
+) -> ReferenceFeatureDistribution:
+    """Load a persisted reference distribution JSON artifact."""
+
+    artifact_path = Path(artifact_path)
+
+    if not artifact_path.is_file():
+        raise FileNotFoundError(f"Reference distribution artifact not found: {artifact_path}")
+
+    with artifact_path.open(encoding="utf-8") as artifact_file:
+        payload = json.load(artifact_file)
+
+    return ReferenceFeatureDistribution.from_dict(payload)
 
 
 def build_reference_distribution(

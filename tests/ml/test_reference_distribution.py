@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -8,6 +11,7 @@ from ml.training.reference_distribution import (
     REFERENCE_HISTOGRAM_BINS,
     REFERENCE_DISTRIBUTION_SCHEMA_VERSION,
     build_reference_distribution,
+    load_reference_distribution,
 )
 
 
@@ -310,3 +314,74 @@ def test_reference_distribution_from_dict_rejects_missing_feature() -> None:
         match="reference feature distribution is missing features: feature_b",
     ):
         type(original).from_dict(payload)
+
+
+def test_load_reference_distribution_from_json_artifact(tmp_path: Path) -> None:
+    dataframe = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    original = build_reference_distribution(
+        dataframe,
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    )
+
+    artifact_path = tmp_path / "reference_feature_distribution.json"
+    artifact_path.write_text(
+        json.dumps(original.as_dict()),
+        encoding="utf-8",
+    )
+
+    restored = load_reference_distribution(artifact_path)
+
+    assert restored == original
+
+
+def test_load_reference_distribution_rejects_missing_artifact(
+    tmp_path: Path,
+) -> None:
+    artifact_path = tmp_path / "missing.json"
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Reference distribution artifact not found",
+    ):
+        load_reference_distribution(artifact_path)
+
+
+def test_load_reference_distribution_validates_schema(tmp_path: Path) -> None:
+    dataframe = pd.DataFrame(
+        {
+            "feature_a": [1.0, 2.0, 3.0, 4.0],
+            "feature_b": [10, 20, 30, 40],
+        }
+    )
+
+    payload = build_reference_distribution(
+        dataframe,
+        _contract(),
+        dataset_name="test-dataset",
+        dataset_version="v1",
+        training_run_id="run-123",
+        model_name="TestModel",
+    ).as_dict()
+    payload["schema_version"] = "v2"
+
+    artifact_path = tmp_path / "reference_feature_distribution.json"
+    artifact_path.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported reference distribution schema version",
+    ):
+        load_reference_distribution(artifact_path)
