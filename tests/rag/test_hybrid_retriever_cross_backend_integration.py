@@ -15,11 +15,15 @@ from rag.evaluation.lineage import (
     HybridRetrievalConfiguration,
     RetrievalEvaluationArtifact,
 )
-from rag.evaluation.models import RetrievalEvaluationCase
-from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.comparison.regression_policy import RetrievalRegressionPolicy
-from rag.evaluation.models import RetrievalEvaluationResult
+from rag.evaluation.composite_workflow import CompositeEvaluationWorkflow
+from rag.evaluation.external import ExternalEvaluationReleasePolicy
+from rag.evaluation.models import RetrievalEvaluationCase, RetrievalEvaluationResult
+from rag.evaluation.policy import RetrievalEvaluationPolicy
 from rag.evaluation.stores.postgres import PostgreSQLRetrievalEvaluationRunStore
+from rag.evaluation.stores.release_decision import (
+    PostgreSQLRetrievalEvaluationReleaseDecisionStore,
+)
 from rag.evaluation.workflow import RetrievalEvaluationWorkflow
 from rag.evaluation.datasets.vehicle_retrieval_quality import (
     VEHICLE_QUALITY_EMBEDDING_IDENTITY,
@@ -489,6 +493,19 @@ async def test_real_hybrid_baseline_persists_and_drives_regression_decision() ->
         assert candidate.regression.result.passed is False
         assert candidate.release_passed is False
 
+        release_decision = CompositeEvaluationWorkflow.release_decision(
+            run=candidate,
+            external_release_policy=ExternalEvaluationReleasePolicy(),
+        )
+
+        assert release_decision.passed is False
+        assert release_decision.errors == ("native: retrieval regression policy failed",)
+        assert release_decision.native.run_id == candidate_run_id
+        assert release_decision.native.passed is False
+        assert release_decision.native.errors == ("retrieval regression policy failed",)
+        assert release_decision.external.passed is True
+        assert release_decision.external.errors == ()
+
         comparison = candidate.regression.comparison
         assert comparison.metrics["recall_at_k"].baseline == pytest.approx(
             baseline.evaluation.recall_at_k
@@ -506,6 +523,27 @@ async def test_real_hybrid_baseline_persists_and_drives_regression_decision() ->
             candidate_session.close()
 
         assert restored_candidate is not None
+
+        decision_session = session_factory()
+        try:
+            decision_repository = PostgreSQLRetrievalEvaluationReleaseDecisionStore(
+                decision_session
+            )
+            await decision_repository.save(release_decision)
+
+            restored_release_decision = await decision_repository.get(candidate_run_id)
+        finally:
+            decision_session.close()
+
+        assert restored_release_decision is not None
+        assert restored_release_decision.run_id == candidate_run_id
+        assert restored_release_decision.passed is False
+        assert restored_release_decision.errors == ("native: retrieval regression policy failed",)
+        assert restored_release_decision.native.run_id == candidate_run_id
+        assert restored_release_decision.native.passed is False
+        assert restored_release_decision.native.errors == ("retrieval regression policy failed",)
+        assert restored_release_decision.external.passed is True
+        assert restored_release_decision.external.errors == ()
         assert restored_candidate.lineage == candidate.lineage
         assert restored_candidate.regression is not None
         assert restored_candidate.regression.baseline_run_id == baseline_run_id
@@ -520,6 +558,15 @@ async def test_real_hybrid_baseline_persists_and_drives_regression_decision() ->
     finally:
         cleanup_session = session_factory()
         try:
+            cleanup_session.execute(
+                text(
+                    "DELETE FROM retrieval_evaluation_release_decisions "
+                    "WHERE run_id = :candidate_run_id"
+                ),
+                {"candidate_run_id": candidate_run_id},
+            )
+            cleanup_session.commit()
+
             cleanup_session.execute(
                 text(
                     "DELETE FROM retrieval_evaluation_runs "
