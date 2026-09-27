@@ -19,6 +19,7 @@ from ai_platform.agents.tool_calls import AgentToolCall
 from app.control_plane.persistence.models import (
     AgentRunCheckpointRecord,
     AgentRunRecord,
+    MemoryItemRecord,
     ToolExecutionIdempotencyRecord,
 )
 from app.control_plane.tool_execution.postgres_idempotency import (
@@ -52,6 +53,8 @@ from app.control_plane.agent_runs.recovery_service import (
 from app.control_plane.agent_runs.request_snapshot import (
     AgentRunRequestSnapshot,
 )
+from memory.service import MemoryService
+from memory.stores.postgres import PostgreSQLMemoryStore
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",
@@ -292,6 +295,188 @@ class CrashBoundaryCheckpointHandler:
             )
         finally:
             session.close()
+
+
+def test_postgres_recovery_preserves_durable_memory_namespace() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "pg-memory-recovery-boundary-e2e"
+    namespace = "pg-memory-recovery-boundary"
+    lease_id = "memory-recovery-initial-lease"
+    memory_item = None
+
+    session = session_factory()
+
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Recover the fleet-42 memory context.",
+            session_id="session-memory-recovery",
+            user_id="user-memory-recovery",
+            principal="api_key:memory-recovery-principal",
+            tenant_id="tenant-memory-recovery",
+            memory_namespace=namespace,
+            metadata={
+                "request_id": "memory-recovery-request",
+                "source": "integration-test",
+            },
+        )
+
+        memory_service = MemoryService(
+            PostgreSQLMemoryStore(session_factory),
+        )
+
+        import asyncio
+
+        memory_item = asyncio.run(
+            memory_service.remember(
+                "Fleet-42 had a successful recovery deployment.",
+                namespace=namespace,
+                memory_type="episodic",
+                metadata={
+                    "source": "memory-recovery-integration-test",
+                },
+            )
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="recoverable-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                principal=request.principal,
+                tenant_id=request.tenant_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                lease_id=lease_id,
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        checkpoint_repository.save(
+            make_checkpoint(run_id),
+            lease_id=lease_id,
+        )
+
+        failed = run_repository.fail_if_owner(
+            run_id,
+            lease_id=lease_id,
+            completed_at=datetime.now(UTC),
+            error_type="SimulatedProcessCrash",
+            error_message="simulated interruption before recovery",
+        )
+
+        assert failed is not None
+        assert failed.status == AgentRunStatus.FAILED
+
+        fresh_memory_service = MemoryService(
+            PostgreSQLMemoryStore(session_factory),
+        )
+
+        recovered_requests = []
+
+        class MemoryRecoveryRuntime(FakeRuntime):
+            async def resume(
+                self,
+                agent_name,
+                request,
+                checkpoint,
+                *,
+                run_id=None,
+                lease_id=None,
+                execution_ownership_lost=None,
+            ):
+                recovered_requests.append(request)
+
+                return await super().resume(
+                    agent_name,
+                    request,
+                    checkpoint,
+                    run_id=run_id,
+                    lease_id=lease_id,
+                    execution_ownership_lost=execution_ownership_lost,
+                )
+
+        runtime = MemoryRecoveryRuntime()
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            lease_seconds=60,
+            max_recovery_attempts=3,
+        )
+
+        result = asyncio.run(recovery_service.recover(run_id))
+
+        assert result.response.output == "Recovered from PostgreSQL checkpoint."
+        assert len(recovered_requests) == 1
+
+        recovered_request = recovered_requests[0]
+
+        assert recovered_request.tenant_id == "tenant-memory-recovery"
+        assert recovered_request.principal == "api_key:memory-recovery-principal"
+        assert recovered_request.memory_namespace == namespace
+
+        recalled = asyncio.run(
+            fresh_memory_service.recall(
+                recovered_request.memory_namespace,
+                memory_type="episodic",
+                limit=10,
+            )
+        )
+
+        assert [item.id for item in recalled] == [memory_item.id]
+        assert recalled[0].content == memory_item.content
+        assert recalled[0].namespace == namespace
+
+        isolated = asyncio.run(
+            fresh_memory_service.recall(
+                "different-memory-namespace",
+                memory_type="episodic",
+                limit=10,
+            )
+        )
+
+        assert isolated == []
+
+    finally:
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+
+        if memory_item is not None:
+            cleanup_memory = session_factory()
+            try:
+                cleanup_memory.execute(
+                    delete(MemoryItemRecord).where(
+                        MemoryItemRecord.id == memory_item.id,
+                    )
+                )
+                cleanup_memory.commit()
+            finally:
+                cleanup_memory.close()
+
+        session.close()
+        engine.dispose()
 
 
 def test_postgres_recovery_replays_completed_tool_from_before_checkpoint() -> None:
