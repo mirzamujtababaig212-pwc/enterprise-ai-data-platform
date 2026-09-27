@@ -24,6 +24,7 @@ class AgentExecutionEventType(StrEnum):
 
     TOOL_AUTHORIZATION_DECISION = "tool.authorization.decision"
     GOVERNANCE_DECISION = "governance.decision"
+    APPROVAL_DECISION = "approval.decision"
 
     ORCHESTRATION_STEP_STARTED = "orchestration.step.started"
     ORCHESTRATION_STEP_COMPLETED = "orchestration.step.completed"

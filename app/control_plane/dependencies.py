@@ -533,6 +533,7 @@ async def get_agent_run_approval_continuation_service(
         checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
         cancellation_registry=_agent_run_cancellation_registry,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
+        observer=_agent_observer,
         override_authorizer=ConfiguredApprovalOverrideAuthorizer(
             app_settings.approval_override_principals,
         ),

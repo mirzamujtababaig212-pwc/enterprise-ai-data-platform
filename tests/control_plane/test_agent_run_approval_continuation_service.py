@@ -11,6 +11,10 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.exceptions import AgentExecutionControlSignal
 from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
 from app.control_plane.agent_run_steps.models import (
     AgentRunStep,
     AgentRunStepStatus,
@@ -135,6 +139,19 @@ def _checkpoint(
     )
 
 
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events: list[AgentExecutionEvent] = []
+
+    async def record(self, event: AgentExecutionEvent) -> None:
+        self.events.append(event)
+
+
+class FailingObserver:
+    async def record(self, event: AgentExecutionEvent) -> None:
+        raise RuntimeError("observer failure")
+
+
 def _service(
     *,
     approval: ApprovalRequest | None = None,
@@ -143,6 +160,7 @@ def _service(
     checkpoint: AgentExecutionCheckpoint | None = None,
     override_repository: MagicMock | None = None,
     override_authorizer: ConfiguredApprovalOverrideAuthorizer | None = None,
+    observer: object | None = None,
 ):
     runtime = MagicMock()
     runtime.resume = AsyncMock(
@@ -219,6 +237,7 @@ def _service(
             override_repository=override_repository,
             lease_seconds=60,
             override_authorizer=override_authorizer,
+            observer=observer,
         ),
         runtime,
         approval_repository,
@@ -234,6 +253,7 @@ async def test_approved_continuation_resumes_and_completes_run() -> None:
     run = _run()
     step = _step()
     checkpoint = _checkpoint()
+    observer = RecordingObserver()
 
     (
         service,
@@ -247,6 +267,7 @@ async def test_approved_continuation_resumes_and_completes_run() -> None:
         run=run,
         step=step,
         checkpoint=checkpoint,
+        observer=observer,
     )
 
     response = await service.continue_approval(
@@ -278,6 +299,65 @@ async def test_approved_continuation_resumes_and_completes_run() -> None:
 
     agent_run_repository.complete_if_owner.assert_called_once()
 
+    assert len(observer.events) == 1
+    event = observer.events[0]
+    assert event.event_type is AgentExecutionEventType.APPROVAL_DECISION
+    assert event.agent_name == run.agent_name
+    assert event.run_id == RUN_ID
+    assert event.session_id == run.session_id
+    assert event.user_id == run.user_id
+    assert event.tool_name == approval.tool_name
+    assert event.call_id == approval.call_id
+    assert event.step_id == approval.step_id
+    assert event.metadata == {
+        "approval_id": APPROVAL_ID,
+        "decision": "approved",
+        "actor": "approver-1",
+        "reason": "Approved for execution",
+    }
+
+
+@pytest.mark.asyncio
+async def test_approval_observer_failure_does_not_block_approved_continuation() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        observer=FailingObserver(),
+    )
+
+    response = await service.continue_approval(
+        APPROVAL_ID,
+        status=ApprovalStatus.APPROVED,
+        resolved_by="approver-1",
+        resolution_reason="Approved for execution",
+    )
+
+    assert response.output == "Payment completed"
+    approval_repository.update_status.assert_called_once_with(
+        APPROVAL_ID,
+        ApprovalStatus.APPROVED,
+        resolved_by="approver-1",
+        resolution_reason="Approved for execution",
+        commit=True,
+    )
+    agent_run_repository.claim_waiting_for_approval.assert_called_once()
+    runtime.resume.assert_awaited_once()
+    agent_run_repository.complete_if_owner.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_rejected_continuation_rejects_run_without_resuming() -> None:
@@ -285,6 +365,7 @@ async def test_rejected_continuation_rejects_run_without_resuming() -> None:
     run = _run()
     step = _step()
     checkpoint = _checkpoint()
+    observer = RecordingObserver()
 
     (
         service,
@@ -298,6 +379,7 @@ async def test_rejected_continuation_rejects_run_without_resuming() -> None:
         run=run,
         step=step,
         checkpoint=checkpoint,
+        observer=observer,
     )
 
     agent_run_repository.reject_waiting_for_approval.return_value = run.model_copy(
@@ -347,6 +429,23 @@ async def test_rejected_continuation_rejects_run_without_resuming() -> None:
     runtime.resume.assert_not_awaited()
     agent_run_repository.complete_if_owner.assert_not_called()
 
+    assert len(observer.events) == 1
+    event = observer.events[0]
+    assert event.event_type is AgentExecutionEventType.APPROVAL_DECISION
+    assert event.agent_name == run.agent_name
+    assert event.run_id == RUN_ID
+    assert event.session_id == run.session_id
+    assert event.user_id == run.user_id
+    assert event.tool_name == approval.tool_name
+    assert event.call_id == approval.call_id
+    assert event.step_id == approval.step_id
+    assert event.metadata == {
+        "approval_id": APPROVAL_ID,
+        "decision": "rejected",
+        "actor": "approver-1",
+        "reason": "Payment not authorized",
+    }
+
 
 @pytest.mark.asyncio
 async def test_already_resolved_approval_can_continue_waiting_run_without_reresolving() -> None:
@@ -354,6 +453,7 @@ async def test_already_resolved_approval_can_continue_waiting_run_without_rereso
     run = _run()
     step = _step()
     checkpoint = _checkpoint()
+    observer = RecordingObserver()
 
     (
         service,
@@ -367,6 +467,7 @@ async def test_already_resolved_approval_can_continue_waiting_run_without_rereso
         run=run,
         step=step,
         checkpoint=checkpoint,
+        observer=observer,
     )
 
     await service.continue_approval(
@@ -378,6 +479,7 @@ async def test_already_resolved_approval_can_continue_waiting_run_without_rereso
     approval_repository.update_status.assert_not_called()
     agent_run_repository.claim_waiting_for_approval.assert_called_once()
     runtime.resume.assert_awaited_once()
+    assert observer.events == []
 
 
 @pytest.mark.asyncio
@@ -495,6 +597,7 @@ async def test_authorized_override_persists_and_resumes_without_approving_reques
     run = _run()
     step = _step()
     checkpoint = _checkpoint()
+    observer = RecordingObserver()
 
     override_repository = MagicMock()
     override_repository.get_by_approval.return_value = None
@@ -512,6 +615,7 @@ async def test_authorized_override_persists_and_resumes_without_approving_reques
         step=step,
         checkpoint=checkpoint,
         override_repository=override_repository,
+        observer=observer,
     )
 
     response = await service.override_approval(
@@ -536,6 +640,23 @@ async def test_authorized_override_persists_and_resumes_without_approving_reques
     agent_run_repository.claim_waiting_for_approval.assert_called_once()
     runtime.resume.assert_awaited_once()
     agent_run_repository.complete_if_owner.assert_called_once()
+
+    assert len(observer.events) == 1
+    event = observer.events[0]
+    assert event.event_type is AgentExecutionEventType.APPROVAL_DECISION
+    assert event.agent_name == run.agent_name
+    assert event.run_id == RUN_ID
+    assert event.session_id == run.session_id
+    assert event.user_id == run.user_id
+    assert event.tool_name == approval.tool_name
+    assert event.call_id == approval.call_id
+    assert event.step_id == approval.step_id
+    assert event.metadata == {
+        "approval_id": APPROVAL_ID,
+        "decision": "overridden",
+        "actor": "api_key:operator-1",
+        "reason": "Emergency operational bypass.",
+    }
 
 
 @pytest.mark.asyncio

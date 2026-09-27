@@ -543,6 +543,7 @@ def test_list_agent_runs_serializes_all_lifecycle_statuses() -> None:
     assert {run["status"] for run in runs} == {
         "pending",
         "running",
+        "waiting_for_approval",
         "completed",
         "failed",
         "rejected",

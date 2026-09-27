@@ -12,6 +12,11 @@ from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
 )
 from ai_platform.agents.models import AgentResponse
+from ai_platform.agents.observability import (
+    AgentExecutionEvent,
+    AgentExecutionEventType,
+)
+from ai_platform.agents.observer import AgentExecutionObserver
 from ai_platform.agents.runtime import AgentRuntime
 from app.control_plane.agent_runs.cancellation import (
     AgentRunCancellationRegistry,
@@ -55,6 +60,7 @@ class AgentRunApprovalContinuationService:
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
         override_authorizer: ApprovalOverrideAuthorizer | None = None,
+        observer: AgentExecutionObserver | None = None,
     ) -> None:
         self._runtime = runtime
         self._approval_repository = approval_repository
@@ -65,6 +71,7 @@ class AgentRunApprovalContinuationService:
         self._cancellation_registry = cancellation_registry
         self._lease_seconds = lease_seconds
         self._override_authorizer = override_authorizer
+        self._observer = observer
 
     async def continue_approval(
         self,
@@ -184,6 +191,17 @@ class AgentRunApprovalContinuationService:
                     "after approval rejection."
                 )
 
+            await self._emit_approval_decision(
+                run=run,
+                approval_id=approval_id,
+                decision="rejected",
+                actor=resolved_by,
+                reason=rejection_reason,
+                tool_name=approval.tool_name,
+                call_id=approval.call_id,
+                step_id=approval.step_id,
+            )
+
             raise RuntimeError(rejection_reason)
 
         checkpoint = self._checkpoints_repository.get_latest(approval.run_id)
@@ -214,6 +232,17 @@ class AgentRunApprovalContinuationService:
                 resolved_by=resolved_by,
                 resolution_reason=resolution_reason,
                 commit=True,
+            )
+
+            await self._emit_approval_decision(
+                run=run,
+                approval_id=approval_id,
+                decision="approved",
+                actor=resolved_by,
+                reason=resolution_reason,
+                tool_name=approval.tool_name,
+                call_id=approval.call_id,
+                step_id=approval.step_id,
             )
 
         return await self._resume_waiting_run(
@@ -337,11 +366,65 @@ class AgentRunApprovalContinuationService:
             commit=True,
         )
 
+        await self._emit_approval_decision(
+            run=run,
+            approval_id=approval_id,
+            decision="overridden",
+            actor=actor,
+            reason=reason,
+            tool_name=approval.tool_name,
+            call_id=approval.call_id,
+            step_id=approval.step_id,
+        )
+
         return await self._resume_waiting_run(
             run=run,
             checkpoint=checkpoint,
             request_snapshot=request_snapshot,
         )
+
+    async def _emit_approval_decision(
+        self,
+        *,
+        run: AgentRun,
+        approval_id: str,
+        decision: str,
+        actor: str,
+        reason: str | None = None,
+        tool_name: str | None = None,
+        call_id: str | None = None,
+        step_id: str | None = None,
+    ) -> None:
+        if self._observer is None:
+            return
+
+        metadata: dict[str, object] = {
+            "approval_id": approval_id,
+            "decision": decision,
+            "actor": actor,
+        }
+
+        if reason is not None:
+            metadata["reason"] = reason
+
+        try:
+            await self._observer.record(
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.APPROVAL_DECISION,
+                    agent_name=run.agent_name,
+                    run_id=run.run_id,
+                    session_id=run.session_id,
+                    user_id=run.user_id,
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    step_id=step_id,
+                    metadata=metadata,
+                )
+            )
+        except Exception:
+            # Approval audit observability must never change the
+            # authoritative approval/continuation outcome.
+            pass
 
     async def _resume_waiting_run(
         self,
