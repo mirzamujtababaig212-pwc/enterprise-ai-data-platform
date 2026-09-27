@@ -37,6 +37,9 @@ def _step(
     tool_name: str | None = None,
     call_id: str | None = None,
     failure_category: str | None = None,
+    input: object | None = None,
+    output: object | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> AgentRunStep:
     return AgentRunStep(
         run_id="run-1",
@@ -47,6 +50,9 @@ def _step(
         tool_name=tool_name,
         call_id=call_id,
         failure_category=failure_category,
+        input=input,
+        output=output,
+        metadata=metadata or {},
     )
 
 
@@ -257,3 +263,87 @@ def test_extract_evidence_handles_missing_run_timestamps() -> None:
     evidence = extract_evidence(run, [], [])
 
     assert evidence.execution_time_ms == 0.0
+
+
+def test_extract_evidence_counts_rag_queries_and_sources_from_provenance() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 3,
+                    "sources": [
+                        {"chunk_id": "chunk-1"},
+                        {"chunk_id": "chunk-2"},
+                        {"chunk_id": "chunk-3"},
+                    ],
+                }
+            },
+        ),
+        _step(
+            step_id="step-2",
+            step_index=1,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-2",
+            metadata={
+                "rag_provenance": {
+                    "sources": [
+                        {"chunk_id": "chunk-4"},
+                        {"chunk_id": "chunk-5"},
+                    ],
+                }
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.rag_queries_total == 2
+    assert evidence.rag_sources_retrieved_total == 5
+
+
+def test_extract_evidence_falls_back_to_rag_output_results() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "query": "What is RAG?",
+                "results": [
+                    {"chunk_id": "chunk-1"},
+                    {"chunk_id": "chunk-2"},
+                ],
+                "retrieved_count": 2,
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.rag_queries_total == 1
+    assert evidence.rag_sources_retrieved_total == 2
+
+
+def test_extract_evidence_defaults_rag_metrics_for_non_rag_runs() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="search",
+            call_id="call-1",
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.rag_queries_total == 0
+    assert evidence.rag_sources_retrieved_total == 0

@@ -28,7 +28,8 @@ def extract_evidence(
     """Build deterministic evaluation evidence from durable agent-run records.
 
     This function is intentionally read-only. It does not inspect prompts,
-    tool arguments, tool outputs, or secrets.
+    tool arguments, or secrets. RAG step metadata and bounded retrieval
+    provenance are evaluated as durable evidence.
     """
     execution_time_ms = 0.0
 
@@ -70,6 +71,36 @@ def extract_evidence(
         )
     )
 
+    rag_queries_total = 0
+    rag_sources_retrieved_total = 0
+
+    for step in steps:
+        provenance = step.metadata.get("rag_provenance")
+        is_rag_step = step.tool_name == "rag.search" or isinstance(provenance, dict)
+
+        if not is_rag_step:
+            continue
+
+        rag_queries_total += 1
+
+        if isinstance(provenance, dict):
+            retrieved_count = provenance.get("retrieved_count")
+
+            if isinstance(retrieved_count, int) and retrieved_count >= 0:
+                rag_sources_retrieved_total += retrieved_count
+                continue
+
+            sources = provenance.get("sources")
+            if isinstance(sources, (list, tuple)):
+                rag_sources_retrieved_total += len(sources)
+                continue
+
+        output = step.output
+        if isinstance(output, dict):
+            results = output.get("results")
+            if isinstance(results, (list, tuple)):
+                rag_sources_retrieved_total += len(results)
+
     model_governance = (
         run.request_snapshot.model_governance if run.request_snapshot is not None else None
     )
@@ -100,6 +131,8 @@ def extract_evidence(
         tool_calls_failed=tool_calls_failed,
         invalid_tool_calls=invalid_tool_calls,
         governance_denials=governance_denials,
+        rag_queries_total=rag_queries_total,
+        rag_sources_retrieved_total=rag_sources_retrieved_total,
         effective_model=effective_model,
         effective_provider=effective_provider,
         model_policy_id=model_policy_id,

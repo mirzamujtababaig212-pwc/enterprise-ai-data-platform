@@ -23,6 +23,8 @@ class AgentRunEvidence:
     tool_calls_failed: int
     invalid_tool_calls: int
     governance_denials: int
+    rag_queries_total: int = 0
+    rag_sources_retrieved_total: int = 0
     effective_model: str | None = None
     effective_provider: str | None = None
     model_policy_id: str | None = None
@@ -47,6 +49,8 @@ class AgentRunEvidence:
             "tool_calls_failed",
             "invalid_tool_calls",
             "governance_denials",
+            "rag_queries_total",
+            "rag_sources_retrieved_total",
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
