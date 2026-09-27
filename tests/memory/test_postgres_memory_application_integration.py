@@ -344,3 +344,151 @@ asyncio.run(main())
         f"stdout:\n{result.stdout}\n"
         f"stderr:\n{result.stderr}"
     )
+
+
+def test_runtime_round_trip_uses_application_postgres_hybrid_memory_retrieval() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+
+    script = """
+import asyncio
+
+from app.control_plane.dependencies import (
+    _agent_registry,
+    _agent_runtime,
+    _memory_service,
+)
+from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
+
+
+class MemoryWritingAgent:
+    definition = AgentDefinition(
+        name="postgres-hybrid-memory-writer",
+        description="Writes deterministic episodic memory for integration testing.",
+        system_prompt="You are a deterministic memory-writing test agent.",
+        enabled=True,
+        memory_write_enabled=True,
+    )
+
+    async def run(self, context):
+        return AgentResponse(
+            agent_name=self.definition.name,
+            output="Fleet-42 completed its recovery deployment successfully.",
+            session_id=context.session_id,
+        )
+
+
+class MemoryReadingAgent:
+    definition = AgentDefinition(
+        name="postgres-hybrid-memory-reader",
+        description="Reads deterministic episodic memory for integration testing.",
+        system_prompt="You are a deterministic memory-reading test agent.",
+        enabled=True,
+    )
+
+    async def run(self, context):
+        self.last_context = context
+        self.last_messages = context.build_llm_messages()
+        return AgentResponse(
+            agent_name=self.definition.name,
+            output="Memory retrieval completed.",
+            session_id=context.session_id,
+        )
+
+
+async def main() -> None:
+    writer = MemoryWritingAgent()
+    reader = MemoryReadingAgent()
+
+    await _agent_registry.register(writer)
+    await _agent_registry.register(reader)
+
+    namespace = "postgres-hybrid-runtime-integration"
+
+    written = await _agent_runtime.run(
+        writer.definition.name,
+        AgentRequest(
+            input="Record the fleet recovery deployment result.",
+            memory_namespace=namespace,
+        ),
+    )
+
+    assert written.output == (
+        "Fleet-42 completed its recovery deployment successfully."
+    )
+
+    try:
+        persisted = await _memory_service.recall(
+            namespace,
+            memory_type="episodic",
+            limit=10,
+        )
+
+        assert len(persisted) == 1
+        assert persisted[0].content == written.output
+        assert persisted[0].namespace == namespace
+        assert persisted[0].memory_type == "episodic"
+
+        retrieved = await _agent_runtime.run(
+            reader.definition.name,
+            AgentRequest(
+                input=written.output,
+                memory_namespace=namespace,
+            ),
+        )
+
+        assert retrieved.output == "Memory retrieval completed."
+
+        context = reader.last_context
+        assert context is not None
+        assert context.memory is not None
+        assert len(context.memory.episodic) == 1
+        assert context.memory.episodic[0].id == persisted[0].id
+        assert context.memory.episodic[0].content == written.output
+
+        assert len(context.memory.episodic_results) == 1
+
+        result = context.memory.episodic_results[0]
+        assert result.item.id == persisted[0].id
+        assert result.item.content == written.output
+        assert result.retrieval_method == "hybrid.rrf"
+        assert result.retrieval_score is not None
+        assert "semantic_rank" in result.provenance
+        assert "lexical_rank" in result.provenance
+
+        messages = reader.last_messages
+        memory_messages = [
+            message
+            for message in messages
+            if message.role == "system"
+            and "following information was retrieved from agent memory" in message.content
+        ]
+
+        assert len(memory_messages) == 1
+        assert written.output in memory_messages[0].content
+    finally:
+        await _memory_service.forget(persisted[0].id)
+
+
+asyncio.run(main())
+"""
+
+    environment = os.environ.copy()
+    environment["MEMORY_STORE_BACKEND"] = "postgres"
+    environment["POSTGRES_HOST"] = "localhost"
+    environment["POSTGRES_PORT"] = "5432"
+    environment["DEFAULT_PROVIDER"] = "mock"
+    environment["DEFAULT_EMBEDDING_MODEL"] = "mock-embedding"
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, (
+        "Application PostgreSQL hybrid memory integration failed.\\n"
+        f"stdout:\\n{result.stdout}\\n"
+        f"stderr:\\n{result.stderr}"
+    )
