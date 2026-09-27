@@ -19,6 +19,11 @@ from ai_platform.agents.models import (
     AgentRequest,
     AgentResponse,
 )
+from ai_platform.agents.policy import (
+    PolicyViolationError,
+    TenantPolicy,
+    TenantPolicyEngine,
+)
 from app.control_plane.agent_runs.models import (
     AgentRun,
     AgentRunExecutionResult,
@@ -450,6 +455,58 @@ async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
         "request_id": "req-123",
         "source": "api",
     }
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_memory_namespace_removed_by_current_tenant_policy():
+    repository = RecordingRepository()
+
+    request = AgentRequest(
+        input="Find vehicle incidents for fleet-42",
+        session_id="session-123",
+        user_id="user-123",
+        principal="api_key:recovery-principal",
+        tenant_id="tenant-acme",
+        memory_namespace="fleet-memory",
+    )
+
+    repository.create(
+        failed_run(
+            request_snapshot=AgentRunRequestSnapshot.from_request(request),
+        )
+    )
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_memory_namespaces=frozenset({"different-memory"}),
+        )
+    )
+
+    runtime = FakeRuntime()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        tenant_policy_engine=policy_engine,
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="Memory namespace.*not allowed",
+    ):
+        await service.recover("run-123")
+
+    assert runtime.calls == []
+
+    recovered = repository.get("run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.FAILED
+    assert recovered.error_type == "PolicyViolationError"
+    assert "fleet-memory" in recovered.error_message
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from ai_platform.agents.observability import (
     AgentExecutionEventType,
 )
 from ai_platform.agents.observer import AgentExecutionObserver
+from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.runtime import AgentRuntime
 
 from app.control_plane.agent_checkpoints.repository import (
@@ -66,6 +67,7 @@ class AgentRunRecoveryService:
         observer: AgentExecutionObserver | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         tool_idempotency_store: ToolExecutionIdempotencyStore | None = None,
+        tenant_policy_engine: TenantPolicyEngine | None = None,
         lease_seconds: int = 60,
         max_recovery_attempts: int = 3,
     ) -> None:
@@ -77,6 +79,7 @@ class AgentRunRecoveryService:
         self._checkpoints_repository = checkpoints_repository
         self._observer = observer
         self._tool_idempotency_store = tool_idempotency_store
+        self._tenant_policy_engine = tenant_policy_engine
         self._lease_seconds = lease_seconds
         self._max_recovery_attempts = max_recovery_attempts
 
@@ -323,6 +326,28 @@ class AgentRunRecoveryService:
                 user_id=run.user_id,
                 principal=run.principal,
             )
+
+            if (
+                request.tenant_id is not None
+                and request.memory_namespace is not None
+                and self._tenant_policy_engine is not None
+            ):
+                self._tenant_policy_engine.authorize_memory_namespace(
+                    tenant_id=request.tenant_id,
+                    memory_namespace=request.memory_namespace,
+                    operation="read",
+                )
+
+                agent_definition = await self._runtime.get_agent_definition(
+                    run.agent_name,
+                )
+
+                if agent_definition.memory_write_enabled:
+                    self._tenant_policy_engine.authorize_memory_namespace(
+                        tenant_id=request.tenant_id,
+                        memory_namespace=request.memory_namespace,
+                        operation="write",
+                    )
 
             response = await self._runtime.resume(
                 run.agent_name,

@@ -553,6 +553,7 @@ async def get_agent_run_recovery_service(
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
         tool_idempotency_store=_tool_idempotency_store,
+        tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
     )
@@ -571,6 +572,7 @@ async def build_agent_run_recovery_service(
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
         tool_idempotency_store=_tool_idempotency_store,
+        tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
     )
