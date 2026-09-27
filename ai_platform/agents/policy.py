@@ -106,6 +106,8 @@ class TenantPolicy:
     allow_cross_tenant_data: bool = False
     allowed_models: FrozenSet[str] | None = None
     allowed_providers: FrozenSet[str] | None = None
+    allowed_memory_namespaces: FrozenSet[str] | None = None
+    blocked_memory_namespaces: FrozenSet[str] = field(default_factory=frozenset)
     output_governance_enabled: bool = False
     blocked_output_patterns: FrozenSet[str] = field(default_factory=frozenset)
     redact_output_patterns: FrozenSet[str] = field(default_factory=frozenset)
@@ -122,6 +124,8 @@ class TenantPolicy:
         for field_name, values in (
             ("allowed_models", self.allowed_models),
             ("allowed_providers", self.allowed_providers),
+            ("allowed_memory_namespaces", self.allowed_memory_namespaces),
+            ("blocked_memory_namespaces", self.blocked_memory_namespaces),
         ):
             if values is not None and any(not value.strip() for value in values):
                 raise ValueError(f"{field_name} must not contain empty values")
@@ -271,6 +275,39 @@ class TenantPolicyEngine:
             policy_id=policy.policy_id,
             policy_version=policy.policy_version,
         )
+
+    def authorize_memory_namespace(
+        self,
+        tenant_id: str,
+        memory_namespace: str,
+        operation: str = "read",
+    ) -> None:
+        """Authorize access to a tenant-scoped logical memory namespace."""
+
+        policy = self.get_policy(tenant_id)
+
+        if not isinstance(memory_namespace, str) or not memory_namespace.strip():
+            raise ValueError("Memory namespace must be a non-empty string.")
+
+        if operation not in {"read", "write"}:
+            raise ValueError("Memory operation must be 'read' or 'write'.")
+
+        normalized_namespace = memory_namespace.strip()
+
+        if normalized_namespace in policy.blocked_memory_namespaces:
+            raise PolicyViolationError(
+                f"Memory namespace '{normalized_namespace}' is explicitly blocked "
+                f"for tenant '{tenant_id}'"
+            )
+
+        if (
+            policy.allowed_memory_namespaces is not None
+            and normalized_namespace not in policy.allowed_memory_namespaces
+        ):
+            raise PolicyViolationError(
+                f"Memory namespace '{normalized_namespace}' is not allowed "
+                f"for tenant '{tenant_id}'"
+            )
 
     def validate_tool_execution(
         self,

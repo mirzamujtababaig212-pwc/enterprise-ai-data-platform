@@ -249,6 +249,84 @@ def test_tenant_policies_are_parsed(
     assert policy.allow_cross_tenant_data is False
 
 
+def test_tenant_policies_parse_memory_namespace_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICY_ENFORCEMENT_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_memory_namespaces": [
+                        "fleet-42",
+                        "project-alpha",
+                    ],
+                    "blocked_memory_namespaces": [
+                        "restricted",
+                    ],
+                }
+            ]
+        ),
+    )
+
+    settings = Settings.from_environment()
+
+    policy = settings.tenant_policies[0]
+
+    assert policy.allowed_memory_namespaces == frozenset(
+        {
+            "fleet-42",
+            "project-alpha",
+        }
+    )
+    assert policy.blocked_memory_namespaces == frozenset({"restricted"})
+
+
+def test_tenant_policies_reject_invalid_memory_namespace_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "allowed_memory_namespaces": "fleet-42",
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES contains an invalid policy configuration",
+    ):
+        Settings.from_environment()
+
+    monkeypatch.setenv(
+        "TENANT_POLICIES",
+        json.dumps(
+            [
+                {
+                    "tenant_id": "tenant-acme",
+                    "blocked_memory_namespaces": "restricted",
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TENANT_POLICIES contains an invalid policy configuration",
+    ):
+        Settings.from_environment()
+
+
 def test_tenant_policies_parse_model_governance_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

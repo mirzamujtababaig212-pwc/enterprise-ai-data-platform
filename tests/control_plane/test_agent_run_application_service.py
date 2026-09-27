@@ -563,6 +563,169 @@ async def test_execute_uses_pinned_model_governance_without_reauthorization() ->
 
 
 @pytest.mark.asyncio
+async def test_execute_allows_memory_namespace_authorized_by_tenant_policy() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-memory-allowed-1",
+        user_id="user-memory-allowed-1",
+        principal="principal-memory-allowed-1",
+        tenant_id="tenant-acme",
+        memory_namespace="fleet-42",
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    assert result.response.output == "completed"
+    repository.create.assert_called_once()
+    runtime.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_memory_namespace_not_allowed_by_tenant_policy() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="enterprise-analyst",
+            description="Test enterprise analyst agent.",
+            system_prompt="You are a test enterprise analyst.",
+            model="gpt-5",
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-memory-denied-1",
+        user_id="user-memory-denied-1",
+        principal="principal-memory-denied-1",
+        tenant_id="tenant-acme",
+        memory_namespace="project-beta",
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="Memory namespace.*not allowed",
+    ):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=request,
+        )
+
+    repository.create.assert_not_called()
+    repository.update.assert_not_called()
+    runtime.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_authorizes_memory_write_for_memory_writing_agent() -> None:
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+    runtime.get_agent_definition = AsyncMock(
+        return_value=AgentDefinition(
+            name="memory-writer",
+            description="Test memory-writing agent.",
+            system_prompt="You are a test memory-writing agent.",
+            model="gpt-5",
+            memory_write_enabled=True,
+        )
+    )
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    authorize_memory_namespace = Mock(wraps=tenant_policy_engine.authorize_memory_namespace)
+    tenant_policy_engine.authorize_memory_namespace = authorize_memory_namespace
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+    )
+
+    request = AgentRequest(
+        input="Record the deployment result",
+        session_id="session-memory-write-1",
+        user_id="user-memory-write-1",
+        principal="principal-memory-write-1",
+        tenant_id="tenant-acme",
+        memory_namespace="fleet-42",
+    )
+
+    await service.execute(
+        agent_name="memory-writer",
+        request=request,
+    )
+
+    assert [call.kwargs for call in authorize_memory_namespace.call_args_list] == [
+        {
+            "tenant_id": "tenant-acme",
+            "memory_namespace": "fleet-42",
+            "operation": "read",
+        },
+        {
+            "tenant_id": "tenant-acme",
+            "memory_namespace": "fleet-42",
+            "operation": "write",
+        },
+    ]
+    repository.create.assert_called_once()
+    runtime.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_execute_rejects_model_not_allowed_by_tenant_policy() -> None:
     repository = _repository()
 

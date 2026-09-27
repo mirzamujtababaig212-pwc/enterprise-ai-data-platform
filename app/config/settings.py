@@ -19,6 +19,7 @@ class Settings:
     external_evaluation_release_required: bool
     agent_run_lease_duration_seconds: int
     agent_run_max_recovery_attempts: int
+    approval_risk_tiers: frozenset[str] = frozenset({"high", "critical"})
     approval_override_principals: frozenset[str] = frozenset()
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     tenant_policy_enforcement_enabled: bool = False
@@ -125,6 +126,11 @@ class Settings:
                     )
                     allowed_models = policy.get("allowed_models")
                     allowed_providers = policy.get("allowed_providers")
+                    allowed_memory_namespaces = policy.get("allowed_memory_namespaces")
+                    blocked_memory_namespaces = policy.get(
+                        "blocked_memory_namespaces",
+                        [],
+                    )
 
                     if not isinstance(allowed_tools, list):
                         raise ValueError("Tenant policy allowed_tools must be an array.")
@@ -146,6 +152,19 @@ class Settings:
                         list,
                     ):
                         raise ValueError("Tenant policy allowed_providers must be an array.")
+
+                    if allowed_memory_namespaces is not None and not isinstance(
+                        allowed_memory_namespaces,
+                        list,
+                    ):
+                        raise ValueError(
+                            "Tenant policy allowed_memory_namespaces must be an array."
+                        )
+
+                    if not isinstance(blocked_memory_namespaces, list):
+                        raise ValueError(
+                            "Tenant policy blocked_memory_namespaces must be an array."
+                        )
 
                     max_tokens_per_run = policy.get("max_tokens_per_run")
 
@@ -205,6 +224,12 @@ class Settings:
                             allowed_providers=(
                                 None if allowed_providers is None else frozenset(allowed_providers)
                             ),
+                            allowed_memory_namespaces=(
+                                None
+                                if allowed_memory_namespaces is None
+                                else frozenset(allowed_memory_namespaces)
+                            ),
+                            blocked_memory_namespaces=frozenset(blocked_memory_namespaces),
                             output_governance_enabled=output_governance_enabled,
                             blocked_output_patterns=frozenset(blocked_output_patterns),
                             redact_output_patterns=frozenset(redact_output_patterns),
@@ -225,14 +250,23 @@ class Settings:
                 "tenant policy enforcement is enabled."
             )
 
+        approval_risk_tiers_raw = os.getenv(
+            "APPROVAL_RISK_TIERS",
+            "high,critical",
+        )
+        approval_risk_tiers = frozenset(
+            value.strip().lower() for value in approval_risk_tiers_raw.split(",") if value.strip()
+        )
+
+        if not approval_risk_tiers:
+            raise RuntimeError("APPROVAL_RISK_TIERS must contain at least one risk tier.")
+
         approval_override_principals_raw = os.getenv(
             "APPROVAL_OVERRIDE_PRINCIPALS",
             "",
         )
         approval_override_principals = frozenset(
-            value.strip()
-            for value in approval_override_principals_raw.split(",")
-            if value.strip()
+            value.strip() for value in approval_override_principals_raw.split(",") if value.strip()
         )
 
         return cls(
@@ -257,6 +291,7 @@ class Settings:
                 os.getenv("AGENT_RUN_LEASE_DURATION_SECONDS", "60")
             ),
             agent_run_max_recovery_attempts=int(os.getenv("AGENT_RUN_MAX_RECOVERY_ATTEMPTS", "3")),
+            approval_risk_tiers=approval_risk_tiers,
             approval_override_principals=approval_override_principals,
             mcp_servers=mcp_servers,
             tenant_policy_enforcement_enabled=tenant_policy_enforcement_enabled,

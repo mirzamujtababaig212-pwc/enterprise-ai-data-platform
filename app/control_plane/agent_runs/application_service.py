@@ -174,6 +174,31 @@ class AgentRunApplicationService:
             model=model,
         )
 
+    async def _authorize_memory_namespace(
+        self,
+        *,
+        agent_name: str,
+        tenant_id: str | None,
+        memory_namespace: str | None,
+    ) -> None:
+        if tenant_id is None or memory_namespace is None or self._tenant_policy_engine is None:
+            return
+
+        self._tenant_policy_engine.authorize_memory_namespace(
+            tenant_id=tenant_id,
+            memory_namespace=memory_namespace,
+            operation="read",
+        )
+
+        agent_definition = await self._runtime.get_agent_definition(agent_name)
+
+        if agent_definition.memory_write_enabled:
+            self._tenant_policy_engine.authorize_memory_namespace(
+                tenant_id=tenant_id,
+                memory_namespace=memory_namespace,
+                operation="write",
+            )
+
     def _resolve_effective_governance_policy(
         self,
         *,
@@ -317,6 +342,12 @@ class AgentRunApplicationService:
             execution_budget=effective_budget,
             governance_policy=effective_governance_policy,
             model_governance=effective_model_governance,
+        )
+
+        await self._authorize_memory_namespace(
+            agent_name=agent_name,
+            tenant_id=effective_request.tenant_id,
+            memory_namespace=effective_request.memory_namespace,
         )
 
         if idempotency_key is not None:

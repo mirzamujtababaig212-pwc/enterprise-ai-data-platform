@@ -298,3 +298,139 @@ def test_tenant_policy_engine_allows_unmapped_tenant() -> None:
 
     assert decision.allowed is True
     assert decision.redacted_output == raw_output
+
+
+def test_tenant_policy_memory_namespaces_default_to_unrestricted() -> None:
+    policy = TenantPolicy(tenant_id="tenant-a")
+
+    assert policy.allowed_memory_namespaces is None
+    assert policy.blocked_memory_namespaces == frozenset()
+
+
+def test_tenant_policy_engine_allows_authorized_memory_namespace() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            allowed_memory_namespaces=frozenset({"fleet-42", "project-alpha"}),
+        )
+    )
+
+    engine.authorize_memory_namespace(
+        "tenant-a",
+        "fleet-42",
+    )
+
+
+def test_tenant_policy_engine_allows_memory_read_and_write() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    engine.authorize_memory_namespace(
+        "tenant-a",
+        "fleet-42",
+        operation="read",
+    )
+    engine.authorize_memory_namespace(
+        "tenant-a",
+        "fleet-42",
+        operation="write",
+    )
+
+
+def test_tenant_policy_engine_rejects_unauthorized_memory_namespace() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    with pytest.raises(PolicyViolationError, match="Memory namespace.*not allowed"):
+        engine.authorize_memory_namespace(
+            "tenant-a",
+            "project-beta",
+        )
+
+
+def test_tenant_policy_engine_blocked_memory_namespace_wins() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+            blocked_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    with pytest.raises(
+        PolicyViolationError,
+        match="Memory namespace.*explicitly blocked",
+    ):
+        engine.authorize_memory_namespace(
+            "tenant-a",
+            "fleet-42",
+        )
+
+
+def test_tenant_policy_engine_rejects_invalid_memory_operation() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(TenantPolicy(tenant_id="tenant-a"))
+
+    with pytest.raises(
+        ValueError,
+        match="Memory operation must be 'read' or 'write'",
+    ):
+        engine.authorize_memory_namespace(
+            "tenant-a",
+            "fleet-42",
+            operation="delete",
+        )
+
+
+def test_tenant_policy_engine_rejects_empty_memory_namespace() -> None:
+    engine = TenantPolicyEngine()
+    engine.register_policy(TenantPolicy(tenant_id="tenant-a"))
+
+    with pytest.raises(
+        ValueError,
+        match="Memory namespace must be a non-empty string",
+    ):
+        engine.authorize_memory_namespace(
+            "tenant-a",
+            "   ",
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allowed_memory_namespaces", "blocked_memory_namespaces"],
+)
+def test_tenant_policy_rejects_empty_memory_namespace_values(
+    field_name: str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        TenantPolicy(
+            tenant_id="tenant-a",
+            **{field_name: frozenset({""})},
+        )
+
+
+def test_tenant_policy_memory_namespace_configuration_is_immutable() -> None:
+    policy = TenantPolicy(
+        tenant_id="tenant-a",
+        allowed_memory_namespaces=frozenset({"fleet-42"}),
+        blocked_memory_namespaces=frozenset({"restricted"}),
+    )
+
+    with pytest.raises(AttributeError):
+        policy.allowed_memory_namespaces = frozenset({"project-alpha"})
+
+    with pytest.raises(AttributeError):
+        policy.allowed_memory_namespaces.add("project-alpha")
