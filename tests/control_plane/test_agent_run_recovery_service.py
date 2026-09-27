@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -507,6 +508,76 @@ async def test_recovery_rejects_memory_namespace_removed_by_current_tenant_polic
     assert recovered.status is AgentRunStatus.FAILED
     assert recovered.error_type == "PolicyViolationError"
     assert "fleet-memory" in recovered.error_message
+
+
+@pytest.mark.asyncio
+async def test_recovery_authorizes_memory_write_for_memory_writing_agent():
+    repository = RecordingRepository()
+
+    request = AgentRequest(
+        input="Record the deployment result",
+        session_id="session-memory-write-recovery",
+        user_id="user-memory-write-recovery",
+        principal="api_key:recovery-principal",
+        tenant_id="tenant-acme",
+        memory_namespace="fleet-42",
+    )
+
+    repository.create(
+        failed_run(
+            request_snapshot=AgentRunRequestSnapshot.from_request(request),
+        )
+    )
+
+    policy_engine = TenantPolicyEngine()
+    policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-acme",
+            allowed_memory_namespaces=frozenset({"fleet-42"}),
+        )
+    )
+
+    authorize_memory_namespace = Mock(
+        wraps=policy_engine.authorize_memory_namespace,
+    )
+    policy_engine.authorize_memory_namespace = authorize_memory_namespace
+
+    runtime = Mock()
+    runtime.resume = AsyncMock(
+        return_value=AgentResponse(
+            agent_name="memory-writer",
+            output="Recovered successfully.",
+            session_id=request.session_id,
+        )
+    )
+    runtime.get_agent_definition = AsyncMock(
+        return_value=Mock(memory_write_enabled=True),
+    )
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        tenant_policy_engine=policy_engine,
+    )
+
+    result = await service.recover("run-123")
+
+    assert result.response is not None
+    assert [call.kwargs for call in authorize_memory_namespace.call_args_list] == [
+        {
+            "tenant_id": "tenant-acme",
+            "memory_namespace": "fleet-42",
+            "operation": "read",
+        },
+        {
+            "tenant_id": "tenant-acme",
+            "memory_namespace": "fleet-42",
+            "operation": "write",
+        },
+    ]
+    runtime.get_agent_definition.assert_awaited_once_with("recoverable-agent")
+    runtime.resume.assert_awaited_once()
 
 
 @pytest.mark.asyncio
