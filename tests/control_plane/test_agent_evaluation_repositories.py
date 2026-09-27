@@ -38,6 +38,10 @@ def make_evaluation_run(
         task_completed=True,
         rag_queries_total=2,
         rag_sources_retrieved_total=5,
+        has_final_answer=True,
+        final_answer_length=42,
+        rag_sources_available_count=5,
+        rag_unique_chunks_count=4,
     )
 
     policy = AgentEvaluationPolicy(

@@ -180,6 +180,16 @@ class PostgreSQLAgentEvaluationRunsRepository:
                     "rag_sources_retrieved_total",
                     0,
                 ),
+                has_final_answer=metrics_data.get("has_final_answer", False),
+                final_answer_length=metrics_data.get("final_answer_length", 0),
+                rag_sources_available_count=metrics_data.get(
+                    "rag_sources_available_count",
+                    0,
+                ),
+                rag_unique_chunks_count=metrics_data.get(
+                    "rag_unique_chunks_count",
+                    0,
+                ),
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(

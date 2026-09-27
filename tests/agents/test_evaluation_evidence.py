@@ -347,3 +347,121 @@ def test_extract_evidence_defaults_rag_metrics_for_non_rag_runs() -> None:
 
     assert evidence.rag_queries_total == 0
     assert evidence.rag_sources_retrieved_total == 0
+
+
+def test_extract_evidence_extracts_final_answer_and_unique_rag_chunks() -> None:
+    run = _run().model_copy(
+        update={
+            "output": {
+                "reply": "The vehicle exceeded the speed threshold.",
+                "provider": "test-provider",
+                "model": "test-model",
+            }
+        }
+    )
+
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 2,
+                    "sources": [
+                        {
+                            "chunk_id": "chunk-1",
+                            "document_id": "doc-1",
+                            "score": 0.91,
+                        },
+                        {
+                            "chunk_id": "chunk-2",
+                            "document_id": "doc-1",
+                            "score": 0.87,
+                        },
+                    ],
+                }
+            },
+        ),
+        _step(
+            step_id="step-2",
+            step_index=1,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 2,
+                    "sources": [
+                        {
+                            "chunk_id": "chunk-2",
+                            "document_id": "doc-1",
+                            "score": 0.88,
+                        },
+                        {
+                            "chunk_id": "chunk-3",
+                            "document_id": "doc-2",
+                            "score": 0.84,
+                        },
+                    ],
+                }
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(run, steps, [])
+
+    assert evidence.has_final_answer is True
+    assert evidence.final_answer_length == len("The vehicle exceeded the speed threshold.")
+    assert evidence.rag_sources_retrieved_total == 4
+    assert evidence.rag_sources_available_count == 4
+    assert evidence.rag_unique_chunks_count == 3
+
+
+def test_extract_evidence_handles_plain_string_final_answer() -> None:
+    run = _run().model_copy(
+        update={
+            "output": "  Final answer from the agent.  ",
+        }
+    )
+
+    evidence = extract_evidence(run, [], [])
+
+    assert evidence.has_final_answer is True
+    assert evidence.final_answer_length == len("Final answer from the agent.")
+
+
+def test_extract_evidence_handles_missing_final_answer() -> None:
+    evidence = extract_evidence(_run(), [], [])
+
+    assert evidence.has_final_answer is False
+    assert evidence.final_answer_length == 0
+
+
+def test_extract_evidence_counts_rag_output_results_as_available_sources() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            output={
+                "results": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "document_id": "doc-1",
+                    },
+                    {
+                        "chunk_id": "chunk-2",
+                        "document_id": "doc-1",
+                    },
+                ]
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.rag_sources_retrieved_total == 2
+    assert evidence.rag_sources_available_count == 2
+    assert evidence.rag_unique_chunks_count == 2

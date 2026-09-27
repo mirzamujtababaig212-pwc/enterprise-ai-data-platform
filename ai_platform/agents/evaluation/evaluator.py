@@ -29,6 +29,10 @@ class AgentEvaluator:
             governance_denials=evidence.governance_denials,
             rag_queries_total=evidence.rag_queries_total,
             rag_sources_retrieved_total=evidence.rag_sources_retrieved_total,
+            has_final_answer=evidence.has_final_answer,
+            final_answer_length=evidence.final_answer_length,
+            rag_sources_available_count=evidence.rag_sources_available_count,
+            rag_unique_chunks_count=evidence.rag_unique_chunks_count,
             task_completed=evidence.status == "completed",
         )
 

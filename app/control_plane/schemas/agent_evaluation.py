@@ -35,6 +35,10 @@ class AgentEvaluationMetricsResponse(BaseModel):
     governance_denials: int
     rag_queries_total: int
     rag_sources_retrieved_total: int
+    has_final_answer: bool
+    final_answer_length: int
+    rag_sources_available_count: int
+    rag_unique_chunks_count: int
     task_completed: bool
 
 

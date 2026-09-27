@@ -29,6 +29,10 @@ def _evidence(**overrides) -> AgentRunEvidence:
         "governance_denials": 0,
         "rag_queries_total": 2,
         "rag_sources_retrieved_total": 5,
+        "has_final_answer": True,
+        "final_answer_length": 42,
+        "rag_sources_available_count": 5,
+        "rag_unique_chunks_count": 4,
     }
     values.update(overrides)
     return AgentRunEvidence(**values)
@@ -49,6 +53,10 @@ def test_evaluator_produces_deterministic_metrics_and_passes_gate():
     assert metrics.tool_calls_successful == 2
     assert metrics.rag_queries_total == 2
     assert metrics.rag_sources_retrieved_total == 5
+    assert metrics.has_final_answer is True
+    assert metrics.final_answer_length == 42
+    assert metrics.rag_sources_available_count == 5
+    assert metrics.rag_unique_chunks_count == 4
     assert metrics.task_completed is True
     assert gate.passed is True
     assert gate.violations == ()

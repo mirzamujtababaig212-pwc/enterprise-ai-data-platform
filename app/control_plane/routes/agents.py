@@ -549,6 +549,10 @@ async def evaluate_agent_run(
             governance_denials=evaluation.metrics.governance_denials,
             rag_queries_total=evaluation.metrics.rag_queries_total,
             rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
+            has_final_answer=evaluation.metrics.has_final_answer,
+            final_answer_length=evaluation.metrics.final_answer_length,
+            rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
+            rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
             task_completed=evaluation.metrics.task_completed,
         ),
         policy=AgentEvaluationPolicyRequest(
@@ -636,6 +640,10 @@ async def list_agent_run_evaluations(
                     governance_denials=evaluation.metrics.governance_denials,
                     rag_queries_total=evaluation.metrics.rag_queries_total,
                     rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
+                    has_final_answer=evaluation.metrics.has_final_answer,
+                    final_answer_length=evaluation.metrics.final_answer_length,
+                    rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
+                    rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
                     task_completed=evaluation.metrics.task_completed,
                 ),
                 policy=AgentEvaluationPolicyRequest(

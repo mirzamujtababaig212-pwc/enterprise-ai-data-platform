@@ -25,6 +25,10 @@ class AgentRunEvidence:
     governance_denials: int
     rag_queries_total: int = 0
     rag_sources_retrieved_total: int = 0
+    has_final_answer: bool = False
+    final_answer_length: int = 0
+    rag_sources_available_count: int = 0
+    rag_unique_chunks_count: int = 0
     effective_model: str | None = None
     effective_provider: str | None = None
     model_policy_id: str | None = None
@@ -51,6 +55,9 @@ class AgentRunEvidence:
             "governance_denials",
             "rag_queries_total",
             "rag_sources_retrieved_total",
+            "final_answer_length",
+            "rag_sources_available_count",
+            "rag_unique_chunks_count",
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
@@ -70,6 +77,10 @@ class AgentEvaluationMetrics:
     task_completed: bool
     rag_queries_total: int = 0
     rag_sources_retrieved_total: int = 0
+    has_final_answer: bool = False
+    final_answer_length: int = 0
+    rag_sources_available_count: int = 0
+    rag_unique_chunks_count: int = 0
 
     def __post_init__(self) -> None:
         if self.execution_time_ms < 0:
@@ -84,6 +95,9 @@ class AgentEvaluationMetrics:
             "governance_denials",
             "rag_queries_total",
             "rag_sources_retrieved_total",
+            "final_answer_length",
+            "rag_sources_available_count",
+            "rag_unique_chunks_count",
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
@@ -99,5 +113,9 @@ class AgentEvaluationMetrics:
             "governance_denials": self.governance_denials,
             "rag_queries_total": self.rag_queries_total,
             "rag_sources_retrieved_total": self.rag_sources_retrieved_total,
+            "has_final_answer": self.has_final_answer,
+            "final_answer_length": self.final_answer_length,
+            "rag_sources_available_count": self.rag_sources_available_count,
+            "rag_unique_chunks_count": self.rag_unique_chunks_count,
             "task_completed": self.task_completed,
         }
