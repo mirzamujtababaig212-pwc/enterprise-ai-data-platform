@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from ai_platform.agents.evaluation.answer_evaluation import (
+    AgentAnswerEvaluation,
+    AgentAnswerEvaluator,
+)
 from ai_platform.agents.evaluation.models import (
     AgentEvaluationMetrics,
     AgentRunEvidence,
@@ -42,3 +46,15 @@ class AgentEvaluator:
         )
 
         return metrics, quality_gate
+
+    @staticmethod
+    def evaluate_answer(
+        evidence: AgentRunEvidence,
+        *,
+        expected_answer: str | None,
+    ) -> AgentAnswerEvaluation:
+        """Evaluate the extracted final answer without changing quality-gate semantics."""
+        return AgentAnswerEvaluator.evaluate(
+            actual_answer=evidence.final_answer_text,
+            expected_answer=expected_answer,
+        )

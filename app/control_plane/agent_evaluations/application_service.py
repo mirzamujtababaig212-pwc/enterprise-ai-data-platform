@@ -44,6 +44,7 @@ class AgentEvaluationApplicationService:
         tenant_id: str,
         principal: str,
         policy: AgentEvaluationPolicy,
+        expected_answer: str | None = None,
     ) -> AgentEvaluationRun:
         if not run_id.strip():
             raise ValueError("run_id must not be empty.")
@@ -83,6 +84,10 @@ class AgentEvaluationApplicationService:
             evidence,
             policy,
         )
+        answer_evaluation = self._evaluator.evaluate_answer(
+            evidence,
+            expected_answer=expected_answer,
+        )
 
         evaluation_run = AgentEvaluationRun(
             evaluation_run_id=str(uuid4()),
@@ -100,6 +105,7 @@ class AgentEvaluationApplicationService:
             metrics=metrics,
             policy=policy,
             quality_gate=quality_gate,
+            answer_evaluation=answer_evaluation,
         )
 
         return self._evaluation_repository.save(evaluation_run)

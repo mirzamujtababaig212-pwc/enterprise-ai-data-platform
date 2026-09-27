@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
@@ -54,6 +55,7 @@ class AgentEvaluationRun:
     metrics: AgentEvaluationMetrics
     policy: AgentEvaluationPolicy
     quality_gate: AgentQualityGateResult
+    answer_evaluation: AgentAnswerEvaluation | None = None
 
     def __post_init__(self) -> None:
         if not self.evaluation_run_id.strip():
@@ -75,4 +77,7 @@ class AgentEvaluationRun:
             "metrics": self.metrics.as_dict(),
             "policy": self.policy.as_dict(),
             "quality_gate": self.quality_gate.as_dict(),
+            "answer_evaluation": (
+                self.answer_evaluation.as_dict() if self.answer_evaluation is not None else None
+            ),
         }

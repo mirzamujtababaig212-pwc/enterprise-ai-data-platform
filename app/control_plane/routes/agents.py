@@ -26,9 +26,11 @@ from app.control_plane.dependencies import (
     get_agent_run_recovery_service,
 )
 from app.control_plane.schemas.agent_evaluation import (
+    AgentAnswerEvaluationResponse,
     AgentEvaluationLineageResponse,
     AgentEvaluationMetricsResponse,
     AgentEvaluationPolicyRequest,
+    AgentEvaluationRequest,
     AgentEvaluationQualityGateResponse,
     AgentEvaluationRunListResponse,
     AgentEvaluationRunResponse,
@@ -474,7 +476,7 @@ async def get_agent_run_step(
 async def evaluate_agent_run(
     request: Request,
     run_id: str,
-    payload: AgentEvaluationPolicyRequest,
+    payload: AgentEvaluationRequest,
     service: AgentEvaluationApplicationService = Depends(
         get_agent_evaluation_application_service,
     ),
@@ -503,6 +505,7 @@ async def evaluate_agent_run(
             tenant_id=tenant_id,
             principal=principal,
             policy=policy,
+            expected_answer=payload.expected_answer,
         )
     except PermissionError as exc:
         raise HTTPException(
@@ -566,6 +569,15 @@ async def evaluate_agent_run(
         quality_gate=AgentEvaluationQualityGateResponse(
             passed=evaluation.quality_gate.passed,
             violations=list(evaluation.quality_gate.violations),
+        ),
+        answer_evaluation=(
+            AgentAnswerEvaluationResponse(
+                evaluated=evaluation.answer_evaluation.evaluated,
+                exact_match=evaluation.answer_evaluation.exact_match,
+                normalization=evaluation.answer_evaluation.normalization,
+            )
+            if evaluation.answer_evaluation is not None
+            else None
         ),
     )
 
@@ -657,6 +669,15 @@ async def list_agent_run_evaluations(
                 quality_gate=AgentEvaluationQualityGateResponse(
                     passed=evaluation.quality_gate.passed,
                     violations=list(evaluation.quality_gate.violations),
+                ),
+                answer_evaluation=(
+                    AgentAnswerEvaluationResponse(
+                        evaluated=evaluation.answer_evaluation.evaluated,
+                        exact_match=evaluation.answer_evaluation.exact_match,
+                        normalization=evaluation.answer_evaluation.normalization,
+                    )
+                    if evaluation.answer_evaluation is not None
+                    else None
                 ),
             )
             for evaluation in evaluations

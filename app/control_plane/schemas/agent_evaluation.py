@@ -14,6 +14,16 @@ class AgentEvaluationPolicyRequest(BaseModel):
     name: str | None = None
 
 
+class AgentEvaluationRequest(BaseModel):
+    expected_answer: str | None = None
+    max_execution_time_ms: float | None = Field(default=None, ge=0.0)
+    max_steps_per_run: int | None = Field(default=None, ge=0)
+    max_invalid_tool_calls: int | None = Field(default=None, ge=0)
+    allow_governance_denials: bool = False
+    require_task_completed: bool = True
+    name: str | None = None
+
+
 class AgentEvaluationLineageResponse(BaseModel):
     evaluated_run_id: str
     agent_name: str
@@ -47,6 +57,12 @@ class AgentEvaluationQualityGateResponse(BaseModel):
     violations: list[str]
 
 
+class AgentAnswerEvaluationResponse(BaseModel):
+    evaluated: bool
+    exact_match: bool | None
+    normalization: str
+
+
 class AgentEvaluationRunResponse(BaseModel):
     evaluation_run_id: str
     created_at: datetime
@@ -55,6 +71,7 @@ class AgentEvaluationRunResponse(BaseModel):
     metrics: AgentEvaluationMetricsResponse
     policy: AgentEvaluationPolicyRequest
     quality_gate: AgentEvaluationQualityGateResponse
+    answer_evaluation: AgentAnswerEvaluationResponse | None = None
 
 
 class AgentEvaluationRunListResponse(BaseModel):

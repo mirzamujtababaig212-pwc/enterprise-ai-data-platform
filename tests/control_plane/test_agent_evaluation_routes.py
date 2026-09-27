@@ -58,6 +58,7 @@ class FakeAgentEvaluationApplicationService:
         tenant_id: str,
         principal: str,
         policy: AgentEvaluationPolicy,
+        expected_answer: str | None = None,
     ) -> AgentEvaluationRun:
         self.evaluate_calls.append(
             (

@@ -184,6 +184,7 @@ def extract_evidence(
         rag_sources_retrieved_total=rag_sources_retrieved_total,
         has_final_answer=has_final_answer,
         final_answer_length=final_answer_length,
+        final_answer_text=answer_text,
         rag_sources_available_count=rag_sources_available_count,
         rag_unique_chunks_count=rag_unique_chunks_count,
         effective_model=effective_model,

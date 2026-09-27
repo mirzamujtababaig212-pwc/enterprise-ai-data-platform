@@ -91,6 +91,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "x-api-key": API_KEY,
             },
             json={
+                "expected_answer": "Deterministic integration-test response.",
                 "max_execution_time_ms": 60_000,
                 "max_steps_per_run": 10,
                 "max_invalid_tool_calls": 0,
@@ -143,6 +144,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "violations": [],
         }
 
+        assert evaluation_payload["answer_evaluation"] == {
+            "evaluated": True,
+            "exact_match": True,
+            "normalization": "whitespace_casefold",
+        }
+
         evaluation_run_id = evaluation_payload["evaluation_run_id"]
 
         with SessionLocal() as session:
@@ -186,6 +193,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             assert evaluation_record.quality_gate == {
                 "passed": True,
                 "violations": [],
+            }
+
+            assert evaluation_record.answer_evaluation == {
+                "evaluated": True,
+                "exact_match": True,
+                "normalization": "whitespace_casefold",
             }
 
         list_response = client.get(

@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
@@ -57,6 +58,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
             metrics=run.metrics.as_dict(),
             policy=run.policy.as_dict(),
             quality_gate=run.quality_gate.as_dict(),
+            answer_evaluation=(
+                run.answer_evaluation.as_dict() if run.answer_evaluation is not None else None
+            ),
         )
 
         try:
@@ -153,6 +157,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
         metrics_data = dict(record.metrics)
         policy_data = dict(record.policy)
         quality_gate_data = dict(record.quality_gate)
+        answer_evaluation_data = (
+            dict(record.answer_evaluation) if record.answer_evaluation is not None else None
+        )
 
         return AgentEvaluationRun(
             evaluation_run_id=record.evaluation_run_id,
@@ -209,5 +216,17 @@ class PostgreSQLAgentEvaluationRunsRepository:
             quality_gate=AgentQualityGateResult(
                 passed=quality_gate_data["passed"],
                 violations=tuple(quality_gate_data.get("violations", [])),
+            ),
+            answer_evaluation=(
+                AgentAnswerEvaluation(
+                    evaluated=answer_evaluation_data["evaluated"],
+                    exact_match=answer_evaluation_data["exact_match"],
+                    normalization=answer_evaluation_data.get(
+                        "normalization",
+                        "whitespace_casefold",
+                    ),
+                )
+                if answer_evaluation_data is not None
+                else None
             ),
         )

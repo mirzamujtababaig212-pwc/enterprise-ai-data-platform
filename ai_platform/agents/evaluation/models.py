@@ -27,6 +27,7 @@ class AgentRunEvidence:
     rag_sources_retrieved_total: int = 0
     has_final_answer: bool = False
     final_answer_length: int = 0
+    final_answer_text: str | None = None
     rag_sources_available_count: int = 0
     rag_unique_chunks_count: int = 0
     effective_model: str | None = None
