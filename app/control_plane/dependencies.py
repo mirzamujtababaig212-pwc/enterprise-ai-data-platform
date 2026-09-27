@@ -512,6 +512,12 @@ async def get_agent_evaluation_application_service(
     )
 
 
+def get_approval_request_repository(
+    db: Session = Depends(get_db),
+) -> PostgreSQLApprovalRequestRepository:
+    return PostgreSQLApprovalRequestRepository(db)
+
+
 async def get_agent_run_approval_continuation_service(
     db: Session = Depends(get_db),
 ) -> AgentRunApprovalContinuationService:

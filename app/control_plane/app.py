@@ -6,6 +6,7 @@ from ai_platform.llm_gateway.api.main import app as llm_gateway_app
 from ai_platform.llm_gateway.middleware.request_id import RequestIDMiddleware
 from app.control_plane.auth import ControlPlaneAPIKeyMiddleware
 from app.control_plane.routes.agents import router as agents_router
+from app.control_plane.routes.approvals import router as approvals_router
 from app.control_plane.routes.evaluation import router as evaluation_router
 from app.control_plane.routes.health import router as health_router
 from app.control_plane.routes.llm import router as llm_router
@@ -44,6 +45,7 @@ app.add_middleware(RequestIDMiddleware)
 
 app.include_router(health_router)
 app.include_router(agents_router)
+app.include_router(approvals_router)
 app.include_router(evaluation_router)
 app.include_router(platform_router)
 app.include_router(llm_router)

@@ -693,3 +693,17 @@ async def test_get_agent_run_approval_continuation_service_uses_configured_overr
     )
     assert service._override_authorizer.is_authorized("api_key:operator-1")
     assert not service._override_authorizer.is_authorized("api_key:other")
+
+
+def test_get_approval_request_repository_uses_injected_session() -> None:
+    from app.control_plane.dependencies import get_approval_request_repository
+    from app.control_plane.approvals.postgres_repository import (
+        PostgreSQLApprovalRequestRepository,
+    )
+
+    session = Mock()
+
+    repository = get_approval_request_repository(db=session)
+
+    assert isinstance(repository, PostgreSQLApprovalRequestRepository)
+    assert repository._session is session
