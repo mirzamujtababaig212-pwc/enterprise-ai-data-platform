@@ -53,6 +53,7 @@ class AgentExecutionEvent:
     run_id: str | None = None
     session_id: str | None = None
     user_id: str | None = None
+    principal: str | None = None
     tool_round: int | None = None
     tool_name: str | None = None
     call_id: str | None = None

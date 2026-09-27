@@ -17,6 +17,7 @@ def make_event(
     run_id: str | None = "run-1",
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
+    principal: str | None = "principal-1",
     tool_round: int | None = None,
     tool_name: str | None = None,
     call_id: str | None = None,
@@ -33,6 +34,7 @@ def make_event(
         run_id=run_id,
         session_id=session_id,
         user_id=user_id,
+        principal=principal,
         tool_round=tool_round,
         tool_name=tool_name,
         call_id=call_id,
@@ -90,6 +92,7 @@ def test_record_and_list_round_trip() -> None:
         assert restored[0] == event
         assert restored[0].event_type == AgentExecutionEventType.LLM_COMPLETED
         assert restored[0].user_id == "user-1"
+        assert restored[0].principal == "principal-1"
         assert restored[0].provider == "openai"
         assert restored[0].model == "gpt-4.1-mini"
         assert restored[0].metadata == {

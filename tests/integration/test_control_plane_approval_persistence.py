@@ -6,11 +6,38 @@ import os
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from app.control_plane.agent_runs.models import AgentRun
+from ai_platform.agents.checkpoint import (
+    AgentCheckpointPosition,
+    AgentExecutionCheckpoint,
+)
+from ai_platform.agents.llm_messages import user_message
+from ai_platform.agents.models import AgentRequest, AgentResponse
+from ai_platform.agents.observability import AgentExecutionEventType
+from app.control_plane.agent_checkpoints.postgres_repository import (
+    PostgreSQLAgentCheckpointsRepository,
+)
+from app.control_plane.agent_run_events.postgres_observer import (
+    PostgreSQLAgentRunEventObserver,
+)
+from app.control_plane.agent_run_steps.models import (
+    AgentRunStep,
+    AgentRunStepStatus,
+)
+from app.control_plane.agent_run_steps.postgres_repository import (
+    PostgreSQLAgentRunStepsRepository,
+)
+from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
+)
+from app.control_plane.agent_runs.request_snapshot import (
+    AgentRunRequestSnapshot,
+)
+from app.control_plane.approvals.continuation_service import (
+    AgentRunApprovalContinuationService,
 )
 from app.control_plane.approvals.models import ApprovalOverride, ApprovalRequest, ApprovalStatus
 from app.control_plane.approvals.postgres_repository import (
@@ -18,6 +45,12 @@ from app.control_plane.approvals.postgres_repository import (
     PostgreSQLApprovalRequestRepository,
 )
 from app.control_plane.persistence.database import SessionLocal
+from app.control_plane.persistence.models import (
+    AgentRunEventRecord,
+    AgentRunRecord,
+    AgentRunStepRecord,
+    ApprovalRequestRecord,
+)
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",
@@ -107,6 +140,298 @@ def make_override(
             tzinfo=UTC,
         ),
     )
+
+
+class ApprovalContinuationRuntime:
+    def __init__(self, session_factory, *, run_id: str, step_id: str) -> None:
+        self._session_factory = session_factory
+        self._run_id = run_id
+        self._step_id = step_id
+        self.calls: list[dict[str, object]] = []
+
+    async def resume(
+        self,
+        agent_name,
+        request,
+        checkpoint,
+        *,
+        run_id=None,
+        lease_id=None,
+        execution_ownership_lost=None,
+    ):
+        self.calls.append(
+            {
+                "agent_name": agent_name,
+                "request": request,
+                "checkpoint": checkpoint,
+                "run_id": run_id,
+                "lease_id": lease_id,
+            }
+        )
+
+        completed_at = datetime.now(UTC)
+        with self._session_factory() as session:
+            step_repository = PostgreSQLAgentRunStepsRepository(session)
+            step = step_repository.transition(
+                self._run_id,
+                self._step_id,
+                status=AgentRunStepStatus.COMPLETED,
+                updated_at=completed_at,
+                completed_at=completed_at,
+                output={"status": "notification_sent"},
+            )
+            assert step is not None
+
+        return AgentResponse(
+            agent_name=agent_name,
+            output="Notification sent after approval.",
+            session_id=request.session_id,
+        )
+
+
+def test_postgres_approval_continuation_persists_full_approval_lifecycle() -> None:
+    """Exercise approval decision, continuation, completion, and audit persistence."""
+
+    session_factory = SessionLocal
+
+    run_id = "pg-approval-continuation-e2e"
+    approval_id = "pg-approval-continuation"
+    step_id = "pg-approval-step"
+    call_id = "pg-approval-call"
+    principal = "api_key:approval-continuation-principal"
+    tenant_id = "tenant-approval-continuation"
+
+    session = session_factory()
+
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        step_repository = PostgreSQLAgentRunStepsRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+        approval_repository = PostgreSQLApprovalRequestRepository(session)
+
+        request = AgentRequest(
+            input="Send the approved fleet notification.",
+            session_id="session-approval-continuation",
+            user_id="approval-continuation-user",
+            principal=principal,
+            tenant_id=tenant_id,
+            memory_namespace="fleet-memory",
+            metadata={
+                "source": "approval-continuation-integration",
+            },
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="approval-continuation-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                principal=request.principal,
+                tenant_id=request.tenant_id,
+                status=AgentRunStatus.WAITING_FOR_APPROVAL,
+                started_at=datetime.now(UTC),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        step_repository.create(
+            AgentRunStep(
+                run_id=run_id,
+                step_id=step_id,
+                step_index=0,
+                step_type="tool_call",
+                status=AgentRunStepStatus.RUNNING,
+                attempt=1,
+                tool_name="send_notification",
+                call_id=call_id,
+            )
+        )
+
+        checkpoint = AgentExecutionCheckpoint(
+            schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+            run_id=run_id,
+            agent_name="approval-continuation-agent",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            messages=(user_message("Send the approved fleet notification."),),
+            tool_round=1,
+            position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+            metadata={
+                "source": "approval-continuation-integration",
+            },
+        )
+        checkpoint_repository.save(checkpoint)
+
+        approval_repository.create(
+            ApprovalRequest(
+                approval_id=approval_id,
+                run_id=run_id,
+                step_id=step_id,
+                call_id=call_id,
+                tool_name="send_notification",
+                idempotency_key="pg-approval-continuation-idem",
+                status=ApprovalStatus.PENDING,
+                policy_name="side-effect-requires-approval",
+                policy_version="1.2.0",
+                risk_tier="high",
+                requested_action="Send the approved fleet notification",
+                policy_metadata={
+                    "requires_human_approval": True,
+                    "source": "approval-continuation-integration",
+                },
+            )
+        )
+
+        runtime = ApprovalContinuationRuntime(
+            session_factory,
+            run_id=run_id,
+            step_id=step_id,
+        )
+        observer = PostgreSQLAgentRunEventObserver(session_factory)
+
+        continuation_service = AgentRunApprovalContinuationService(
+            runtime=runtime,
+            approval_repository=approval_repository,
+            agent_run_repository=run_repository,
+            agent_run_steps_repository=step_repository,
+            checkpoints_repository=checkpoint_repository,
+            lease_seconds=60,
+            observer=observer,
+        )
+
+        import asyncio
+
+        response = asyncio.run(
+            continuation_service.continue_approval(
+                approval_id,
+                status=ApprovalStatus.APPROVED,
+                resolved_by="approver-integration",
+                resolution_reason="Approved for execution.",
+            )
+        )
+
+        assert response.output == "Notification sent after approval."
+
+        assert len(runtime.calls) == 1
+        runtime_call = runtime.calls[0]
+        assert runtime_call["agent_name"] == "approval-continuation-agent"
+        assert runtime_call["run_id"] == run_id
+        resumed_checkpoint = runtime_call["checkpoint"]
+        assert resumed_checkpoint.run_id == checkpoint.run_id
+        assert resumed_checkpoint.agent_name == checkpoint.agent_name
+        assert resumed_checkpoint.session_id == checkpoint.session_id
+        assert resumed_checkpoint.user_id == checkpoint.user_id
+        assert resumed_checkpoint.messages == checkpoint.messages
+        assert resumed_checkpoint.tool_round == checkpoint.tool_round
+        assert resumed_checkpoint.position == checkpoint.position
+        assert resumed_checkpoint.metadata == checkpoint.metadata
+        assert resumed_checkpoint.execution_budget_state.llm_calls == (
+            checkpoint.execution_budget_state.llm_calls
+        )
+        assert resumed_checkpoint.execution_budget_state.tool_calls == (
+            checkpoint.execution_budget_state.tool_calls
+        )
+        assert resumed_checkpoint.execution_budget_state.tool_rounds == (
+            checkpoint.execution_budget_state.tool_rounds
+        )
+        assert resumed_checkpoint.execution_budget_state.total_tokens == (
+            checkpoint.execution_budget_state.total_tokens
+        )
+        assert resumed_checkpoint.execution_budget_state.elapsed_seconds >= 0
+
+        resumed_request = runtime_call["request"]
+        assert resumed_request.input == request.input
+        assert resumed_request.session_id == request.session_id
+        assert resumed_request.user_id == request.user_id
+        assert resumed_request.principal == principal
+        assert resumed_request.tenant_id == tenant_id
+        assert resumed_request.memory_namespace == "fleet-memory"
+        assert resumed_request.metadata == {
+            "source": "approval-continuation-integration",
+        }
+
+        session.rollback()
+
+        restored_approval = approval_repository.get(approval_id)
+        assert restored_approval is not None
+        assert restored_approval.status is ApprovalStatus.APPROVED
+        assert restored_approval.resolved_by == "approver-integration"
+        assert restored_approval.resolution_reason == "Approved for execution."
+        assert restored_approval.resolved_at is not None
+
+        restored_run = run_repository.get(run_id)
+        assert restored_run is not None
+        assert restored_run.status is AgentRunStatus.COMPLETED
+        assert restored_run.output == "Notification sent after approval."
+        assert restored_run.lease_id is None
+        assert restored_run.lease_expires_at is None
+        assert restored_run.completed_at is not None
+
+        restored_step = step_repository.get(run_id, step_id)
+        assert restored_step is not None
+        assert restored_step.status is AgentRunStepStatus.COMPLETED
+        assert restored_step.tool_name == "send_notification"
+        assert restored_step.call_id == call_id
+        assert restored_step.output == {"status": "notification_sent"}
+        assert restored_step.completed_at is not None
+
+        restored_checkpoint = checkpoint_repository.get_latest(run_id)
+        assert restored_checkpoint is not None
+        assert restored_checkpoint.run_id == run_id
+        assert restored_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+
+        with session_factory() as event_session:
+            events = event_session.scalars(
+                select(AgentRunEventRecord)
+                .where(
+                    AgentRunEventRecord.run_id == run_id,
+                    AgentRunEventRecord.event_type
+                    == AgentExecutionEventType.APPROVAL_DECISION.value,
+                )
+                .order_by(AgentRunEventRecord.id.asc())
+            ).all()
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.agent_name == "approval-continuation-agent"
+        assert event.session_id == request.session_id
+        assert event.user_id == request.user_id
+        assert event.principal == principal
+        assert event.tool_name == "send_notification"
+        assert event.call_id == call_id
+        assert event.step_id == step_id
+        assert event.event_metadata == {
+            "approval_id": approval_id,
+            "decision": "approved",
+            "actor": "approver-integration",
+            "reason": "Approved for execution.",
+        }
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(AgentRunEventRecord).where(
+                AgentRunEventRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunStepRecord).where(
+                AgentRunStepRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(ApprovalRequestRecord).where(
+                ApprovalRequestRecord.approval_id == approval_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
 
 
 def test_postgres_approval_list_scopes_by_identity_status_and_limit() -> None:

@@ -415,6 +415,7 @@ class AgentRunApprovalContinuationService:
                     run_id=run.run_id,
                     session_id=run.session_id,
                     user_id=run.user_id,
+                    principal=run.principal,
                     tool_name=tool_name,
                     call_id=call_id,
                     step_id=step_id,
