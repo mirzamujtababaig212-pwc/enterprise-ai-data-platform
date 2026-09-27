@@ -1119,6 +1119,8 @@ class FakeRAGTool:
                     "document_id": "doc-rag-001",
                     "content": "Sensitive enterprise context.",
                     "score": 0.91,
+                    "retrieval_score": 0.72,
+                    "reranker_score": 0.91,
                     "metadata": {
                         "classification": "confidential",
                     },
@@ -1128,6 +1130,8 @@ class FakeRAGTool:
                     "document_id": "doc-rag-002",
                     "content": "Another sensitive context.",
                     "score": 0.83,
+                    "retrieval_score": 0.61,
+                    "reranker_score": 0.88,
                     "metadata": {
                         "classification": "restricted",
                     },
@@ -2150,6 +2154,8 @@ async def test_llm_agent_checkpoint_failure_preserves_idempotent_tool_result() -
                 "document_id": "doc-rag-001",
                 "content": "Sensitive enterprise context.",
                 "score": 0.91,
+                "retrieval_score": 0.72,
+                "reranker_score": 0.91,
                 "metadata": {
                     "classification": "confidential",
                 },
@@ -2159,6 +2165,8 @@ async def test_llm_agent_checkpoint_failure_preserves_idempotent_tool_result() -
                 "document_id": "doc-rag-002",
                 "content": "Another sensitive context.",
                 "score": 0.83,
+                "retrieval_score": 0.61,
+                "reranker_score": 0.88,
                 "metadata": {
                     "classification": "restricted",
                 },
@@ -2507,6 +2515,22 @@ async def test_llm_agent_completes_rag_orchestration_step_on_tool_result() -> No
     assert result.output["query"] == "RAG"
     assert result.output["retrieved_count"] == 2
     assert result.metadata["rag_provenance"]["retrieved_count"] == 2
+    assert result.metadata["rag_provenance"]["sources"] == [
+        {
+            "chunk_id": "chunk-rag-001",
+            "document_id": "doc-rag-001",
+            "retrieval_score": 0.72,
+            "reranker_score": 0.91,
+            "score": 0.91,
+        },
+        {
+            "chunk_id": "chunk-rag-002",
+            "document_id": "doc-rag-002",
+            "retrieval_score": 0.61,
+            "reranker_score": 0.88,
+            "score": 0.83,
+        },
+    ]
 
     assert response.output == "RAG retrieves relevant context for generation."
 
@@ -3372,11 +3396,15 @@ async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
                 {
                     "chunk_id": "chunk-rag-001",
                     "document_id": "doc-rag-001",
+                    "retrieval_score": 0.72,
+                    "reranker_score": 0.91,
                     "score": 0.91,
                 },
                 {
                     "chunk_id": "chunk-rag-002",
                     "document_id": "doc-rag-002",
+                    "retrieval_score": 0.61,
+                    "reranker_score": 0.88,
                     "score": 0.83,
                 },
             ],
@@ -3388,6 +3416,84 @@ async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
     assert "Sensitive enterprise context." not in serialized
     assert "Another sensitive context." not in serialized
     assert "classification" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_rag_provenance_retains_sources_without_scores() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    class ScorelessRAGTool(FakeRAGTool):
+        def __init__(self) -> None:
+            super().__init__("rag.search")
+
+        async def execute(self, arguments):
+            self.execute_count += 1
+            return {
+                "query": arguments["query"],
+                "retrieved_count": 1,
+                "results": [
+                    {
+                        "chunk_id": "chunk-scoreless",
+                        "document_id": "doc-scoreless",
+                        "content": "Context without ranking metadata.",
+                        "metadata": {
+                            "classification": "internal",
+                        },
+                    }
+                ],
+            }
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+    tool = ScorelessRAGTool()
+    await tool_registry.register(tool)
+
+    observer = FakeAgentExecutionObserver()
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-scoreless",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+    )
+
+    await agent.run(context)
+
+    completed = next(
+        event
+        for event in observer.events
+        if event.event_type == AgentExecutionEventType.TOOL_CALL_COMPLETED
+    )
+
+    assert completed.metadata["rag_provenance"] == {
+        "retrieved_count": 1,
+        "sources": [
+            {
+                "chunk_id": "chunk-scoreless",
+                "document_id": "doc-scoreless",
+                "retrieval_score": None,
+                "reranker_score": None,
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio

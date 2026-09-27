@@ -65,9 +65,16 @@ class EmbeddedChunk:
 @dataclass(frozen=True)
 class RetrievalResult:
     """
-    A retrieved chunk and its similarity score.
+    A retrieved chunk and its ranking scores.
+
+    ``score`` remains the final ranking score for backward compatibility.
+    ``retrieval_score`` preserves the original retriever score when a
+    reranker is involved, while ``reranker_score`` records the reranker's
+    score independently.
     """
 
     chunk: DocumentChunk
     score: float
     embedding_identity: EmbeddingIdentity | None = None
+    retrieval_score: float | None = None
+    reranker_score: float | None = None

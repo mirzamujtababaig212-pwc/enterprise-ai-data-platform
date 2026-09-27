@@ -39,6 +39,12 @@ class AgentEvaluator:
             final_answer_length=evidence.final_answer_length,
             rag_sources_available_count=evidence.rag_sources_available_count,
             rag_unique_chunks_count=evidence.rag_unique_chunks_count,
+            retrieval_score_min=evidence.retrieval_score_min,
+            retrieval_score_max=evidence.retrieval_score_max,
+            retrieval_score_avg=evidence.retrieval_score_avg,
+            reranker_score_min=evidence.reranker_score_min,
+            reranker_score_max=evidence.reranker_score_max,
+            reranker_score_avg=evidence.reranker_score_avg,
             task_completed=evidence.status == "completed",
         )
 

@@ -92,6 +92,8 @@ async def test_rag_search_returns_structured_results() -> None:
             "document_id": "doc-1",
             "content": "Enterprise RAG retrieves relevant knowledge.",
             "score": 0.95,
+            "retrieval_score": 0.95,
+            "reranker_score": None,
             "metadata": {"source": "test"},
         },
         {
@@ -99,6 +101,8 @@ async def test_rag_search_returns_structured_results() -> None:
             "document_id": "doc-1",
             "content": "Retrieved context is supplied to the agent.",
             "score": 0.85,
+            "retrieval_score": 0.85,
+            "reranker_score": None,
             "metadata": {"source": "test"},
         },
     ]

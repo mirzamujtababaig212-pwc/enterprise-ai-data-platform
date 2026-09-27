@@ -142,21 +142,37 @@ class LLMAgent:
             chunk_id = result.get("chunk_id")
             document_id = result.get("document_id")
             score = result.get("score")
+            retrieval_score = result.get("retrieval_score")
+            reranker_score = result.get("reranker_score")
 
             if not isinstance(chunk_id, str) or not chunk_id:
                 continue
             if not isinstance(document_id, str) or not document_id:
                 continue
-            if not isinstance(score, (int, float)) or isinstance(score, bool):
-                continue
 
-            sources.append(
-                {
-                    "chunk_id": chunk_id,
-                    "document_id": document_id,
-                    "score": score,
-                }
-            )
+            # Backward compatibility with older RAG payloads that only
+            # exposed the final/legacy ``score`` field.
+            if not isinstance(retrieval_score, (int, float)) or isinstance(retrieval_score, bool):
+                if isinstance(score, (int, float)) and not isinstance(score, bool):
+                    retrieval_score = score
+                else:
+                    retrieval_score = None
+
+            if not isinstance(reranker_score, (int, float)) or isinstance(reranker_score, bool):
+                reranker_score = None
+
+            source = {
+                "chunk_id": chunk_id,
+                "document_id": document_id,
+                "retrieval_score": retrieval_score,
+                "reranker_score": reranker_score,
+            }
+
+            # Temporary compatibility field for existing consumers.
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                source["score"] = score
+
+            sources.append(source)
 
         if not sources:
             return {}

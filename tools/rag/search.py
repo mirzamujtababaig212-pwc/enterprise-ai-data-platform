@@ -140,7 +140,15 @@ class RAGSearchTool:
                     "chunk_id": result.chunk.id,
                     "document_id": result.chunk.document_id,
                     "content": result.chunk.content,
+                    # Compatibility field: final ranking score.
                     "score": result.score,
+                    # Canonical evaluation signals.
+                    "retrieval_score": (
+                        result.retrieval_score
+                        if result.retrieval_score is not None
+                        else result.score
+                    ),
+                    "reranker_score": result.reranker_score,
                     "metadata": result.chunk.metadata,
                 }
                 for result in results

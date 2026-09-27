@@ -302,8 +302,28 @@ class RerankingRetriever:
             governance_policy=governance_policy,
         )
 
-        return await self.reranker.rerank(
+        reranked = await self.reranker.rerank(
             query,
             candidates,
             top_k=top_k,
+        )
+
+        original_retrieval_scores = {
+            result.chunk.id: (
+                result.retrieval_score if result.retrieval_score is not None else result.score
+            )
+            for result in candidates
+        }
+
+        return tuple(
+            RetrievalResult(
+                chunk=result.chunk,
+                score=result.score,
+                embedding_identity=result.embedding_identity,
+                retrieval_score=original_retrieval_scores.get(result.chunk.id),
+                reranker_score=(
+                    result.reranker_score if result.reranker_score is not None else result.score
+                ),
+            )
+            for result in reranked
         )

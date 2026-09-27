@@ -153,3 +153,47 @@ async def test_reranking_retriever_rejects_invalid_arguments():
 
     with pytest.raises(ValueError, match="between -1.0 and 1.0"):
         await service.retrieve("vehicle", min_score=1.1)
+
+
+class ScoreChangingReranker:
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[RetrievalResult],
+        *,
+        top_k: int,
+    ) -> list[RetrievalResult]:
+        return [
+            RetrievalResult(
+                chunk=result.chunk,
+                score=0.91,
+                embedding_identity=result.embedding_identity,
+            )
+            for result in candidates[:top_k]
+        ]
+
+
+@pytest.mark.asyncio
+async def test_reranking_retriever_preserves_original_retrieval_score() -> None:
+    retriever = FakeRetriever(
+        [
+            _result("a", "vehicle", 0.72),
+        ]
+    )
+    reranker = ScoreChangingReranker()
+
+    service = RerankingRetriever(
+        retriever,
+        reranker,
+        candidate_k=1,
+    )
+
+    results = await service.retrieve(
+        "vehicle",
+        top_k=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].score == 0.91
+    assert results[0].retrieval_score == 0.72
+    assert results[0].reranker_score == 0.91

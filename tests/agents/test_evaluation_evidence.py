@@ -307,6 +307,80 @@ def test_extract_evidence_counts_rag_queries_and_sources_from_provenance() -> No
     assert evidence.rag_sources_retrieved_total == 5
 
 
+def test_extract_evidence_aggregates_rag_score_signals() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 3,
+                    "sources": [
+                        {
+                            "chunk_id": "chunk-1",
+                            "retrieval_score": 0.72,
+                            "reranker_score": 0.91,
+                        },
+                        {
+                            "chunk_id": "chunk-2",
+                            "retrieval_score": 0.61,
+                            "reranker_score": 0.88,
+                        },
+                        {
+                            "chunk_id": "chunk-3",
+                            "retrieval_score": 0.83,
+                            "reranker_score": 0.95,
+                        },
+                    ],
+                }
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.retrieval_score_min == 0.61
+    assert evidence.retrieval_score_max == 0.83
+    assert evidence.retrieval_score_avg == (0.72 + 0.61 + 0.83) / 3
+
+    assert evidence.reranker_score_min == 0.88
+    assert evidence.reranker_score_max == 0.95
+    assert evidence.reranker_score_avg == (0.91 + 0.88 + 0.95) / 3
+
+
+def test_extract_evidence_uses_legacy_score_as_retrieval_score() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 2,
+                    "sources": [
+                        {"chunk_id": "chunk-1", "score": 0.70},
+                        {"chunk_id": "chunk-2", "score": 0.90},
+                    ],
+                }
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.retrieval_score_min == 0.70
+    assert evidence.retrieval_score_max == 0.90
+    assert evidence.retrieval_score_avg == 0.80
+    assert evidence.reranker_score_min is None
+    assert evidence.reranker_score_max is None
+    assert evidence.reranker_score_avg is None
+
+
 def test_extract_evidence_falls_back_to_rag_output_results() -> None:
     steps = [
         _step(

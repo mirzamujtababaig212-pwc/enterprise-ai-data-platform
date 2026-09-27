@@ -102,6 +102,9 @@ def extract_evidence(
     rag_sources_available_count = 0
     rag_chunk_ids: set[str] = set()
 
+    retrieval_scores: list[float] = []
+    reranker_scores: list[float] = []
+
     for step in steps:
         provenance = step.metadata.get("rag_provenance")
         is_rag_step = step.tool_name == "rag.search" or isinstance(provenance, dict)
@@ -131,6 +134,23 @@ def extract_evidence(
                     if isinstance(chunk_id, str) and chunk_id:
                         rag_chunk_ids.add(chunk_id)
 
+                    retrieval_score = source.get("retrieval_score")
+                    if isinstance(retrieval_score, (int, float)) and not isinstance(
+                        retrieval_score, bool
+                    ):
+                        retrieval_scores.append(float(retrieval_score))
+                    else:
+                        # Compatibility with older provenance records.
+                        score = source.get("score")
+                        if isinstance(score, (int, float)) and not isinstance(score, bool):
+                            retrieval_scores.append(float(score))
+
+                    reranker_score = source.get("reranker_score")
+                    if isinstance(reranker_score, (int, float)) and not isinstance(
+                        reranker_score, bool
+                    ):
+                        reranker_scores.append(float(reranker_score))
+
                 continue
 
         output = step.output
@@ -148,7 +168,34 @@ def extract_evidence(
                     if isinstance(chunk_id, str) and chunk_id:
                         rag_chunk_ids.add(chunk_id)
 
+                    retrieval_score = result.get("retrieval_score")
+                    if isinstance(retrieval_score, (int, float)) and not isinstance(
+                        retrieval_score, bool
+                    ):
+                        retrieval_scores.append(float(retrieval_score))
+                    else:
+                        # Compatibility with older raw RAG results.
+                        score = result.get("score")
+                        if isinstance(score, (int, float)) and not isinstance(score, bool):
+                            retrieval_scores.append(float(score))
+
+                    reranker_score = result.get("reranker_score")
+                    if isinstance(reranker_score, (int, float)) and not isinstance(
+                        reranker_score, bool
+                    ):
+                        reranker_scores.append(float(reranker_score))
+
     rag_unique_chunks_count = len(rag_chunk_ids)
+
+    retrieval_score_min = min(retrieval_scores) if retrieval_scores else None
+    retrieval_score_max = max(retrieval_scores) if retrieval_scores else None
+    retrieval_score_avg = (
+        sum(retrieval_scores) / len(retrieval_scores) if retrieval_scores else None
+    )
+
+    reranker_score_min = min(reranker_scores) if reranker_scores else None
+    reranker_score_max = max(reranker_scores) if reranker_scores else None
+    reranker_score_avg = sum(reranker_scores) / len(reranker_scores) if reranker_scores else None
 
     model_governance = (
         run.request_snapshot.model_governance if run.request_snapshot is not None else None
@@ -187,6 +234,12 @@ def extract_evidence(
         final_answer_text=answer_text,
         rag_sources_available_count=rag_sources_available_count,
         rag_unique_chunks_count=rag_unique_chunks_count,
+        retrieval_score_min=retrieval_score_min,
+        retrieval_score_max=retrieval_score_max,
+        retrieval_score_avg=retrieval_score_avg,
+        reranker_score_min=reranker_score_min,
+        reranker_score_max=reranker_score_max,
+        reranker_score_avg=reranker_score_avg,
         effective_model=effective_model,
         effective_provider=effective_provider,
         model_policy_id=model_policy_id,

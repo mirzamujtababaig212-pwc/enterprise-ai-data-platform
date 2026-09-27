@@ -30,6 +30,12 @@ class AgentRunEvidence:
     final_answer_text: str | None = None
     rag_sources_available_count: int = 0
     rag_unique_chunks_count: int = 0
+    retrieval_score_min: float | None = None
+    retrieval_score_max: float | None = None
+    retrieval_score_avg: float | None = None
+    reranker_score_min: float | None = None
+    reranker_score_max: float | None = None
+    reranker_score_avg: float | None = None
     effective_model: str | None = None
     effective_provider: str | None = None
     model_policy_id: str | None = None
@@ -82,6 +88,12 @@ class AgentEvaluationMetrics:
     final_answer_length: int = 0
     rag_sources_available_count: int = 0
     rag_unique_chunks_count: int = 0
+    retrieval_score_min: float | None = None
+    retrieval_score_max: float | None = None
+    retrieval_score_avg: float | None = None
+    reranker_score_min: float | None = None
+    reranker_score_max: float | None = None
+    reranker_score_avg: float | None = None
 
     def __post_init__(self) -> None:
         if self.execution_time_ms < 0:
@@ -118,5 +130,11 @@ class AgentEvaluationMetrics:
             "final_answer_length": self.final_answer_length,
             "rag_sources_available_count": self.rag_sources_available_count,
             "rag_unique_chunks_count": self.rag_unique_chunks_count,
+            "retrieval_score_min": self.retrieval_score_min,
+            "retrieval_score_max": self.retrieval_score_max,
+            "retrieval_score_avg": self.retrieval_score_avg,
+            "reranker_score_min": self.reranker_score_min,
+            "reranker_score_max": self.reranker_score_max,
+            "reranker_score_avg": self.reranker_score_avg,
             "task_completed": self.task_completed,
         }
