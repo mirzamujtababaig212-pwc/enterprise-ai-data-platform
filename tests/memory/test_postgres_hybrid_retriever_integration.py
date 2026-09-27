@@ -6,9 +6,9 @@ import os
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import create_engine, delete, text
+from sqlalchemy.orm import sessionmaker
 
-from app.control_plane.persistence.database import SessionLocal
 from app.control_plane.persistence.models import (
     MemoryEmbeddingRecord,
     MemoryItemRecord,
@@ -23,12 +23,41 @@ from memory.models import MemoryItem
 from memory.retrieval.hybrid import HybridMemoryRetriever
 from memory.retrieval.postgres_lexical import PostgreSQLLexicalMemoryRetriever
 from memory.retrieval.postgres_semantic import PostgreSQLSemanticMemoryRetriever
+from memory.retrieval.reranker import CrossEncoderMemoryReranker
+from memory.retrieval.reranking import RerankingMemoryRetriever
 from rag.models import EmbeddingIdentity, EmbeddingResult
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",
     reason="PostgreSQL integration tests require RUN_POSTGRES_INTEGRATION=1",
 )
+
+
+def _postgres_session_factory():
+    host = os.getenv("POSTGRES_TEST_HOST", "localhost")
+    port = os.getenv("POSTGRES_TEST_PORT", "5432")
+    user = os.getenv("POSTGRES_TEST_USER", "postgres")
+    password = os.getenv("POSTGRES_TEST_PASSWORD", "postgres")
+    database = os.getenv("POSTGRES_TEST_DB", "vehicle_platform")
+
+    engine = create_engine(
+        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        pool_pre_ping=True,
+        future=True,
+    )
+
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+    return (
+        sessionmaker(
+            bind=engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        ),
+        engine,
+    )
 
 
 class FakeEmbeddingService:
@@ -137,8 +166,9 @@ def _embedding(
 async def _put_memory(
     memory: MemoryItem,
     embedding: EmbeddingResult,
+    session_factory,
 ) -> None:
-    session = SessionLocal()
+    session = session_factory()
     try:
         session.add(
             MemoryItemRecord(
@@ -155,14 +185,14 @@ async def _put_memory(
     finally:
         session.close()
 
-    await PostgreSQLMemoryEmbeddingStore(SessionLocal).put(
+    await PostgreSQLMemoryEmbeddingStore(session_factory).put(
         memory.id,
         embedding,
     )
 
 
-async def _cleanup(memory_ids: list[str]) -> None:
-    session = SessionLocal()
+async def _cleanup(memory_ids: list[str], session_factory) -> None:
+    session = session_factory()
     try:
         session.execute(
             delete(MemoryEmbeddingRecord).where(MemoryEmbeddingRecord.memory_id.in_(memory_ids))
@@ -175,6 +205,7 @@ async def _cleanup(memory_ids: list[str]) -> None:
 
 def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results():
     async def run() -> None:
+        session_factory, engine = _postgres_session_factory()
         namespace = "postgres-hybrid-memory-retrieval"
 
         memories = [
@@ -215,7 +246,7 @@ def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results()
 
         try:
             for memory in memories:
-                await _put_memory(memory, embeddings[memory.id])
+                await _put_memory(memory, embeddings[memory.id], session_factory)
 
             embedding_service = FakeEmbeddingService(
                 vectors={
@@ -226,10 +257,10 @@ def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results()
 
             semantic_retriever = PostgreSQLSemanticMemoryRetriever(
                 embedding_service=embedding_service,
-                session_factory=SessionLocal,
+                session_factory=session_factory,
             )
             lexical_retriever = PostgreSQLLexicalMemoryRetriever(
-                session_factory=SessionLocal,
+                session_factory=session_factory,
             )
 
             retriever = HybridMemoryRetriever(
@@ -252,13 +283,15 @@ def test_postgresql_hybrid_memory_retriever_fuses_semantic_and_lexical_results()
             assert len(result_ids) == 3
             assert len(result_ids) == len(set(result_ids))
         finally:
-            await _cleanup([memory.id for memory in memories])
+            await _cleanup([memory.id for memory in memories], session_factory)
+            engine.dispose()
 
     asyncio.run(run())
 
 
 def test_postgresql_hybrid_memory_retriever_meets_quality_baseline():
     async def run() -> None:
+        session_factory, engine = _postgres_session_factory()
         identity = EmbeddingIdentity(
             requested_provider="test-provider",
             requested_model="postgres-hybrid-quality-test",
@@ -276,14 +309,15 @@ def test_postgresql_hybrid_memory_retriever_meets_quality_baseline():
                         vector=_vector_for_text(item.content),
                         identity=identity,
                     ),
+                    session_factory,
                 )
 
             semantic_retriever = PostgreSQLSemanticMemoryRetriever(
                 embedding_service=embedding_service,
-                session_factory=SessionLocal,
+                session_factory=session_factory,
             )
             lexical_retriever = PostgreSQLLexicalMemoryRetriever(
-                session_factory=SessionLocal,
+                session_factory=session_factory,
             )
             retriever = HybridMemoryRetriever(
                 semantic_retriever=semantic_retriever,
@@ -312,6 +346,130 @@ def test_postgresql_hybrid_memory_retriever_meets_quality_baseline():
             print(f"ndcg@5      = {result.ndcg_at_k:.6f}")
             print(f"latency_ms  = {result.mean_latency_ms:.3f}")
         finally:
-            await _cleanup([item.id for item in MEMORY_RETRIEVAL_QUALITY_ITEMS])
+            await _cleanup(
+                [item.id for item in MEMORY_RETRIEVAL_QUALITY_ITEMS],
+                session_factory,
+            )
+            engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_postgresql_hybrid_cross_encoder_memory_retriever_quality():
+    """Compare experimental cross-encoder reranking with hybrid retrieval.
+
+    This benchmark is observational rather than a production-quality gate:
+    the reranker must execute successfully and produce measurable metrics,
+    but it is not required to improve the hybrid baseline.
+    """
+
+    async def run() -> None:
+        session_factory, engine = _postgres_session_factory()
+        identity = EmbeddingIdentity(
+            requested_provider="test-provider",
+            requested_model="postgres-hybrid-reranker-quality-test",
+            resolved_provider="test-provider",
+            resolved_model="postgres-hybrid-reranker-quality-test",
+            dimension=DIMENSION,
+        )
+        embedding_service = SyntheticBenchmarkEmbeddingService(identity)
+
+        try:
+            for item in MEMORY_RETRIEVAL_QUALITY_ITEMS:
+                await _put_memory(
+                    item,
+                    EmbeddingResult(
+                        vector=_vector_for_text(item.content),
+                        identity=identity,
+                    ),
+                    session_factory,
+                )
+
+            semantic_retriever = PostgreSQLSemanticMemoryRetriever(
+                embedding_service=embedding_service,
+                session_factory=session_factory,
+            )
+            lexical_retriever = PostgreSQLLexicalMemoryRetriever(
+                session_factory=session_factory,
+            )
+
+            baseline_retriever = HybridMemoryRetriever(
+                semantic_retriever=semantic_retriever,
+                lexical_retriever=lexical_retriever,
+                candidate_k=20,
+                rrf_k=60,
+            )
+
+            reranked_hybrid_retriever = HybridMemoryRetriever(
+                semantic_retriever=semantic_retriever,
+                lexical_retriever=lexical_retriever,
+                candidate_k=20,
+                rrf_k=60,
+            )
+
+            reranker = CrossEncoderMemoryReranker(
+                model_id=CrossEncoderMemoryReranker.DEFAULT_MODEL_ID,
+                onnx_filename=CrossEncoderMemoryReranker.DEFAULT_ONNX_FILENAME,
+                revision="aca45de6945b5dc6399abcd2a9c55ded5dc9111f",
+                max_length=8192,
+            )
+            reranked_retriever = RerankingMemoryRetriever(
+                reranked_hybrid_retriever,
+                reranker,
+                candidate_k=20,
+            )
+
+            baseline_evaluator = MemoryRetrievalEvaluator(
+                baseline_retriever,
+                k=5,
+            )
+            reranked_evaluator = MemoryRetrievalEvaluator(
+                reranked_retriever,
+                k=5,
+            )
+
+            baseline = await baseline_evaluator.evaluate(MEMORY_RETRIEVAL_QUALITY_CASES)
+            reranked = await reranked_evaluator.evaluate(MEMORY_RETRIEVAL_QUALITY_CASES)
+
+            print()
+            print("PostgreSQL hybrid@20 baseline:")
+            print(f"recall@5    = {baseline.recall_at_k:.6f}")
+            print(f"precision@5 = {baseline.precision_at_k:.6f}")
+            print(f"mrr         = {baseline.mrr:.6f}")
+            print(f"ndcg@5      = {baseline.ndcg_at_k:.6f}")
+            print(f"latency_ms  = {baseline.mean_latency_ms:.3f}")
+
+            print()
+            print("PostgreSQL hybrid@20 + cross-encoder reranker:")
+            print(f"recall@5    = {reranked.recall_at_k:.6f}")
+            print(f"precision@5 = {reranked.precision_at_k:.6f}")
+            print(f"mrr         = {reranked.mrr:.6f}")
+            print(f"ndcg@5      = {reranked.ndcg_at_k:.6f}")
+            print(f"latency_ms  = {reranked.mean_latency_ms:.3f}")
+
+            print()
+            print("Reranker delta:")
+            print(f"recall@5    = " f"{reranked.recall_at_k - baseline.recall_at_k:+.6f}")
+            print(f"precision@5 = " f"{reranked.precision_at_k - baseline.precision_at_k:+.6f}")
+            print(f"mrr         = " f"{reranked.mrr - baseline.mrr:+.6f}")
+            print(f"ndcg@5      = " f"{reranked.ndcg_at_k - baseline.ndcg_at_k:+.6f}")
+            print(f"latency_ms  = " f"{reranked.mean_latency_ms - baseline.mean_latency_ms:+.3f}")
+
+            assert baseline.evaluated_queries == len(MEMORY_RETRIEVAL_QUALITY_CASES)
+            assert baseline.successful_queries == len(MEMORY_RETRIEVAL_QUALITY_CASES)
+            assert baseline.failed_queries == 0
+
+            assert reranked.evaluated_queries == len(MEMORY_RETRIEVAL_QUALITY_CASES)
+            assert reranked.successful_queries == len(MEMORY_RETRIEVAL_QUALITY_CASES)
+            assert reranked.failed_queries == 0
+
+            assert baseline.mean_latency_ms >= 0.0
+            assert reranked.mean_latency_ms >= 0.0
+        finally:
+            await _cleanup(
+                [item.id for item in MEMORY_RETRIEVAL_QUALITY_ITEMS],
+                session_factory,
+            )
+            engine.dispose()
 
     asyncio.run(run())
