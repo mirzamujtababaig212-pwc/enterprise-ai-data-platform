@@ -22,6 +22,8 @@ class AgentEvaluator:
     def evaluate_run(
         evidence: AgentRunEvidence,
         policy: AgentEvaluationPolicy,
+        *,
+        answer_evaluation: AgentAnswerEvaluation | None = None,
     ) -> tuple[AgentEvaluationMetrics, AgentQualityGateResult]:
         metrics = AgentEvaluationMetrics(
             execution_time_ms=evidence.execution_time_ms,
@@ -43,6 +45,7 @@ class AgentEvaluator:
         quality_gate = AgentQualityGateEvaluator.evaluate(
             metrics,
             policy,
+            answer_evaluation=answer_evaluation,
         )
 
         return metrics, quality_gate

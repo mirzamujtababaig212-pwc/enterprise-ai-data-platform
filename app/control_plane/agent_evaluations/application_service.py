@@ -80,13 +80,14 @@ class AgentEvaluationApplicationService:
             events,
         )
 
-        metrics, quality_gate = self._evaluator.evaluate_run(
-            evidence,
-            policy,
-        )
         answer_evaluation = self._evaluator.evaluate_answer(
             evidence,
             expected_answer=expected_answer,
+        )
+        metrics, quality_gate = self._evaluator.evaluate_run(
+            evidence,
+            policy,
+            answer_evaluation=answer_evaluation,
         )
 
         evaluation_run = AgentEvaluationRun(

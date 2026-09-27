@@ -97,6 +97,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "max_invalid_tool_calls": 0,
                 "allow_governance_denials": False,
                 "require_task_completed": True,
+                "require_answer_match": True,
                 "name": "production-integration-quality-gate",
             },
         )
@@ -136,6 +137,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "max_invalid_tool_calls": 0,
             "allow_governance_denials": False,
             "require_task_completed": True,
+            "require_answer_match": True,
             "name": "production-integration-quality-gate",
         }
 
@@ -187,6 +189,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "max_invalid_tool_calls": 0,
                 "allow_governance_denials": False,
                 "require_task_completed": True,
+                "require_answer_match": True,
                 "name": "production-integration-quality-gate",
             }
 

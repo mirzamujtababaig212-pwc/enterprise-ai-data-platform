@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluator
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
 from ai_platform.agents.evaluation.models import AgentRunEvidence
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
@@ -60,6 +61,77 @@ def test_evaluator_produces_deterministic_metrics_and_passes_gate():
     assert metrics.task_completed is True
     assert gate.passed is True
     assert gate.violations == ()
+
+
+def test_answer_mismatch_does_not_fail_gate_when_not_required():
+    policy = AgentEvaluationPolicy(require_answer_match=False)
+    answer_evaluation = AgentAnswerEvaluator.evaluate(
+        actual_answer="Actual response",
+        expected_answer="Expected response",
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        answer_evaluation=answer_evaluation,
+    )
+
+    assert answer_evaluation.evaluated is True
+    assert answer_evaluation.exact_match is False
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_required_answer_match_passes_when_answer_matches():
+    policy = AgentEvaluationPolicy(require_answer_match=True)
+    answer_evaluation = AgentAnswerEvaluator.evaluate(
+        actual_answer="Expected response",
+        expected_answer="expected   response",
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        answer_evaluation=answer_evaluation,
+    )
+
+    assert answer_evaluation.evaluated is True
+    assert answer_evaluation.exact_match is True
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_required_answer_match_rejects_mismatched_answer():
+    policy = AgentEvaluationPolicy(require_answer_match=True)
+    answer_evaluation = AgentAnswerEvaluator.evaluate(
+        actual_answer="Actual response",
+        expected_answer="Expected response",
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        answer_evaluation=answer_evaluation,
+    )
+
+    assert answer_evaluation.evaluated is True
+    assert answer_evaluation.exact_match is False
+    assert gate.passed is False
+    assert gate.violations == ("Final answer did not match the expected answer.",)
+
+
+def test_required_answer_match_rejects_missing_evaluation():
+    policy = AgentEvaluationPolicy(require_answer_match=True)
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Answer match was required but answer evaluation was not performed.",
+    )
 
 
 def test_quality_gate_rejects_multiple_violations():

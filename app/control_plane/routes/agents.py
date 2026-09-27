@@ -496,6 +496,7 @@ async def evaluate_agent_run(
         max_invalid_tool_calls=payload.max_invalid_tool_calls,
         allow_governance_denials=payload.allow_governance_denials,
         require_task_completed=payload.require_task_completed,
+        require_answer_match=payload.require_answer_match,
         name=payload.name,
     )
 
@@ -564,6 +565,7 @@ async def evaluate_agent_run(
             max_invalid_tool_calls=evaluation.policy.max_invalid_tool_calls,
             allow_governance_denials=evaluation.policy.allow_governance_denials,
             require_task_completed=evaluation.policy.require_task_completed,
+            require_answer_match=evaluation.policy.require_answer_match,
             name=evaluation.policy.name,
         ),
         quality_gate=AgentEvaluationQualityGateResponse(
@@ -664,6 +666,7 @@ async def list_agent_run_evaluations(
                     max_invalid_tool_calls=evaluation.policy.max_invalid_tool_calls,
                     allow_governance_denials=evaluation.policy.allow_governance_denials,
                     require_task_completed=evaluation.policy.require_task_completed,
+                    require_answer_match=evaluation.policy.require_answer_match,
                     name=evaluation.policy.name,
                 ),
                 quality_gate=AgentEvaluationQualityGateResponse(

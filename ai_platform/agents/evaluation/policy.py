@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
 
 
@@ -15,6 +16,7 @@ class AgentEvaluationPolicy:
     max_invalid_tool_calls: int | None = None
     allow_governance_denials: bool = False
     require_task_completed: bool = True
+    require_answer_match: bool = False
     name: str | None = None
 
     def __post_init__(self) -> None:
@@ -34,6 +36,7 @@ class AgentEvaluationPolicy:
             "max_invalid_tool_calls": self.max_invalid_tool_calls,
             "allow_governance_denials": self.allow_governance_denials,
             "require_task_completed": self.require_task_completed,
+            "require_answer_match": self.require_answer_match,
             "name": self.name,
         }
 
@@ -59,6 +62,7 @@ class AgentQualityGateEvaluator:
     def evaluate(
         metrics: AgentEvaluationMetrics,
         policy: AgentEvaluationPolicy,
+        answer_evaluation: AgentAnswerEvaluation | None = None,
     ) -> AgentQualityGateResult:
         violations: list[str] = []
 
@@ -93,6 +97,14 @@ class AgentQualityGateEvaluator:
             violations.append(
                 f"Execution triggered {metrics.governance_denials} " "governance denial(s)."
             )
+
+        if policy.require_answer_match:
+            if answer_evaluation is None or not answer_evaluation.evaluated:
+                violations.append(
+                    "Answer match was required but answer evaluation was not performed."
+                )
+            elif not answer_evaluation.exact_match:
+                violations.append("Final answer did not match the expected answer.")
 
         return AgentQualityGateResult(
             passed=not violations,

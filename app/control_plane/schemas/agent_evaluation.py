@@ -11,6 +11,7 @@ class AgentEvaluationPolicyRequest(BaseModel):
     max_invalid_tool_calls: int | None = Field(default=None, ge=0)
     allow_governance_denials: bool = False
     require_task_completed: bool = True
+    require_answer_match: bool = False
     name: str | None = None
 
 
@@ -21,6 +22,7 @@ class AgentEvaluationRequest(BaseModel):
     max_invalid_tool_calls: int | None = Field(default=None, ge=0)
     allow_governance_denials: bool = False
     require_task_completed: bool = True
+    require_answer_match: bool = False
     name: str | None = None
 
 

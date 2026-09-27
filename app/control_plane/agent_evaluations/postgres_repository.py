@@ -211,6 +211,10 @@ class PostgreSQLAgentEvaluationRunsRepository:
                     "require_task_completed",
                     True,
                 ),
+                require_answer_match=policy_data.get(
+                    "require_answer_match",
+                    False,
+                ),
                 name=policy_data.get("name"),
             ),
             quality_gate=AgentQualityGateResult(
