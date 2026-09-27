@@ -27,6 +27,8 @@ def _evidence(**overrides) -> AgentRunEvidence:
         "tool_calls_failed": 0,
         "invalid_tool_calls": 0,
         "governance_denials": 0,
+        "rag_queries_total": 2,
+        "rag_sources_retrieved_total": 5,
     }
     values.update(overrides)
     return AgentRunEvidence(**values)
@@ -45,6 +47,8 @@ def test_evaluator_produces_deterministic_metrics_and_passes_gate():
     assert metrics.steps_total == 3
     assert metrics.tool_calls_total == 2
     assert metrics.tool_calls_successful == 2
+    assert metrics.rag_queries_total == 2
+    assert metrics.rag_sources_retrieved_total == 5
     assert metrics.task_completed is True
     assert gate.passed is True
     assert gate.violations == ()
@@ -137,6 +141,8 @@ def test_evaluation_run_is_immutable_and_serializable():
         "tool_calls_failed",
         "invalid_tool_calls",
         "governance_denials",
+        "rag_queries_total",
+        "rag_sources_retrieved_total",
     ],
 )
 def test_evidence_rejects_negative_metrics(field):

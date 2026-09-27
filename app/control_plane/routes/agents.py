@@ -547,6 +547,8 @@ async def evaluate_agent_run(
             tool_calls_failed=evaluation.metrics.tool_calls_failed,
             invalid_tool_calls=evaluation.metrics.invalid_tool_calls,
             governance_denials=evaluation.metrics.governance_denials,
+            rag_queries_total=evaluation.metrics.rag_queries_total,
+            rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
             task_completed=evaluation.metrics.task_completed,
         ),
         policy=AgentEvaluationPolicyRequest(
@@ -632,6 +634,8 @@ async def list_agent_run_evaluations(
                     tool_calls_failed=evaluation.metrics.tool_calls_failed,
                     invalid_tool_calls=evaluation.metrics.invalid_tool_calls,
                     governance_denials=evaluation.metrics.governance_denials,
+                    rag_queries_total=evaluation.metrics.rag_queries_total,
+                    rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
                     task_completed=evaluation.metrics.task_completed,
                 ),
                 policy=AgentEvaluationPolicyRequest(

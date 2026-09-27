@@ -33,6 +33,8 @@ class AgentEvaluationMetricsResponse(BaseModel):
     tool_calls_failed: int
     invalid_tool_calls: int
     governance_denials: int
+    rag_queries_total: int
+    rag_sources_retrieved_total: int
     task_completed: bool
 
 

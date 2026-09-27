@@ -36,6 +36,8 @@ def make_evaluation_run(
         invalid_tool_calls=0,
         governance_denials=0,
         task_completed=True,
+        rag_queries_total=2,
+        rag_sources_retrieved_total=5,
     )
 
     policy = AgentEvaluationPolicy(

@@ -120,6 +120,8 @@ def make_evaluation(
             invalid_tool_calls=0,
             governance_denials=0,
             task_completed=True,
+            rag_queries_total=2,
+            rag_sources_retrieved_total=5,
         ),
         policy=AgentEvaluationPolicy(
             max_execution_time_ms=1000,
@@ -187,6 +189,8 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     }
     assert body["metrics"]["steps_total"] == 3
     assert body["metrics"]["tool_calls_total"] == 2
+    assert body["metrics"]["rag_queries_total"] == 2
+    assert body["metrics"]["rag_sources_retrieved_total"] == 5
     assert body["metrics"]["task_completed"] is True
     assert body["policy"]["name"] == "default-agent-quality"
     assert body["quality_gate"]["passed"] is True

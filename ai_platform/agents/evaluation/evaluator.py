@@ -27,6 +27,8 @@ class AgentEvaluator:
             tool_calls_failed=evidence.tool_calls_failed,
             invalid_tool_calls=evidence.invalid_tool_calls,
             governance_denials=evidence.governance_denials,
+            rag_queries_total=evidence.rag_queries_total,
+            rag_sources_retrieved_total=evidence.rag_sources_retrieved_total,
             task_completed=evidence.status == "completed",
         )
 

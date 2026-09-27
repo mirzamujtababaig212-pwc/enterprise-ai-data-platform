@@ -175,6 +175,11 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 tool_calls_failed=metrics_data["tool_calls_failed"],
                 invalid_tool_calls=metrics_data["invalid_tool_calls"],
                 governance_denials=metrics_data["governance_denials"],
+                rag_queries_total=metrics_data.get("rag_queries_total", 0),
+                rag_sources_retrieved_total=metrics_data.get(
+                    "rag_sources_retrieved_total",
+                    0,
+                ),
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(

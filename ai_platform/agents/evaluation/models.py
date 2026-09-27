@@ -68,6 +68,8 @@ class AgentEvaluationMetrics:
     invalid_tool_calls: int
     governance_denials: int
     task_completed: bool
+    rag_queries_total: int = 0
+    rag_sources_retrieved_total: int = 0
 
     def __post_init__(self) -> None:
         if self.execution_time_ms < 0:
@@ -80,6 +82,8 @@ class AgentEvaluationMetrics:
             "tool_calls_failed",
             "invalid_tool_calls",
             "governance_denials",
+            "rag_queries_total",
+            "rag_sources_retrieved_total",
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
@@ -93,5 +97,7 @@ class AgentEvaluationMetrics:
             "tool_calls_failed": self.tool_calls_failed,
             "invalid_tool_calls": self.invalid_tool_calls,
             "governance_denials": self.governance_denials,
+            "rag_queries_total": self.rag_queries_total,
+            "rag_sources_retrieved_total": self.rag_sources_retrieved_total,
             "task_completed": self.task_completed,
         }
