@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .models import ApprovalRequest, ApprovalStatus
+from .models import ApprovalOverride, ApprovalRequest, ApprovalStatus
 
 
 class ApprovalRequestRepository(Protocol):
@@ -32,3 +32,27 @@ class ApprovalRequestRepository(Protocol):
         self,
         run_id: str,
     ) -> list[ApprovalRequest]: ...
+
+
+class ApprovalOverrideRepository(Protocol):
+    def create(
+        self,
+        override: ApprovalOverride,
+        *,
+        commit: bool = True,
+    ) -> ApprovalOverride: ...
+
+    def get(
+        self,
+        override_id: str,
+    ) -> ApprovalOverride | None: ...
+
+    def get_by_approval(
+        self,
+        approval_id: str,
+    ) -> ApprovalOverride | None: ...
+
+    def list_by_run(
+        self,
+        run_id: str,
+    ) -> list[ApprovalOverride]: ...

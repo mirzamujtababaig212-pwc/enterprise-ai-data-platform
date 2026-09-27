@@ -5,10 +5,13 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.control_plane.persistence.models import ApprovalRequestRecord
+from app.control_plane.persistence.models import (
+    ApprovalOverrideRecord,
+    ApprovalRequestRecord,
+)
 
-from .models import ApprovalRequest, ApprovalStatus
-from .repository import ApprovalRequestRepository
+from .models import ApprovalOverride, ApprovalRequest, ApprovalStatus
+from .repository import ApprovalOverrideRepository, ApprovalRequestRepository
 
 
 class PostgreSQLApprovalRequestRepository(ApprovalRequestRepository):
@@ -171,4 +174,124 @@ class PostgreSQLApprovalRequestRepository(ApprovalRequestRepository):
             created_at=record.created_at,
             updated_at=record.updated_at,
             resolved_at=record.resolved_at,
+        )
+
+
+class PostgreSQLApprovalOverrideRepository(ApprovalOverrideRepository):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def close(self) -> None:
+        """Close the repository's database session."""
+        self._session.close()
+
+    def create(
+        self,
+        override: ApprovalOverride,
+        *,
+        commit: bool = True,
+    ) -> ApprovalOverride:
+        try:
+            existing = self._session.scalar(
+                select(ApprovalOverrideRecord).where(
+                    ApprovalOverrideRecord.override_id == override.override_id,
+                )
+            )
+
+            if existing is not None:
+                raise ValueError(f"approval override already exists: {override.override_id}")
+
+            existing_for_approval = self._session.scalar(
+                select(ApprovalOverrideRecord).where(
+                    ApprovalOverrideRecord.approval_id == override.approval_id,
+                )
+            )
+
+            if existing_for_approval is not None:
+                raise ValueError(
+                    "approval override already exists for approval: " f"{override.approval_id}"
+                )
+
+            now = datetime.now(UTC)
+
+            record = ApprovalOverrideRecord(
+                override_id=override.override_id,
+                approval_id=override.approval_id,
+                run_id=override.run_id,
+                actor=override.actor,
+                reason=override.reason,
+                created_at=override.created_at or now,
+            )
+
+            self._session.add(record)
+            self._session.flush()
+
+            if commit:
+                self._session.commit()
+
+            return self._to_domain(record)
+
+        except Exception:
+            if commit:
+                self._session.rollback()
+            raise
+
+    def get(
+        self,
+        override_id: str,
+    ) -> ApprovalOverride | None:
+        record = self._session.scalar(
+            select(ApprovalOverrideRecord).where(
+                ApprovalOverrideRecord.override_id == override_id,
+            )
+        )
+
+        if record is None:
+            return None
+
+        return self._to_domain(record)
+
+    def get_by_approval(
+        self,
+        approval_id: str,
+    ) -> ApprovalOverride | None:
+        record = self._session.scalar(
+            select(ApprovalOverrideRecord).where(
+                ApprovalOverrideRecord.approval_id == approval_id,
+            )
+        )
+
+        if record is None:
+            return None
+
+        return self._to_domain(record)
+
+    def list_by_run(
+        self,
+        run_id: str,
+    ) -> list[ApprovalOverride]:
+        records = self._session.scalars(
+            select(ApprovalOverrideRecord)
+            .where(
+                ApprovalOverrideRecord.run_id == run_id,
+            )
+            .order_by(
+                ApprovalOverrideRecord.created_at.asc(),
+                ApprovalOverrideRecord.override_id.asc(),
+            )
+        ).all()
+
+        return [self._to_domain(record) for record in records]
+
+    @staticmethod
+    def _to_domain(
+        record: ApprovalOverrideRecord,
+    ) -> ApprovalOverride:
+        return ApprovalOverride(
+            override_id=record.override_id,
+            approval_id=record.approval_id,
+            run_id=record.run_id,
+            actor=record.actor,
+            reason=record.reason,
+            created_at=record.created_at,
         )

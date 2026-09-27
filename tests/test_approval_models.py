@@ -115,3 +115,59 @@ def test_approval_request_requires_resolver() -> None:
             ApprovalStatus.APPROVED,
             resolved_by="   ",
         )
+
+
+def test_approval_override_defaults_created_at_to_utc() -> None:
+    from app.control_plane.approvals.models import ApprovalOverride
+
+    override = ApprovalOverride(
+        override_id="override-1",
+        approval_id="approval-1",
+        run_id="run-1",
+        actor="operator-123",
+        reason="Emergency operational bypass",
+    )
+
+    assert override.override_id == "override-1"
+    assert override.approval_id == "approval-1"
+    assert override.run_id == "run-1"
+    assert override.actor == "operator-123"
+    assert override.reason == "Emergency operational bypass"
+    assert override.created_at.tzinfo is not None
+    assert override.created_at.utcoffset() is not None
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["override_id", "approval_id", "run_id", "actor", "reason"],
+)
+def test_approval_override_requires_non_empty_fields(field: str) -> None:
+    from pydantic import ValidationError
+
+    from app.control_plane.approvals.models import ApprovalOverride
+
+    values = {
+        "override_id": "override-1",
+        "approval_id": "approval-1",
+        "run_id": "run-1",
+        "actor": "operator-123",
+        "reason": "Emergency operational bypass",
+    }
+    values[field] = ""
+
+    with pytest.raises(ValidationError):
+        ApprovalOverride(**values)
+
+
+def test_approval_override_is_exported_from_package() -> None:
+    from app.control_plane.approvals import ApprovalOverride
+
+    override = ApprovalOverride(
+        override_id="override-1",
+        approval_id="approval-1",
+        run_id="run-1",
+        actor="operator-123",
+        reason="Emergency operational bypass",
+    )
+
+    assert override.actor == "operator-123"

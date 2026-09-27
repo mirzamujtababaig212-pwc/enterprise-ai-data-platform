@@ -117,3 +117,136 @@ def test_list_by_run_rejects_empty_run_id() -> None:
 
     with pytest.raises(ValueError, match="run_id must not be empty"):
         repository.list_by_run(" ")
+
+
+def make_override(
+    override_id: str = "override-1",
+    approval_id: str = "approval-1",
+    run_id: str = "run-1",
+):
+    from app.control_plane.approvals.models import ApprovalOverride
+
+    return ApprovalOverride(
+        override_id=override_id,
+        approval_id=approval_id,
+        run_id=run_id,
+        actor="operator-1",
+        reason="Emergency operational bypass",
+    )
+
+
+def test_override_create_and_get() -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+    override = make_override()
+
+    created = repository.create(override)
+
+    assert created == override
+    assert repository.get(override.override_id) == override
+    assert repository.get_by_approval(override.approval_id) == override
+
+
+def test_override_create_rejects_duplicate_override_id() -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+    override = make_override()
+
+    repository.create(override)
+
+    with pytest.raises(
+        ValueError,
+        match="approval override already exists",
+    ):
+        repository.create(override)
+
+
+def test_override_create_rejects_second_override_for_same_approval() -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+    repository.create(make_override())
+
+    with pytest.raises(
+        ValueError,
+        match="approval override already exists for approval",
+    ):
+        repository.create(
+            make_override(
+                override_id="override-2",
+                approval_id="approval-1",
+            )
+        )
+
+
+def test_override_get_by_approval_returns_none_when_missing() -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+
+    assert repository.get_by_approval("missing") is None
+
+
+def test_override_list_by_run() -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+
+    first = repository.create(
+        make_override(
+            override_id="override-1",
+            approval_id="approval-1",
+            run_id="run-1",
+        )
+    )
+    second = repository.create(
+        make_override(
+            override_id="override-2",
+            approval_id="approval-2",
+            run_id="run-1",
+        )
+    )
+    repository.create(
+        make_override(
+            override_id="override-3",
+            approval_id="approval-3",
+            run_id="run-2",
+        )
+    )
+
+    assert repository.list_by_run("run-1") == [first, second]
+
+
+@pytest.mark.parametrize(
+    ("method", "value", "message"),
+    [
+        ("get", " ", "override_id must not be empty"),
+        ("get_by_approval", " ", "approval_id must not be empty"),
+        ("list_by_run", " ", "run_id must not be empty"),
+    ],
+)
+def test_override_repository_rejects_empty_lookup_values(
+    method: str,
+    value: str,
+    message: str,
+) -> None:
+    from app.control_plane.approvals.in_memory import (
+        InMemoryApprovalOverrideRepository,
+    )
+
+    repository = InMemoryApprovalOverrideRepository()
+
+    with pytest.raises(ValueError, match=message):
+        getattr(repository, method)(value)

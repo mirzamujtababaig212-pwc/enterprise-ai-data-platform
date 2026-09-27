@@ -20,7 +20,8 @@ from app.control_plane.agent_runs.lease import (
     create_lease,
     heartbeat_loop,
 )
-from app.control_plane.agent_runs.models import AgentRunStatus
+from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_run_steps.models import AgentRunStepStatus
 from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
@@ -28,8 +29,9 @@ from app.control_plane.agent_checkpoints.repository import (
     AgentCheckpointsRepository,
 )
 
-from .models import ApprovalStatus
-from .repository import ApprovalRequestRepository
+from .authorization import ApprovalOverrideAuthorizer
+from .models import ApprovalOverride, ApprovalStatus
+from .repository import ApprovalOverrideRepository, ApprovalRequestRepository
 
 
 class AgentRunApprovalContinuationService:
@@ -49,16 +51,20 @@ class AgentRunApprovalContinuationService:
         agent_run_repository: AgentRunRepository,
         agent_run_steps_repository: AgentRunStepsRepository,
         checkpoints_repository: AgentCheckpointsRepository,
+        override_repository: ApprovalOverrideRepository | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         lease_seconds: int = 60,
+        override_authorizer: ApprovalOverrideAuthorizer | None = None,
     ) -> None:
         self._runtime = runtime
         self._approval_repository = approval_repository
         self._agent_run_repository = agent_run_repository
         self._agent_run_steps_repository = agent_run_steps_repository
         self._checkpoints_repository = checkpoints_repository
+        self._override_repository = override_repository
         self._cancellation_registry = cancellation_registry
         self._lease_seconds = lease_seconds
+        self._override_authorizer = override_authorizer
 
     async def continue_approval(
         self,
@@ -72,6 +78,18 @@ class AgentRunApprovalContinuationService:
 
         if approval is None:
             raise ValueError(f"Approval request '{approval_id}' was not found.")
+
+        existing_override = (
+            self._override_repository.get_by_approval(approval_id)
+            if self._override_repository is not None
+            else None
+        )
+
+        if existing_override is not None:
+            raise ValueError(
+                f"Approval request '{approval_id}' already has an override "
+                "and cannot be resolved normally."
+            )
 
         run = self._agent_run_repository.get(approval.run_id)
 
@@ -198,17 +216,151 @@ class AgentRunApprovalContinuationService:
                 commit=True,
             )
 
+        return await self._resume_waiting_run(
+            run=run,
+            checkpoint=checkpoint,
+            request_snapshot=request_snapshot,
+        )
+
+    async def override_approval(
+        self,
+        approval_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> AgentResponse:
+        if self._override_repository is None:
+            raise RuntimeError("Approval override repository is not configured.")
+
+        if self._override_authorizer is None:
+            raise RuntimeError("Approval override authorizer is not configured.")
+
+        if not actor.strip():
+            raise ValueError("Override actor must not be empty.")
+
+        if not reason.strip():
+            raise ValueError("Override reason must not be empty.")
+
+        if not self._override_authorizer.is_authorized(actor):
+            raise PermissionError(f"Principal '{actor}' is not authorized to override approvals.")
+
+        approval = self._approval_repository.get(approval_id)
+
+        if approval is None:
+            raise ValueError(f"Approval request '{approval_id}' was not found.")
+
+        if approval.status is not ApprovalStatus.PENDING:
+            raise ValueError(
+                f"Approval request '{approval_id}' must be pending for an "
+                f"override; current status is {approval.status.value}."
+            )
+
+        existing_override = self._override_repository.get_by_approval(
+            approval_id,
+        )
+
+        if existing_override is not None:
+            raise ValueError(f"Approval request '{approval_id}' already has an override.")
+
+        run = self._agent_run_repository.get(approval.run_id)
+
+        if run is None:
+            raise ValueError(
+                f"Agent run '{approval.run_id}' for approval " f"'{approval_id}' was not found."
+            )
+
+        if run.status is not AgentRunStatus.WAITING_FOR_APPROVAL:
+            raise ValueError(
+                f"Agent run '{run.run_id}' must be waiting for approval; "
+                f"current status is {run.status.value}."
+            )
+
+        step = self._agent_run_steps_repository.get(
+            approval.run_id,
+            approval.step_id,
+        )
+
+        if step is None:
+            raise ValueError(
+                f"Agent run step '{approval.step_id}' for run "
+                f"'{approval.run_id}' was not found."
+            )
+
+        if step.run_id != approval.run_id:
+            raise ValueError("Approval request run_id does not match the agent run step.")
+
+        if step.step_id != approval.step_id:
+            raise ValueError("Approval request step_id does not match the agent run step.")
+
+        if step.call_id != approval.call_id:
+            raise ValueError("Approval request call_id does not match the agent run step.")
+
+        if step.tool_name != approval.tool_name:
+            raise ValueError("Approval request tool_name does not match the agent run step.")
+
+        if step.status is not AgentRunStepStatus.RUNNING:
+            raise ValueError(
+                f"Agent run step '{step.step_id}' must be running for approval "
+                f"override; current status is {step.status.value}."
+            )
+
+        checkpoint = self._checkpoints_repository.get_latest(approval.run_id)
+
+        if checkpoint is None:
+            raise ValueError(
+                f"Agent run '{approval.run_id}' has no execution checkpoint "
+                "for approval override."
+            )
+
+        self._validate_checkpoint(
+            checkpoint,
+            approval_run_id=approval.run_id,
+        )
+
+        request_snapshot = run.request_snapshot
+
+        if request_snapshot is None:
+            raise ValueError(
+                f"Agent run '{approval.run_id}' has no request snapshot " "for approval override."
+            )
+
+        override = ApprovalOverride(
+            override_id=f"override-{approval_id}",
+            approval_id=approval_id,
+            run_id=approval.run_id,
+            actor=actor,
+            reason=reason,
+        )
+
+        self._override_repository.create(
+            override,
+            commit=True,
+        )
+
+        return await self._resume_waiting_run(
+            run=run,
+            checkpoint=checkpoint,
+            request_snapshot=request_snapshot,
+        )
+
+    async def _resume_waiting_run(
+        self,
+        *,
+        run: AgentRun,
+        checkpoint: AgentExecutionCheckpoint,
+        request_snapshot: AgentRunRequestSnapshot,
+    ) -> AgentResponse:
         lease_id, lease_expires_at = create_lease(self._lease_seconds)
 
         claimed_run = self._agent_run_repository.claim_waiting_for_approval(
-            approval.run_id,
+            run.run_id,
             lease_id=lease_id,
             lease_expires_at=lease_expires_at,
         )
 
         if claimed_run is None:
             raise RuntimeError(
-                f"Agent run '{approval.run_id}' could not be claimed for " "approval continuation."
+                f"Agent run '{run.run_id}' could not be claimed for " "approval continuation."
             )
 
         request = request_snapshot.to_request(

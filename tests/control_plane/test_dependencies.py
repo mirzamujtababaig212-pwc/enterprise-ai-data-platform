@@ -22,6 +22,7 @@ from app.control_plane.agent_runs.recovery_service import AgentRunRecoveryServic
 from app.control_plane.dependencies import (
     _build_rag_retriever,
     get_agent_run_application_service,
+    get_agent_run_approval_continuation_service,
     get_agent_run_recovery_service,
     get_mcp_server_lifecycle_service,
     get_usage_store,
@@ -649,3 +650,46 @@ def test_build_tenant_policy_engine_loads_environment_policy(
     assert policy.allowed_tools == frozenset({"rag.search"})
     assert policy.blocked_tools == frozenset({"vehicle.data.query"})
     assert policy.allowed_mcp_servers == frozenset({"document-server"})
+
+
+@pytest.mark.asyncio
+async def test_get_agent_run_approval_continuation_service_uses_configured_override_authorizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=123,
+        agent_run_max_recovery_attempts=3,
+        approval_override_principals=frozenset({"api_key:operator-1"}),
+    )
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies.Settings.from_environment",
+        classmethod(lambda cls: configured_settings),
+    )
+
+    async def initialize_agents() -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+
+    service = await get_agent_run_approval_continuation_service(db=Mock())
+
+    from app.control_plane.approvals.authorization import (
+        ConfiguredApprovalOverrideAuthorizer,
+    )
+
+    assert isinstance(
+        service._override_authorizer,
+        ConfiguredApprovalOverrideAuthorizer,
+    )
+    assert service._override_authorizer.is_authorized("api_key:operator-1")
+    assert not service._override_authorizer.is_authorized("api_key:other")

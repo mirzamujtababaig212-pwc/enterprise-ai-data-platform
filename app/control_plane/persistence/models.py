@@ -457,6 +457,46 @@ class AgentRunStepRecord(Base):
     )
 
 
+class ApprovalOverrideRecord(Base):
+    __tablename__ = "approval_overrides"
+
+    override_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+
+    approval_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("approval_requests.approval_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    actor: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    reason: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class ApprovalRequestRecord(Base):
     __tablename__ = "approval_requests"
 

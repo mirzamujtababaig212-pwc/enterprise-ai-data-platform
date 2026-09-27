@@ -1,8 +1,10 @@
-from .models import ApprovalRequest, ApprovalStatus
-from .repository import ApprovalRequestRepository
+from .models import ApprovalOverride, ApprovalRequest, ApprovalStatus
+from .repository import ApprovalOverrideRepository, ApprovalRequestRepository
 
 __all__ = [
+    "ApprovalOverride",
     "ApprovalRequest",
+    "ApprovalOverrideRepository",
     "ApprovalRequestRepository",
     "ApprovalStatus",
 ]

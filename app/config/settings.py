@@ -19,6 +19,7 @@ class Settings:
     external_evaluation_release_required: bool
     agent_run_lease_duration_seconds: int
     agent_run_max_recovery_attempts: int
+    approval_override_principals: frozenset[str] = frozenset()
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     tenant_policy_enforcement_enabled: bool = False
     tenant_policies: tuple[TenantPolicy, ...] = ()
@@ -224,6 +225,16 @@ class Settings:
                 "tenant policy enforcement is enabled."
             )
 
+        approval_override_principals_raw = os.getenv(
+            "APPROVAL_OVERRIDE_PRINCIPALS",
+            "",
+        )
+        approval_override_principals = frozenset(
+            value.strip()
+            for value in approval_override_principals_raw.split(",")
+            if value.strip()
+        )
+
         return cls(
             environment=os.getenv("ENVIRONMENT", "dev"),
             aws_region=os.getenv("AWS_REGION", "us-east-1"),
@@ -246,6 +257,7 @@ class Settings:
                 os.getenv("AGENT_RUN_LEASE_DURATION_SECONDS", "60")
             ),
             agent_run_max_recovery_attempts=int(os.getenv("AGENT_RUN_MAX_RECOVERY_ATTEMPTS", "3")),
+            approval_override_principals=approval_override_principals,
             mcp_servers=mcp_servers,
             tenant_policy_enforcement_enabled=tenant_policy_enforcement_enabled,
             tenant_policies=tenant_policies,

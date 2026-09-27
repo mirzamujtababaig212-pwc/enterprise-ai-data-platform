@@ -12,8 +12,9 @@ from app.control_plane.agent_runs.models import AgentRun
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
 )
-from app.control_plane.approvals.models import ApprovalRequest, ApprovalStatus
+from app.control_plane.approvals.models import ApprovalOverride, ApprovalRequest, ApprovalStatus
 from app.control_plane.approvals.postgres_repository import (
+    PostgreSQLApprovalOverrideRepository,
     PostgreSQLApprovalRequestRepository,
 )
 from app.control_plane.persistence.database import SessionLocal
@@ -76,6 +77,31 @@ def make_approval(
             26,
             9,
             0,
+            tzinfo=UTC,
+        ),
+    )
+
+
+def make_override(
+    *,
+    override_id: str = "override-1",
+    approval_id: str = "approval-1",
+    run_id: str = "approval-run-1",
+    created_at: datetime | None = None,
+) -> ApprovalOverride:
+    return ApprovalOverride(
+        override_id=override_id,
+        approval_id=approval_id,
+        run_id=run_id,
+        actor="operator-1",
+        reason="Emergency operational bypass.",
+        created_at=created_at
+        or datetime(
+            2026,
+            9,
+            26,
+            9,
+            30,
             tzinfo=UTC,
         ),
     )
@@ -392,3 +418,246 @@ def test_postgres_approval_create_can_be_rolled_back() -> None:
                 synchronize_session=False
             )
             session.commit()
+
+
+def test_postgres_approval_override_create_get_round_trip() -> None:
+    run_id = "approval-pg-override-round-trip"
+    approval = make_approval(
+        approval_id="approval-pg-override-round-trip",
+        run_id=run_id,
+    )
+    override = make_override(
+        override_id="override-pg-round-trip",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+
+    try:
+        with SessionLocal() as session:
+            PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+
+            approval_repository = PostgreSQLApprovalRequestRepository(session)
+            approval_repository.create(approval)
+
+            repository = PostgreSQLApprovalOverrideRepository(session)
+            created = repository.create(override)
+            restored = repository.get(override.override_id)
+            by_approval = repository.get_by_approval(approval.approval_id)
+
+            assert created == override
+            assert restored == override
+            assert by_approval == override
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
+
+
+def test_postgres_approval_override_list_by_run_is_deterministic() -> None:
+    run_id = "approval-pg-override-list"
+
+    approval_a = make_approval(
+        approval_id="approval-pg-override-list-a",
+        run_id=run_id,
+        step_id="step-a",
+        call_id="call-a",
+        idempotency_key="idem-a",
+    )
+    approval_b = make_approval(
+        approval_id="approval-pg-override-list-b",
+        run_id=run_id,
+        step_id="step-b",
+        call_id="call-b",
+        idempotency_key="idem-b",
+    )
+
+    first = make_override(
+        override_id="override-pg-list-a",
+        approval_id=approval_a.approval_id,
+        run_id=run_id,
+        created_at=datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
+    )
+    second = make_override(
+        override_id="override-pg-list-b",
+        approval_id=approval_b.approval_id,
+        run_id=run_id,
+        created_at=datetime(2026, 9, 26, 10, 1, tzinfo=UTC),
+    )
+
+    try:
+        with SessionLocal() as session:
+            PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+
+            approval_repository = PostgreSQLApprovalRequestRepository(session)
+            approval_repository.create(approval_a)
+            approval_repository.create(approval_b)
+
+            repository = PostgreSQLApprovalOverrideRepository(session)
+            repository.create(first)
+            repository.create(second)
+
+            listed = repository.list_by_run(run_id)
+
+            assert [item.override_id for item in listed] == [
+                "override-pg-list-a",
+                "override-pg-list-b",
+            ]
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
+
+
+def test_postgres_approval_override_rejects_duplicate_override_id() -> None:
+    run_id = "approval-pg-override-duplicate-id"
+    approval = make_approval(
+        approval_id="approval-pg-override-duplicate-id",
+        run_id=run_id,
+    )
+    override = make_override(
+        override_id="override-pg-duplicate-id",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+
+    try:
+        with SessionLocal() as session:
+            PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+
+            PostgreSQLApprovalRequestRepository(session).create(approval)
+
+            repository = PostgreSQLApprovalOverrideRepository(session)
+            repository.create(override)
+
+            with pytest.raises(
+                ValueError,
+                match="approval override already exists",
+            ):
+                repository.create(override)
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
+
+
+def test_postgres_approval_override_allows_only_one_override_per_approval() -> None:
+    run_id = "approval-pg-override-unique-approval"
+    approval = make_approval(
+        approval_id="approval-pg-override-unique-approval",
+        run_id=run_id,
+    )
+    first = make_override(
+        override_id="override-pg-unique-approval-a",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+    second = make_override(
+        override_id="override-pg-unique-approval-b",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+
+    try:
+        with SessionLocal() as session:
+            PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+
+            PostgreSQLApprovalRequestRepository(session).create(approval)
+
+            repository = PostgreSQLApprovalOverrideRepository(session)
+            repository.create(first)
+
+            with pytest.raises(
+                ValueError,
+                match="approval override already exists for approval",
+            ):
+                repository.create(second)
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
+
+
+def test_postgres_approval_override_create_can_be_rolled_back() -> None:
+    run_id = "approval-pg-override-rollback"
+    approval = make_approval(
+        approval_id="approval-pg-override-rollback",
+        run_id=run_id,
+    )
+    override = make_override(
+        override_id="override-pg-rollback",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+
+    try:
+        with SessionLocal() as session:
+            PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+
+            PostgreSQLApprovalRequestRepository(session).create(approval)
+
+            repository = PostgreSQLApprovalOverrideRepository(session)
+            repository.create(override, commit=False)
+
+            assert repository.get(override.override_id) == override
+
+            session.rollback()
+
+            assert repository.get(override.override_id) is None
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
+
+
+def test_postgres_approval_override_is_removed_with_agent_run() -> None:
+    run_id = "approval-pg-override-cascade"
+    approval = make_approval(
+        approval_id="approval-pg-override-cascade",
+        run_id=run_id,
+    )
+    override = make_override(
+        override_id="override-pg-cascade",
+        approval_id=approval.approval_id,
+        run_id=run_id,
+    )
+
+    with SessionLocal() as session:
+        PostgreSQLAgentRunRepository(session).create(make_run(run_id=run_id))
+        PostgreSQLApprovalRequestRepository(session).create(approval)
+        PostgreSQLApprovalOverrideRepository(session).create(override)
+
+    with SessionLocal() as session:
+        from app.control_plane.persistence.models import AgentRunRecord
+
+        session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+            synchronize_session=False
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        assert PostgreSQLApprovalOverrideRepository(session).get(override.override_id) is None

@@ -55,6 +55,7 @@ from app.control_plane.approvals.continuation_service import (
 from app.control_plane.approvals.coordinator import ControlPlaneApprovalCoordinator
 from app.control_plane.approvals.policy import SideEffectApprovalPolicy
 from app.control_plane.approvals.postgres_repository import (
+    PostgreSQLApprovalOverrideRepository,
     PostgreSQLApprovalRequestRepository,
 )
 from app.control_plane.evaluation_application_service import EvaluationApplicationService
@@ -105,6 +106,9 @@ from tools.mcp.manager import MCPServerManager
 from tools.rag.search import RAGSearchTool
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.vehicle.data_query import VehicleDataQueryTool
+from app.control_plane.approvals.authorization import (
+    ConfiguredApprovalOverrideAuthorizer,
+)
 
 _llm_router = Router()
 
@@ -517,11 +521,15 @@ async def get_agent_run_approval_continuation_service(
     return AgentRunApprovalContinuationService(
         runtime=_agent_runtime,
         approval_repository=PostgreSQLApprovalRequestRepository(db),
+        override_repository=PostgreSQLApprovalOverrideRepository(db),
         agent_run_repository=PostgreSQLAgentRunRepository(db),
         agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
         checkpoints_repository=PostgreSQLAgentCheckpointsRepository(db),
         cancellation_registry=_agent_run_cancellation_registry,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
+        override_authorizer=ConfiguredApprovalOverrideAuthorizer(
+            app_settings.approval_override_principals,
+        ),
     )
 
 

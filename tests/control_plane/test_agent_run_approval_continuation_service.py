@@ -20,7 +20,14 @@ from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapsho
 from app.control_plane.approvals.continuation_service import (
     AgentRunApprovalContinuationService,
 )
-from app.control_plane.approvals.models import ApprovalRequest, ApprovalStatus
+from app.control_plane.approvals.authorization import (
+    ConfiguredApprovalOverrideAuthorizer,
+)
+from app.control_plane.approvals.models import (
+    ApprovalOverride,
+    ApprovalRequest,
+    ApprovalStatus,
+)
 from ai_platform.agents.llm_messages import user_message
 
 
@@ -134,6 +141,8 @@ def _service(
     run: AgentRun | None = None,
     step: AgentRunStep | None = None,
     checkpoint: AgentExecutionCheckpoint | None = None,
+    override_repository: MagicMock | None = None,
+    override_authorizer: ConfiguredApprovalOverrideAuthorizer | None = None,
 ):
     runtime = MagicMock()
     runtime.resume = AsyncMock(
@@ -191,6 +200,15 @@ def _service(
     checkpoints_repository = MagicMock()
     checkpoints_repository.get_latest.return_value = checkpoint
 
+    if override_repository is None:
+        override_repository = MagicMock()
+        override_repository.get_by_approval.return_value = None
+
+    if override_authorizer is None:
+        override_authorizer = ConfiguredApprovalOverrideAuthorizer(
+            frozenset({"api_key:operator-1"}),
+        )
+
     return (
         AgentRunApprovalContinuationService(
             runtime=runtime,
@@ -198,7 +216,9 @@ def _service(
             agent_run_repository=agent_run_repository,
             agent_run_steps_repository=agent_run_steps_repository,
             checkpoints_repository=checkpoints_repository,
+            override_repository=override_repository,
             lease_seconds=60,
+            override_authorizer=override_authorizer,
         ),
         runtime,
         approval_repository,
@@ -467,3 +487,316 @@ async def test_runtime_control_signal_returns_run_to_waiting_for_approval() -> N
 
     agent_run_repository.transition_to_waiting_for_approval_if_owner.assert_called_once()
     agent_run_repository.complete_if_owner.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_authorized_override_persists_and_resumes_without_approving_request() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+    )
+
+    response = await service.override_approval(
+        APPROVAL_ID,
+        actor="api_key:operator-1",
+        reason="Emergency operational bypass.",
+    )
+
+    assert response.output == "Payment completed"
+
+    approval_repository.update_status.assert_not_called()
+
+    override_repository.create.assert_called_once()
+    override = override_repository.create.call_args.args[0]
+
+    assert isinstance(override, ApprovalOverride)
+    assert override.approval_id == APPROVAL_ID
+    assert override.run_id == RUN_ID
+    assert override.actor == "api_key:operator-1"
+    assert override.reason == "Emergency operational bypass."
+
+    agent_run_repository.claim_waiting_for_approval.assert_called_once()
+    runtime.resume.assert_awaited_once()
+    agent_run_repository.complete_if_owner.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_override_does_not_resume_or_persist() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+        override_authorizer=ConfiguredApprovalOverrideAuthorizer(
+            frozenset({"api_key:operator-1"}),
+        ),
+    )
+
+    with pytest.raises(PermissionError, match="not authorized"):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="api_key:unauthorized",
+            reason="Emergency operational bypass.",
+        )
+
+    override_repository.create.assert_not_called()
+    agent_run_repository.claim_waiting_for_approval.assert_not_called()
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_existing_override_cannot_be_reused() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    existing_override = ApprovalOverride(
+        override_id="override-existing",
+        approval_id=APPROVAL_ID,
+        run_id=RUN_ID,
+        actor="api_key:operator-1",
+        reason="Existing operational bypass.",
+    )
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = existing_override
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+    )
+
+    with pytest.raises(ValueError, match="already has an override"):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="api_key:operator-1",
+            reason="Second bypass.",
+        )
+
+    override_repository.create.assert_not_called()
+    agent_run_repository.claim_waiting_for_approval.assert_not_called()
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_override_requires_authorizer_configuration() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+        override_authorizer=None,
+    )
+
+    service._override_authorizer = None
+
+    with pytest.raises(
+        RuntimeError,
+        match="override authorizer is not configured",
+    ):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="api_key:operator-1",
+            reason="Emergency operational bypass.",
+        )
+
+    override_repository.create.assert_not_called()
+    agent_run_repository.claim_waiting_for_approval.assert_not_called()
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [ApprovalStatus.APPROVED, ApprovalStatus.REJECTED],
+)
+async def test_resolved_approval_cannot_be_overridden(
+    status: ApprovalStatus,
+) -> None:
+    approval = _approval(status=status)
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+    )
+
+    with pytest.raises(ValueError, match="must be pending"):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="api_key:operator-1",
+            reason="Emergency operational bypass.",
+        )
+
+    override_repository.create.assert_not_called()
+    agent_run_repository.claim_waiting_for_approval.assert_not_called()
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_override_requires_non_empty_actor_and_reason() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+    )
+
+    with pytest.raises(ValueError, match="actor must not be empty"):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="   ",
+            reason="Emergency operational bypass.",
+        )
+
+    with pytest.raises(ValueError, match="reason must not be empty"):
+        await service.override_approval(
+            APPROVAL_ID,
+            actor="api_key:operator-1",
+            reason="   ",
+        )
+
+    override_repository.create.assert_not_called()
+    agent_run_repository.claim_waiting_for_approval.assert_not_called()
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_normal_approval_cannot_continue_after_override() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+
+    existing_override = ApprovalOverride(
+        override_id="override-existing",
+        approval_id=APPROVAL_ID,
+        run_id=RUN_ID,
+        actor="api_key:operator-1",
+        reason="Emergency operational bypass.",
+    )
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = existing_override
+
+    (
+        service,
+        runtime,
+        _,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="already has an override.*cannot be resolved normally",
+    ):
+        await service.continue_approval(
+            APPROVAL_ID,
+            status=ApprovalStatus.APPROVED,
+            resolved_by="api_key:approver-1",
+            resolution_reason="Approved after review.",
+        )
+
+    agent_run_repository.get.assert_not_called()
+    runtime.resume.assert_not_awaited()
+    override_repository.get_by_approval.assert_called_once_with(APPROVAL_ID)
