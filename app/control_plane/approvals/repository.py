@@ -18,6 +18,15 @@ class ApprovalRequestRepository(Protocol):
         approval_id: str,
     ) -> ApprovalRequest | None: ...
 
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        status: ApprovalStatus | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalRequest]: ...
+
     def update_status(
         self,
         approval_id: str,

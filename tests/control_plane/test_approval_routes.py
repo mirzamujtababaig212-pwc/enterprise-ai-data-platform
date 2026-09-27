@@ -17,6 +17,7 @@ from app.control_plane.routes.approvals import router
 
 class FakeApprovalRepository:
     def __init__(self) -> None:
+        self.list_calls: list[tuple[str | None, str | None, ApprovalStatus | None, int]] = []
         self.approval = ApprovalRequest(
             approval_id="approval-123",
             run_id="run-123",
@@ -35,6 +36,23 @@ class FakeApprovalRepository:
         if approval_id == self.approval.approval_id:
             return self.approval
         return None
+
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        status: ApprovalStatus | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalRequest]:
+        self.list_calls.append(
+            (tenant_id, principal, status, limit),
+        )
+
+        if status is not None and self.approval.status is not status:
+            return []
+
+        return [self.approval][:limit]
 
 
 class FakeAgentRunApplicationService:
@@ -405,3 +423,96 @@ def test_override_approval_requires_reason() -> None:
 
     assert response.status_code == 422
     assert continuation_service.calls == []
+
+
+def test_list_approvals_uses_authenticated_identity_and_filters() -> None:
+    approval_repository = FakeApprovalRepository()
+    application_service = FakeAgentRunApplicationService()
+    continuation_service = FakeApprovalContinuationService()
+
+    client = build_client(
+        approval_repository,
+        application_service,
+        continuation_service,
+    )
+
+    response = client.get(
+        "/api/v1/approvals",
+        params={
+            "status": "pending",
+            "limit": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "approval_id": "approval-123",
+            "run_id": "run-123",
+            "step_id": "step-1",
+            "call_id": "call-1",
+            "tool_name": "vehicle.lookup",
+            "idempotency_key": "idem-1",
+            "status": "pending",
+            "policy_name": "high-risk-tool",
+            "policy_version": "1",
+            "risk_tier": "high",
+            "requested_action": "lookup vehicle",
+            "policy_metadata": {},
+            "resolved_by": None,
+            "resolution_reason": None,
+            "created_at": None,
+            "updated_at": None,
+            "resolved_at": None,
+        },
+    ]
+    assert approval_repository.list_calls == [
+        (
+            "tenant-acme",
+            "api_key:test-owner",
+            ApprovalStatus.PENDING,
+            25,
+        ),
+    ]
+
+
+def test_list_approvals_requires_authenticated_identity() -> None:
+    approval_repository = FakeApprovalRepository()
+    application_service = FakeAgentRunApplicationService()
+    continuation_service = FakeApprovalContinuationService()
+
+    client = build_client(
+        approval_repository,
+        application_service,
+        continuation_service,
+        principal=None,
+        tenant_id=None,
+    )
+
+    response = client.get("/api/v1/approvals")
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Authenticated tenant and principal context are required.",
+    }
+    assert approval_repository.list_calls == []
+
+
+def test_list_approvals_rejects_invalid_limit() -> None:
+    approval_repository = FakeApprovalRepository()
+    application_service = FakeAgentRunApplicationService()
+    continuation_service = FakeApprovalContinuationService()
+
+    client = build_client(
+        approval_repository,
+        application_service,
+        continuation_service,
+    )
+
+    response = client.get(
+        "/api/v1/approvals",
+        params={"limit": 101},
+    )
+
+    assert response.status_code == 422
+    assert approval_repository.list_calls == []

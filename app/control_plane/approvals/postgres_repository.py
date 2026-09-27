@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.models import (
+    AgentRunRecord,
     ApprovalOverrideRecord,
     ApprovalRequestRecord,
 )
@@ -87,6 +88,45 @@ class PostgreSQLApprovalRequestRepository(ApprovalRequestRepository):
             return None
 
         return self._to_domain(record)
+
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        status: ApprovalStatus | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalRequest]:
+        statement = select(ApprovalRequestRecord)
+
+        if tenant_id is not None or principal is not None:
+            statement = statement.join(
+                AgentRunRecord,
+                ApprovalRequestRecord.run_id == AgentRunRecord.run_id,
+            )
+
+            if tenant_id is not None:
+                statement = statement.where(
+                    AgentRunRecord.tenant_id == tenant_id,
+                )
+
+            if principal is not None:
+                statement = statement.where(
+                    AgentRunRecord.principal == principal,
+                )
+
+        if status is not None:
+            statement = statement.where(
+                ApprovalRequestRecord.status == status.value,
+            )
+
+        statement = statement.order_by(
+            ApprovalRequestRecord.created_at.desc(),
+            ApprovalRequestRecord.approval_id.desc(),
+        ).limit(limit)
+
+        records = self._session.scalars(statement).all()
+        return [self._to_domain(record) for record in records]
 
     def update_status(
         self,

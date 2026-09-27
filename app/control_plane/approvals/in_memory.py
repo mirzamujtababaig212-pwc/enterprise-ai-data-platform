@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from threading import Lock
 
 from .models import ApprovalOverride, ApprovalRequest, ApprovalStatus
@@ -35,6 +36,35 @@ class InMemoryApprovalRequestRepository(ApprovalRequestRepository):
 
         with self._lock:
             return self._approvals.get(approval_id)
+
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        status: ApprovalStatus | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalRequest]:
+        del tenant_id, principal
+
+        if limit < 1:
+            raise ValueError("limit must be greater than zero.")
+
+        with self._lock:
+            approvals = list(self._approvals.values())
+
+            if status is not None:
+                approvals = [approval for approval in approvals if approval.status is status]
+
+            approvals.sort(
+                key=lambda approval: (
+                    approval.created_at or datetime.min.replace(tzinfo=UTC),
+                    approval.approval_id,
+                ),
+                reverse=True,
+            )
+
+            return approvals[:limit]
 
     def update_status(
         self,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ai_platform.agents.models import AgentResponse
 from app.control_plane.agent_runs.application_service import (
@@ -20,6 +20,7 @@ from app.control_plane.dependencies import (
 from app.control_plane.schemas.approvals import (
     ApprovalDecisionRequest,
     ApprovalDecisionResponse,
+    ApprovalInboxItem,
     ApprovalOverrideRequest,
 )
 
@@ -92,6 +93,54 @@ def _authorize_approval_access(
         )
 
     return principal, approval.run_id
+
+
+@router.get(
+    "",
+    response_model=list[ApprovalInboxItem],
+)
+async def list_approvals(
+    request: Request,
+    approval_repository: ApprovalRequestRepository = Depends(
+        get_approval_request_repository,
+    ),
+    approval_status: ApprovalStatus | None = Query(
+        default=None,
+        alias="status",
+    ),
+    limit: int = Query(default=100, ge=1, le=100),
+) -> list[ApprovalInboxItem]:
+    tenant_id, principal = _authenticated_identity(request)
+
+    approvals = approval_repository.list(
+        tenant_id=tenant_id,
+        principal=principal,
+        status=approval_status,
+        limit=limit,
+    )
+
+    return [
+        ApprovalInboxItem(
+            approval_id=approval.approval_id,
+            run_id=approval.run_id,
+            step_id=approval.step_id,
+            call_id=approval.call_id,
+            tool_name=approval.tool_name,
+            idempotency_key=approval.idempotency_key,
+            status=approval.status.value,
+            policy_name=approval.policy_name,
+            policy_version=approval.policy_version,
+            risk_tier=approval.risk_tier,
+            requested_action=approval.requested_action,
+            policy_metadata=approval.policy_metadata,
+            resolved_by=approval.resolved_by,
+            resolution_reason=approval.resolution_reason,
+            created_at=approval.created_at,
+            updated_at=approval.updated_at,
+            resolved_at=approval.resolved_at,
+        )
+        for approval in approvals
+    ]
 
 
 @router.post(

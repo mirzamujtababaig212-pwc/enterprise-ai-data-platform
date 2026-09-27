@@ -28,14 +28,16 @@ pytestmark = pytest.mark.skipif(
 def make_run(
     *,
     run_id: str,
+    principal: str = "api_key:approval-integration",
+    tenant_id: str = "tenant-approval",
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
         agent_name="approval-integration-agent",
         session_id=f"session-{run_id}",
         user_id="approval-integration-user",
-        principal="api_key:approval-integration",
-        tenant_id="tenant-approval",
+        principal=principal,
+        tenant_id=tenant_id,
     )
 
 
@@ -105,6 +107,159 @@ def make_override(
             tzinfo=UTC,
         ),
     )
+
+
+def test_postgres_approval_list_scopes_by_identity_status_and_limit() -> None:
+    matching_run_id = "approval-pg-inbox-match"
+    other_principal_run_id = "approval-pg-inbox-principal"
+    other_tenant_run_id = "approval-pg-inbox-tenant"
+
+    matching_pending = make_approval(
+        approval_id="approval-pg-inbox-new",
+        run_id=matching_run_id,
+        step_id="step-new",
+        call_id="call-new",
+        idempotency_key="idem-new",
+    ).model_copy(
+        update={
+            "created_at": datetime(2026, 9, 26, 11, 0, tzinfo=UTC),
+            "updated_at": datetime(2026, 9, 26, 11, 0, tzinfo=UTC),
+        }
+    )
+
+    matching_approved = make_approval(
+        approval_id="approval-pg-inbox-approved",
+        run_id=matching_run_id,
+        step_id="step-approved",
+        call_id="call-approved",
+        idempotency_key="idem-approved",
+    ).model_copy(
+        update={
+            "created_at": datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
+            "updated_at": datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
+            "status": ApprovalStatus.APPROVED,
+            "resolved_by": "reviewer-1",
+            "resolved_at": datetime(2026, 9, 26, 10, 30, tzinfo=UTC),
+        }
+    )
+
+    other_principal = make_approval(
+        approval_id="approval-pg-inbox-wrong-principal",
+        run_id=other_principal_run_id,
+        step_id="step-principal",
+        call_id="call-principal",
+        idempotency_key="idem-principal",
+    ).model_copy(
+        update={
+            "created_at": datetime(2026, 9, 26, 12, 0, tzinfo=UTC),
+            "updated_at": datetime(2026, 9, 26, 12, 0, tzinfo=UTC),
+        }
+    )
+
+    other_tenant = make_approval(
+        approval_id="approval-pg-inbox-wrong-tenant",
+        run_id=other_tenant_run_id,
+        step_id="step-tenant",
+        call_id="call-tenant",
+        idempotency_key="idem-tenant",
+    ).model_copy(
+        update={
+            "created_at": datetime(2026, 9, 26, 13, 0, tzinfo=UTC),
+            "updated_at": datetime(2026, 9, 26, 13, 0, tzinfo=UTC),
+        }
+    )
+
+    run_ids = {
+        matching_run_id,
+        other_principal_run_id,
+        other_tenant_run_id,
+    }
+
+    try:
+        with SessionLocal() as session:
+            run_repository = PostgreSQLAgentRunRepository(session)
+            repository = PostgreSQLApprovalRequestRepository(session)
+
+            run_repository.create(make_run(run_id=matching_run_id))
+            run_repository.create(
+                make_run(
+                    run_id=other_principal_run_id,
+                    principal="api_key:other-principal",
+                )
+            )
+            run_repository.create(
+                make_run(
+                    run_id=other_tenant_run_id,
+                    tenant_id="tenant-other",
+                )
+            )
+
+            repository.create(matching_pending)
+            repository.create(matching_approved)
+            repository.create(other_principal)
+            repository.create(other_tenant)
+
+            pending = repository.list(
+                tenant_id="tenant-approval",
+                principal="api_key:approval-integration",
+                status=ApprovalStatus.PENDING,
+            )
+
+            assert [item.approval_id for item in pending] == [
+                "approval-pg-inbox-new",
+            ]
+
+            scoped = repository.list(
+                tenant_id="tenant-approval",
+                principal="api_key:approval-integration",
+                limit=10,
+            )
+
+            assert [item.approval_id for item in scoped] == [
+                "approval-pg-inbox-new",
+                "approval-pg-inbox-approved",
+            ]
+
+            limited = repository.list(
+                tenant_id="tenant-approval",
+                principal="api_key:approval-integration",
+                limit=1,
+            )
+
+            assert [item.approval_id for item in limited] == [
+                "approval-pg-inbox-new",
+            ]
+
+            tenant_only = repository.list(
+                tenant_id="tenant-approval",
+                limit=10,
+            )
+
+            assert [item.approval_id for item in tenant_only] == [
+                "approval-pg-inbox-wrong-principal",
+                "approval-pg-inbox-new",
+                "approval-pg-inbox-approved",
+            ]
+
+            principal_only = repository.list(
+                principal="api_key:approval-integration",
+                limit=10,
+            )
+
+            assert [item.approval_id for item in principal_only] == [
+                "approval-pg-inbox-wrong-tenant",
+                "approval-pg-inbox-new",
+                "approval-pg-inbox-approved",
+            ]
+
+    finally:
+        with SessionLocal() as session:
+            from app.control_plane.persistence.models import AgentRunRecord
+
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+            session.commit()
 
 
 def test_postgres_approval_create_get_round_trip() -> None:

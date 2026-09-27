@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from app.control_plane.approvals.in_memory import (
@@ -93,6 +95,50 @@ def test_update_status_cannot_resolve_twice() -> None:
             ApprovalStatus.APPROVED,
             resolved_by="reviewer-2",
         )
+
+
+def test_list_filters_status_and_applies_limit() -> None:
+    repository = InMemoryApprovalRequestRepository()
+
+    older = repository.create(
+        make_approval("approval-old", "run-1").model_copy(
+            update={
+                "created_at": datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
+            }
+        )
+    )
+    newer = repository.create(
+        make_approval("approval-new", "run-1").model_copy(
+            update={
+                "created_at": datetime(2026, 9, 26, 11, 0, tzinfo=UTC),
+            }
+        )
+    )
+    repository.update_status(
+        older.approval_id,
+        ApprovalStatus.APPROVED,
+        resolved_by="reviewer-1",
+    )
+
+    pending = repository.list(
+        status=ApprovalStatus.PENDING,
+        limit=10,
+    )
+    assert [item.approval_id for item in pending] == [
+        "approval-new",
+    ]
+
+    scoped = repository.list(limit=1)
+    assert [item.approval_id for item in scoped] == [
+        newer.approval_id,
+    ]
+
+
+def test_list_rejects_non_positive_limit() -> None:
+    repository = InMemoryApprovalRequestRepository()
+
+    with pytest.raises(ValueError, match="limit must be greater than zero"):
+        repository.list(limit=0)
 
 
 def test_list_by_run() -> None:
