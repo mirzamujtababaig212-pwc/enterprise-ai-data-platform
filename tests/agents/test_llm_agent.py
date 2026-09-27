@@ -8,6 +8,7 @@ from app.control_plane.approvals.models import ApprovalStatus
 from app.control_plane.approvals.policy import SideEffectApprovalPolicy
 
 import asyncio
+from datetime import datetime
 
 from typing import Any
 
@@ -72,6 +73,8 @@ from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
+from memory.context.builder import MemoryContext
+from memory.models import MemoryItem
 from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -1803,6 +1806,95 @@ async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
     assert after_checkpoint.messages[-1].role is AgentMessageRole.TOOL
     assert "call-123" in after_checkpoint.messages[-1].content
     assert len(after_checkpoint.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_checkpoint_preserves_rendered_memory_context() -> None:
+    definition = AgentDefinition(
+        name="production-memory-agent",
+        description="Production memory-enabled LLM agent",
+        system_prompt="You are a production assistant.",
+        model="gpt-test",
+        tool_names=("search",),
+    )
+
+    checkpoint_handler = FakeAgentCheckpointHandler()
+    gateway = FakeToolCallingLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    memory_item = MemoryItem(
+        id="memory-001",
+        memory_type="semantic",
+        content="The production deployment uses the approved release workflow.",
+        namespace="enterprise-agent",
+        created_at=datetime.now(),
+    )
+
+    memory_context = MemoryContext(
+        working=(),
+        semantic=(memory_item,),
+        episodic=(),
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="How does the production deployment work?",
+            user_id="user-123",
+            session_id="session-456",
+            memory_namespace="enterprise-agent",
+        ),
+        tools=tools,
+        llm=llm_context,
+        memory=memory_context,
+        run_id="run-memory-checkpoint-1",
+    )
+
+    agent = LLMAgent(
+        definition,
+        checkpoint_handler=checkpoint_handler,
+    )
+
+    await agent.run(context)
+
+    assert len(checkpoint_handler.checkpoints) == 2
+
+    before_checkpoint = checkpoint_handler.checkpoints[0]
+
+    memory_messages = [
+        message
+        for message in before_checkpoint.messages
+        if message.role is AgentMessageRole.SYSTEM
+        and "The following information was retrieved from agent memory." in message.content
+    ]
+
+    assert len(memory_messages) == 1
+    assert (
+        "The production deployment uses the approved release workflow."
+        in memory_messages[0].content
+    )
+
+    after_checkpoint = checkpoint_handler.checkpoints[1]
+
+    assert after_checkpoint.messages[: len(before_checkpoint.messages)] == (
+        before_checkpoint.messages
+    )
+
+    serialized = before_checkpoint.to_dict()
+    restored = AgentExecutionCheckpoint.from_dict(serialized)
+
+    assert restored.messages == before_checkpoint.messages
 
 
 @pytest.mark.asyncio
