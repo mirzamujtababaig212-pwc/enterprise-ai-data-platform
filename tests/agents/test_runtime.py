@@ -104,6 +104,7 @@ class ReplanningPlanProvider:
 class ReplanningDecisionProvider:
     def __init__(self) -> None:
         self.decisions: list[AgentRuntimeDecision] = []
+        self.results: list[AgentRuntimeDecisionResult] = []
         self.contexts: list[AgentExecutionContext] = []
         self.states: list[object] = []
         self.evaluations: list[AgentRuntimeEvaluationSnapshot] = []
@@ -128,10 +129,12 @@ class ReplanningDecisionProvider:
             else AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED
         )
 
-        return AgentRuntimeDecisionResult(
+        result = AgentRuntimeDecisionResult(
             decision=decision,
             reason=reason,
         )
+        self.results.append(result)
+        return result
 
 
 class FakeAgent:
@@ -596,6 +599,17 @@ async def test_runtime_replans_between_semantic_iterations() -> None:
         AgentRuntimeDecision.STOP,
     ]
 
+    assert decision_provider.results == [
+        AgentRuntimeDecisionResult(
+            decision=AgentRuntimeDecision.CONTINUE,
+            reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_REMAINING,
+        ),
+        AgentRuntimeDecisionResult(
+            decision=AgentRuntimeDecision.STOP,
+            reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+        ),
+    ]
+
     assert len(decision_provider.contexts) == 2
     assert decision_provider.contexts[0] is decision_provider.contexts[1]
 
@@ -614,8 +628,12 @@ async def test_runtime_replans_between_semantic_iterations() -> None:
 
     assert len(gateway.requests) == 2
 
-    assert decision_provider.contexts[-1].runtime_state.phase is (AgentRuntimePhase.EVALUATE)
-    assert decision_provider.contexts[-1].runtime_state.decision is (AgentRuntimeDecision.STOP)
+    assert decision_provider.contexts[-1].runtime_state.phase is AgentRuntimePhase.EVALUATE
+    assert decision_provider.contexts[-1].runtime_state.decision is AgentRuntimeDecision.STOP
+    assert (
+        decision_provider.contexts[-1].runtime_state.decision_reason
+        == AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED.value
+    )
 
 
 @pytest.mark.asyncio
