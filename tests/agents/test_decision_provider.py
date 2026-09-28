@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ai_platform.agents.decision_provider import (
     AgentRuntimeDecisionReason,
     AgentRuntimeDecisionResult,
@@ -65,6 +67,28 @@ def test_deterministic_decision_provider_returns_stop() -> None:
         decision=AgentRuntimeDecision.STOP,
         reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
     )
+
+
+def test_decision_result_rejects_invalid_decision_type() -> None:
+    with pytest.raises(
+        TypeError,
+        match="Runtime decision result decision must be an AgentRuntimeDecision",
+    ):
+        AgentRuntimeDecisionResult(
+            decision="stop",
+            reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+        )
+
+
+def test_decision_result_rejects_invalid_reason_type() -> None:
+    with pytest.raises(
+        TypeError,
+        match="Runtime decision result reason must be an AgentRuntimeDecisionReason",
+    ):
+        AgentRuntimeDecisionResult(
+            decision=AgentRuntimeDecision.STOP,
+            reason="iteration_budget_exhausted",
+        )
 
 
 def test_execution_context_defaults_to_deterministic_decision_provider() -> None:

@@ -35,6 +35,8 @@ from ai_platform.agents.exceptions import (
     AgentToolLoopLimitError,
 )
 from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.orchestration import AgentRuntimeDecision, AgentRuntimePhase
+from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.policy import (
     ModelGovernanceDecision,
@@ -200,6 +202,43 @@ def make_context(
     )
 
     return context, gateway
+
+
+def test_llm_agent_rejects_invalid_runtime_decision_provider_result() -> None:
+    context, _ = make_context()
+    context.runtime_state.transition_to(AgentRuntimePhase.ACT)
+    context.runtime_state.transition_to(AgentRuntimePhase.OBSERVE)
+    context.runtime_state.transition_to(AgentRuntimePhase.EVALUATE)
+
+    class InvalidDecisionProvider:
+        def evaluate(
+            self,
+            context: AgentExecutionContext,
+            evaluation: AgentRuntimeEvaluationSnapshot,
+        ) -> AgentRuntimeDecision:
+            return AgentRuntimeDecision.STOP
+
+    context.decision_provider = InvalidDecisionProvider()
+
+    response = AgentResponse(
+        agent_name="test-llm-agent",
+        output="Generated answer.",
+        session_id=context.session_id,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="Runtime decision provider must return an AgentRuntimeDecisionResult",
+    ):
+        LLMAgent._evaluate_runtime_decision(
+            context,
+            response=response,
+            tool_rounds=0,
+        )
+
+    assert context.runtime_state.phase is AgentRuntimePhase.EVALUATE
+    assert context.runtime_state.decision is None
+    assert context.runtime_state.decision_reason is None
 
 
 @pytest.mark.asyncio
