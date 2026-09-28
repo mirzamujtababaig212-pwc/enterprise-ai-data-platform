@@ -9,6 +9,7 @@ from app.control_plane.approvals.policy import SideEffectApprovalPolicy
 
 import asyncio
 from datetime import datetime
+from time import monotonic
 
 from typing import Any
 
@@ -27,6 +28,7 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.budget import ExecutionBudget, ExecutionBudgetState
 from ai_platform.agents.exceptions import (
+    AgentExecutionDurationLimitError,
     AgentExecutionOwnershipLostError,
     AgentExecutionWaitingForApprovalError,
     AgentLLMCallLimitError,
@@ -3328,6 +3330,79 @@ async def test_llm_agent_persists_failed_durable_tool_step() -> None:
     assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
     assert step.error == "RuntimeError: simulated tool failure"
     assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_persists_duration_limit_failure_for_running_durable_step() -> None:
+    definition = AgentDefinition(
+        name="test-duration-limit-agent",
+        description="Test agent for execution duration limit.",
+        system_prompt="You are a test agent.",
+        model="gpt-test",
+    )
+
+    gateway = FakeLLMGateway()
+    tool_registry = InMemoryToolRegistry()
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="generate_answer",
+                step_index=0,
+                name="Generate answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-duration-limit"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Generate an answer.",
+            session_id="session-duration-limit",
+            execution_budget=ExecutionBudget(
+                max_duration_seconds=1.0,
+            ),
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    context.execution_budget_state.started_at = monotonic() - 2.0
+
+    with pytest.raises(
+        AgentExecutionDurationLimitError,
+        match=r"maximum execution duration \(1\.0 seconds\)",
+    ):
+        await agent.run(context)
+
+    step = repository.get(run_id, "generate_answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.completed_at is not None
+    assert step.error == (
+        "AgentExecutionDurationLimitError: "
+        "Agent 'test-duration-limit-agent' exceeded the maximum execution "
+        "duration (1.0 seconds)."
+    )
+
+    assert len(gateway.requests) == 0
 
 
 @pytest.mark.asyncio

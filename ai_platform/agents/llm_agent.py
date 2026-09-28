@@ -14,6 +14,7 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.exceptions import (
+    AgentExecutionWaitingForApprovalError,
     AgentExecutionOwnershipLostError,
     AgentOutputPolicyError,
     AgentTokenLimitError,
@@ -1615,6 +1616,7 @@ class LLMAgent:
                 if (
                     current_step is not None
                     and current_step.status is OrchestrationStepStatus.RUNNING
+                    and not isinstance(exc, AgentExecutionWaitingForApprovalError)
                 ):
                     failed_step_index = current_step.step_index
                     context.orchestration_state.fail_step(
@@ -1623,7 +1625,11 @@ class LLMAgent:
                             "error_type": type(exc).__name__,
                         },
                     )
-
+                    await self._persist_orchestration_step_failed(
+                        context,
+                        current_step,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                     await self._emit_orchestration_step_failed(
                         context,
                         failed_step_index,
