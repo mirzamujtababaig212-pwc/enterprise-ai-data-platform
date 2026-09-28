@@ -312,11 +312,31 @@ def test_production_control_plane_persists_agent_run_events() -> None:
         events_payload = events_response.json()
 
         assert [event["event_type"] for event in events_payload["events"]] == [
+            "governance.decision",
+            "governance.decision",
+            "governance.decision",
             "agent.started",
             "llm.requested",
             "llm.completed",
+            "runtime.decision",
             "agent.completed",
         ]
+
+        runtime_decision_payload = next(
+            event for event in events_payload["events"] if event["event_type"] == "runtime.decision"
+        )
+
+        assert runtime_decision_payload["run_id"] == run_id
+        assert runtime_decision_payload["session_id"] == session_id
+        assert runtime_decision_payload["user_id"] == "integration-test-user"
+        assert runtime_decision_payload["provider"] == "integration-test"
+        assert runtime_decision_payload["model"] == "integration-test-model"
+        assert runtime_decision_payload["step_index"] == 0
+        assert runtime_decision_payload["metadata"] == {
+            "decision": "stop",
+            "reason": "iteration_budget_exhausted",
+            "iteration": 1,
+        }
 
         assert all(event["run_id"] == run_id for event in events_payload["events"])
         assert all(
@@ -348,11 +368,29 @@ def test_production_control_plane_persists_agent_run_events() -> None:
             )
 
         assert [event.event_type for event in events] == [
+            "governance.decision",
+            "governance.decision",
+            "governance.decision",
             "agent.started",
             "llm.requested",
             "llm.completed",
+            "runtime.decision",
             "agent.completed",
         ]
+
+        runtime_decision = next(event for event in events if event.event_type == "runtime.decision")
+
+        assert runtime_decision.run_id == run_id
+        assert runtime_decision.session_id == session_id
+        assert runtime_decision.user_id == "integration-test-user"
+        assert runtime_decision.provider == "integration-test"
+        assert runtime_decision.model == "integration-test-model"
+        assert runtime_decision.step_index == 0
+        assert runtime_decision.event_metadata == {
+            "decision": "stop",
+            "reason": "iteration_budget_exhausted",
+            "iteration": 1,
+        }
 
         assert events
         assert {event.run_id for event in events} == {run_id}
@@ -689,6 +727,9 @@ def test_production_control_plane_persists_failed_agent_run() -> None:
             )
 
         assert [event.event_type for event in events] == [
+            "governance.decision",
+            "governance.decision",
+            "governance.decision",
             "agent.started",
             "llm.requested",
             "agent.failed",
@@ -1012,12 +1053,17 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert produce_step.status == "completed"
 
         assert [event.event_type for event in events] == [
+            "governance.decision",
+            "governance.decision",
+            "governance.decision",
             "agent.started",
             "orchestration.step.started",
             "llm.requested",
             "llm.completed",
             "tool.call.requested",
             "tool.authorization.decision",
+            "governance.decision",
+            "governance.decision",
             "tool.call.completed",
             "orchestration.step.completed",
             "orchestration.step.started",
@@ -1028,6 +1074,7 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             "llm.requested",
             "llm.completed",
             "orchestration.step.completed",
+            "runtime.decision",
             "agent.completed",
         ]
 
@@ -1056,8 +1103,11 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         ]
 
         assert all(event.run_id == run_id for event in events)
-        assert all(event.agent_name == "enterprise-rag-analyst" for event in events)
         assert all(event.session_id == session_id for event in events)
+
+        execution_events = [event for event in events if event.event_type != "governance.decision"]
+        assert all(event.agent_name == "enterprise-rag-analyst" for event in execution_events)
+        assert sum(event.event_type == "governance.decision" for event in events) == 5
 
         tool_requested = next(
             event for event in events if event.event_type == "tool.call.requested"
