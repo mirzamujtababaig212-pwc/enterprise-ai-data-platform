@@ -157,6 +157,98 @@ def test_quality_gate_rejects_multiple_violations():
     assert len(gate.violations) == 4
 
 
+def test_quality_gate_passes_rag_score_thresholds():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            retrieval_score_avg=0.72,
+            reranker_score_avg=0.91,
+        ),
+        policy,
+    )
+
+    assert metrics.retrieval_score_avg == 0.72
+    assert metrics.reranker_score_avg == 0.91
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_quality_gate_rejects_rag_score_thresholds():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            retrieval_score_avg=0.61,
+            reranker_score_avg=0.84,
+        ),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Average retrieval score (0.61) was below " "minimum threshold (0.70).",
+        "Average reranker score (0.84) was below " "minimum threshold (0.90).",
+    )
+
+
+def test_quality_gate_rejects_missing_rag_scores_when_threshold_required():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Average retrieval score was unavailable but minimum threshold " "(0.70) is required.",
+        "Average reranker score was unavailable but minimum threshold " "(0.90) is required.",
+    )
+
+
+def test_quality_gate_ignores_rag_scores_without_thresholds():
+    policy = AgentEvaluationPolicy()
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            retrieval_score_avg=0.20,
+            reranker_score_avg=0.10,
+        ),
+        policy,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_evaluation_policy_serializes_rag_score_thresholds():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+    )
+
+    assert policy.as_dict()["min_retrieval_score"] == 0.70
+    assert policy.as_dict()["min_reranker_score"] == 0.90
+
+
+def test_evaluation_policy_rejects_negative_rag_score_thresholds():
+    with pytest.raises(ValueError, match="min_retrieval_score must be non-negative"):
+        AgentEvaluationPolicy(min_retrieval_score=-0.01)
+
+    with pytest.raises(ValueError, match="min_reranker_score must be non-negative"):
+        AgentEvaluationPolicy(min_reranker_score=-0.01)
+
+
 def test_quality_gate_rejects_incomplete_run():
     policy = AgentEvaluationPolicy()
 
