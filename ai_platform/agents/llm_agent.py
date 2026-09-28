@@ -918,7 +918,7 @@ class LLMAgent:
                 updated_at=now,
                 completed_at=now,
                 output=output,
-                metadata=metadata,
+                metadata=self._runtime_step_metadata(context, metadata),
             )
         finally:
             repository.close()
@@ -1092,6 +1092,21 @@ class LLMAgent:
             metadata=dict(response.metadata),
         )
 
+    @staticmethod
+    def _transition_runtime_to_observe(
+        context: AgentExecutionContext,
+        step_index: int,
+    ) -> None:
+        """Transition Runtime V1 from ACT to OBSERVE at a logical boundary."""
+
+        if context.runtime_state.phase is not AgentRuntimePhase.ACT:
+            raise RuntimeError("Runtime V1 must be in ACT before entering OBSERVE")
+
+        context.runtime_state.transition_to(
+            AgentRuntimePhase.OBSERVE,
+            current_step_index=step_index,
+        )
+
     async def _complete_orchestration_step(
         self,
         context: AgentExecutionContext,
@@ -1112,6 +1127,12 @@ class LLMAgent:
             step_index,
             tool_round=tool_round,
         )
+
+        if step_index == len(state.steps) - 1:
+            self._transition_runtime_to_observe(
+                context,
+                step_index,
+            )
 
         completed_step = state.steps[step_index]
         step_result = state.get_step_result(completed_step.step_id)
@@ -1178,6 +1199,12 @@ class LLMAgent:
             step.step_index,
             tool_round=tool_round,
         )
+
+        if step.step_index == len(state.steps) - 1:
+            self._transition_runtime_to_observe(
+                context,
+                step.step_index,
+            )
 
         completed_step = state.steps[step.step_index]
 
@@ -1760,6 +1787,12 @@ class LLMAgent:
 
         if orchestration_step_index is None:
             raise RuntimeError("Orchestration recovery could not determine the current step.")
+
+        if context.runtime_state.phase is AgentRuntimePhase.PLAN:
+            context.runtime_state.transition_to(
+                AgentRuntimePhase.ACT,
+                current_step_index=orchestration_step_index,
+            )
 
         current_step = state.current_step
 
