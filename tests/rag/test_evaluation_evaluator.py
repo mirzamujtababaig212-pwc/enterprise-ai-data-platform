@@ -9,7 +9,13 @@ from rag.evaluation import (
 from rag.models import DocumentChunk, RetrievalResult
 
 
-def make_result(chunk_id: str, score: float = 0.9) -> RetrievalResult:
+def make_result(
+    chunk_id: str,
+    score: float = 0.9,
+    *,
+    retrieval_score: float | None = None,
+    reranker_score: float | None = None,
+) -> RetrievalResult:
     return RetrievalResult(
         chunk=DocumentChunk(
             id=chunk_id,
@@ -17,6 +23,8 @@ def make_result(chunk_id: str, score: float = 0.9) -> RetrievalResult:
             content=f"content-{chunk_id}",
         ),
         score=score,
+        retrieval_score=retrieval_score,
+        reranker_score=reranker_score,
     )
 
 
@@ -219,9 +227,24 @@ async def test_retrieval_evaluator_preserves_retrieval_scores() -> None:
 
     assert query_result.retrieved_chunk_ids == ("A", "B")
     assert query_result.retrieved_results == (
-        RetrievalQueryResult(chunk_id="A", score=0.91),
-        RetrievalQueryResult(chunk_id="B", score=0.73),
+        RetrievalQueryResult(
+            chunk_id="A",
+            score=0.91,
+            retrieval_score=0.91,
+        ),
+        RetrievalQueryResult(
+            chunk_id="B",
+            score=0.73,
+            retrieval_score=0.73,
+        ),
     )
+
+    assert result.retrieval_score_min == pytest.approx(0.73)
+    assert result.retrieval_score_max == pytest.approx(0.91)
+    assert result.retrieval_score_avg == pytest.approx(0.82)
+    assert result.reranker_score_min is None
+    assert result.reranker_score_max is None
+    assert result.reranker_score_avg is None
 
 
 @pytest.mark.asyncio
@@ -382,3 +405,83 @@ async def test_retrieval_evaluator_separates_abstention_from_retrieval_metrics()
     # Abstention metric uses only the abstention query.
     assert result.abstention_accuracy == pytest.approx(1.0)
     assert result.abstention_evaluated_queries == 1
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_preserves_retrieval_and_reranker_scores() -> None:
+    retriever = FakeRetriever(
+        {
+            "battery": [
+                make_result(
+                    "A",
+                    score=0.91,
+                    retrieval_score=0.72,
+                    reranker_score=0.91,
+                ),
+                make_result(
+                    "B",
+                    score=0.83,
+                    retrieval_score=0.61,
+                    reranker_score=0.83,
+                ),
+            ],
+        }
+    )
+
+    evaluator = RetrievalEvaluator(retriever, k=2)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="battery",
+                relevant_chunk_ids=("A", "B"),
+            )
+        ]
+    )
+
+    assert result.query_results[0].retrieved_results == (
+        RetrievalQueryResult(
+            chunk_id="A",
+            score=0.91,
+            retrieval_score=0.72,
+            reranker_score=0.91,
+        ),
+        RetrievalQueryResult(
+            chunk_id="B",
+            score=0.83,
+            retrieval_score=0.61,
+            reranker_score=0.83,
+        ),
+    )
+
+    assert result.retrieval_score_min == pytest.approx(0.61)
+    assert result.retrieval_score_max == pytest.approx(0.72)
+    assert result.retrieval_score_avg == pytest.approx(0.665)
+
+    assert result.reranker_score_min == pytest.approx(0.83)
+    assert result.reranker_score_max == pytest.approx(0.91)
+    assert result.reranker_score_avg == pytest.approx(0.87)
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_leaves_score_diagnostics_unset_when_no_results() -> None:
+    retriever = FakeRetriever({"unknown": []})
+
+    evaluator = RetrievalEvaluator(retriever, k=3)
+
+    result = await evaluator.evaluate(
+        [
+            RetrievalEvaluationCase(
+                query="unknown",
+                relevant_chunk_ids=(),
+                expect_abstention=True,
+            )
+        ]
+    )
+
+    assert result.retrieval_score_min is None
+    assert result.retrieval_score_max is None
+    assert result.retrieval_score_avg is None
+    assert result.reranker_score_min is None
+    assert result.reranker_score_max is None
+    assert result.reranker_score_avg is None

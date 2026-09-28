@@ -66,11 +66,17 @@ class RetrievalEvaluationCase:
 @dataclass(frozen=True)
 class RetrievalQueryResult:
     """
-    Retrieved chunk identity and similarity score captured for evaluation.
+    Retrieved chunk identity and ranking scores captured for evaluation.
+
+    ``score`` remains the final ranking score for backward compatibility.
+    ``retrieval_score`` preserves the original retriever score, while
+    ``reranker_score`` records a reranker's score when one was used.
     """
 
     chunk_id: str
     score: float
+    retrieval_score: float | None = None
+    reranker_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -114,8 +120,14 @@ class RetrievalEvaluationResult:
     query_results: tuple[RetrievalQueryEvaluation, ...]
     abstention_accuracy: float = 0.0
     abstention_evaluated_queries: int = 0
+    retrieval_score_min: float | None = None
+    retrieval_score_max: float | None = None
+    retrieval_score_avg: float | None = None
+    reranker_score_min: float | None = None
+    reranker_score_max: float | None = None
+    reranker_score_avg: float | None = None
 
-    def as_dict(self) -> dict[str, float]:
+    def as_dict(self) -> dict[str, float | None]:
         return {
             "retrieval_recall_at_k": self.recall_at_k,
             "retrieval_precision_at_k": self.precision_at_k,
@@ -127,4 +139,10 @@ class RetrievalEvaluationResult:
             "retrieval_mean_latency_ms": self.mean_latency_ms,
             "retrieval_abstention_accuracy": self.abstention_accuracy,
             "retrieval_abstention_evaluated_queries": float(self.abstention_evaluated_queries),
+            "retrieval_score_min": self.retrieval_score_min,
+            "retrieval_score_max": self.retrieval_score_max,
+            "retrieval_score_avg": self.retrieval_score_avg,
+            "reranker_score_min": self.reranker_score_min,
+            "reranker_score_max": self.reranker_score_max,
+            "reranker_score_avg": self.reranker_score_avg,
         }

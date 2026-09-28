@@ -94,6 +94,12 @@ class RetrievalEvaluator:
                 RetrievalQueryResult(
                     chunk_id=result.chunk.id,
                     score=result.score,
+                    retrieval_score=(
+                        getattr(result, "retrieval_score", None)
+                        if getattr(result, "retrieval_score", None) is not None
+                        else result.score
+                    ),
+                    reranker_score=getattr(result, "reranker_score", None),
                 )
                 for result in retrieved_results[: self.k]
             )
@@ -173,6 +179,31 @@ class RetrievalEvaluator:
             else 0.0
         )
 
+        retrieval_scores = [
+            retrieved.retrieval_score
+            for query_result in successful_results
+            for retrieved in query_result.retrieved_results
+            if retrieved.retrieval_score is not None
+        ]
+        reranker_scores = [
+            retrieved.reranker_score
+            for query_result in successful_results
+            for retrieved in query_result.retrieved_results
+            if retrieved.reranker_score is not None
+        ]
+
+        retrieval_score_min = min(retrieval_scores) if retrieval_scores else None
+        retrieval_score_max = max(retrieval_scores) if retrieval_scores else None
+        retrieval_score_avg = (
+            sum(retrieval_scores) / len(retrieval_scores) if retrieval_scores else None
+        )
+
+        reranker_score_min = min(reranker_scores) if reranker_scores else None
+        reranker_score_max = max(reranker_scores) if reranker_scores else None
+        reranker_score_avg = (
+            sum(reranker_scores) / len(reranker_scores) if reranker_scores else None
+        )
+
         if answerable_queries == 0:
             return RetrievalEvaluationResult(
                 recall_at_k=0.0,
@@ -186,6 +217,12 @@ class RetrievalEvaluator:
                 abstention_accuracy=abstention_accuracy,
                 abstention_evaluated_queries=abstention_evaluated_queries,
                 query_results=tuple(query_results),
+                retrieval_score_min=retrieval_score_min,
+                retrieval_score_max=retrieval_score_max,
+                retrieval_score_avg=retrieval_score_avg,
+                reranker_score_min=reranker_score_min,
+                reranker_score_max=reranker_score_max,
+                reranker_score_avg=reranker_score_avg,
             )
 
         return RetrievalEvaluationResult(
@@ -218,4 +255,10 @@ class RetrievalEvaluator:
             abstention_accuracy=abstention_accuracy,
             abstention_evaluated_queries=abstention_evaluated_queries,
             query_results=tuple(query_results),
+            retrieval_score_min=retrieval_score_min,
+            retrieval_score_max=retrieval_score_max,
+            retrieval_score_avg=retrieval_score_avg,
+            reranker_score_min=reranker_score_min,
+            reranker_score_max=reranker_score_max,
+            reranker_score_avg=reranker_score_avg,
         )

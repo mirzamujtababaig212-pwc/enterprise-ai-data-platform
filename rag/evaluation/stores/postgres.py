@@ -149,6 +149,12 @@ def _serialize_run(
         "retrieval_mean_latency_ms": run.evaluation.mean_latency_ms,
         "retrieval_abstention_accuracy": run.evaluation.abstention_accuracy,
         "retrieval_abstention_evaluated_queries": (run.evaluation.abstention_evaluated_queries),
+        "retrieval_score_min": run.evaluation.retrieval_score_min,
+        "retrieval_score_max": run.evaluation.retrieval_score_max,
+        "retrieval_score_avg": run.evaluation.retrieval_score_avg,
+        "reranker_score_min": run.evaluation.reranker_score_min,
+        "reranker_score_max": run.evaluation.reranker_score_max,
+        "reranker_score_avg": run.evaluation.reranker_score_avg,
     }
 
     quality_gate = run.quality_gate.as_dict()
@@ -274,6 +280,12 @@ def _deserialize_run(
         query_results=(),
         abstention_accuracy=evaluation_data["retrieval_abstention_accuracy"],
         abstention_evaluated_queries=evaluation_data["retrieval_abstention_evaluated_queries"],
+        retrieval_score_min=evaluation_data.get("retrieval_score_min"),
+        retrieval_score_max=evaluation_data.get("retrieval_score_max"),
+        retrieval_score_avg=evaluation_data.get("retrieval_score_avg"),
+        reranker_score_min=evaluation_data.get("reranker_score_min"),
+        reranker_score_max=evaluation_data.get("reranker_score_max"),
+        reranker_score_avg=evaluation_data.get("reranker_score_avg"),
     )
 
     quality_gate_data = dict(record.quality_gate)

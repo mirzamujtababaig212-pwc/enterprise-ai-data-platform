@@ -71,6 +71,12 @@ def _run(
         query_results=(),
         abstention_accuracy=1.0,
         abstention_evaluated_queries=1,
+        retrieval_score_min=0.61,
+        retrieval_score_max=0.72,
+        retrieval_score_avg=0.665,
+        reranker_score_min=0.83,
+        reranker_score_max=0.91,
+        reranker_score_avg=0.87,
     )
 
     quality_gate = RetrievalQualityGate.evaluate(
@@ -223,6 +229,12 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
         assert restored.evaluation.ndcg_at_k == run.evaluation.ndcg_at_k
         assert restored.evaluation.evaluated_queries == run.evaluation.evaluated_queries
         assert restored.evaluation.mean_latency_ms == run.evaluation.mean_latency_ms
+        assert restored.evaluation.retrieval_score_min == run.evaluation.retrieval_score_min
+        assert restored.evaluation.retrieval_score_max == run.evaluation.retrieval_score_max
+        assert restored.evaluation.retrieval_score_avg == run.evaluation.retrieval_score_avg
+        assert restored.evaluation.reranker_score_min == run.evaluation.reranker_score_min
+        assert restored.evaluation.reranker_score_max == run.evaluation.reranker_score_max
+        assert restored.evaluation.reranker_score_avg == run.evaluation.reranker_score_avg
         assert restored.evaluation.query_results == ()
 
         assert restored.quality_gate.passed == run.quality_gate.passed
@@ -237,6 +249,55 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
             "ragas/faithfulness/faithfulness": 0.91,
         }
         assert restored.external_quality_gate.policy == (run.external_quality_gate.policy)
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
+def test_get_legacy_run_without_score_diagnostics_preserves_compatibility() -> None:
+    repository, engine = _repository()
+
+    try:
+        run = _run(run_id="legacy-score-diagnostics-run")
+        asyncio.run(repository.save(run))
+
+        record = repository._session.get(
+            RetrievalEvaluationRunRecord,
+            run.run_id,
+        )
+
+        assert record is not None
+
+        legacy_evaluation = dict(record.evaluation)
+        for key in (
+            "retrieval_score_min",
+            "retrieval_score_max",
+            "retrieval_score_avg",
+            "reranker_score_min",
+            "reranker_score_max",
+            "reranker_score_avg",
+        ):
+            legacy_evaluation.pop(key, None)
+
+        record.evaluation = legacy_evaluation
+        repository._session.flush()
+
+        restored = asyncio.run(repository.get(run.run_id))
+
+        assert restored is not None
+        assert restored.run_id == run.run_id
+        assert restored.evaluation.recall_at_k == run.evaluation.recall_at_k
+        assert restored.evaluation.precision_at_k == run.evaluation.precision_at_k
+        assert restored.evaluation.mrr == run.evaluation.mrr
+        assert restored.evaluation.ndcg_at_k == run.evaluation.ndcg_at_k
+        assert restored.evaluation.mean_latency_ms == run.evaluation.mean_latency_ms
+
+        assert restored.evaluation.retrieval_score_min is None
+        assert restored.evaluation.retrieval_score_max is None
+        assert restored.evaluation.retrieval_score_avg is None
+        assert restored.evaluation.reranker_score_min is None
+        assert restored.evaluation.reranker_score_max is None
+        assert restored.evaluation.reranker_score_avg is None
     finally:
         repository._session.close()
         engine.dispose()
