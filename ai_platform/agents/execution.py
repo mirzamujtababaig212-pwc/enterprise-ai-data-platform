@@ -99,6 +99,25 @@ class AgentExecutionContext:
             if not isinstance(message, AgentMessage):
                 raise TypeError("Agent execution history must contain " "AgentMessage instances.")
 
+    def install_orchestration_plan(
+        self,
+        plan: OrchestrationPlan | None,
+    ) -> None:
+        """
+        Install an immutable orchestration plan and materialize fresh state.
+
+        A plan represents one semantic runtime iteration. Replacing a plan
+        therefore always replaces its mutable OrchestrationState as well;
+        an existing orchestration state is never reused for a new plan.
+        """
+        if plan is not None and not isinstance(plan, OrchestrationPlan):
+            raise TypeError("Orchestration plan must be an OrchestrationPlan or None.")
+
+        self.orchestration_plan = plan
+        self.orchestration_state = (
+            plan.materialize_state() if plan is not None else OrchestrationState()
+        )
+
     def get_agent_run_steps_repository(self) -> AgentRunStepsRepository | None:
         """Return a fresh durable step repository for this execution."""
         if self.agent_run_steps_repository_factory is None:
