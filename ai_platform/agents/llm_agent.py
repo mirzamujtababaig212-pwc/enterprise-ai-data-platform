@@ -1979,6 +1979,24 @@ class LLMAgent:
         """
         Resume an agent from a durable execution checkpoint.
 
+        Cancellation is handled at the recovery boundary so that recovery
+        setup, tool replay, and continuation all cancel the active
+        orchestration step consistently.
+        """
+        try:
+            return await self._resume(context, checkpoint)
+        except asyncio.CancelledError:
+            await self._cancel_current_orchestration_step(context)
+            raise
+
+    async def _resume(
+        self,
+        context: AgentExecutionContext,
+        checkpoint: AgentExecutionCheckpoint,
+    ) -> AgentResponse:
+        """
+        Resume an agent from a durable execution checkpoint.
+
         The checkpoint conversation is the authoritative continuation state.
         Logical orchestration position is restored from bounded checkpoint
         metadata, while completed tools represented by the checkpoint are not

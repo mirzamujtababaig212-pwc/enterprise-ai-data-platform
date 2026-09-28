@@ -4720,6 +4720,168 @@ async def test_llm_agent_resume_from_before_tool_checkpoint_executes_saved_tool(
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_resume_cancellation_cancels_orchestration_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="mock-gpt",
+        tool_names=("rag.search",),
+    )
+
+    class CancellationBlockingTool(FakeRAGTool):
+        def __init__(self) -> None:
+            super().__init__(name="rag.search")
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def execute(self, arguments):
+            self.execute_count += 1
+            self.started.set()
+
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = CancellationBlockingTool()
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    repository = InMemoryAgentRunStepsRepository()
+    observer = FakeAgentExecutionObserver()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-orchestration-cancel",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-orchestration-cancel-1",
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-orchestration-cancel-1",
+        agent_name=definition.name,
+        session_id="session-orchestration-cancel",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-cancel-1",
+                        name="rag.search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.BEFORE_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.RUNNING.value,
+                        "tool_round": None,
+                    },
+                },
+            },
+        },
+        execution_budget_state=ExecutionBudgetState(
+            llm_calls=1,
+            tool_calls=1,
+            tool_rounds=1,
+        ),
+    )
+
+    step = context.orchestration_state.steps[0]
+    context.orchestration_state.start_step(0)
+
+    repository.create(
+        AgentRunStep(
+            run_id=context.run_id,
+            step_id=step.step_id,
+            step_index=step.step_index,
+            step_type="tool",
+            status=AgentRunStepStatus.RUNNING,
+        )
+    )
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    execution_task = asyncio.create_task(
+        agent.resume(
+            context,
+            checkpoint,
+        )
+    )
+
+    await asyncio.wait_for(tool.started.wait(), timeout=1.0)
+
+    execution_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution_task
+
+    assert tool.cancelled is True
+
+    state = context.orchestration_state
+    assert state.current_step is not None
+    assert state.current_step.status is OrchestrationStepStatus.CANCELLED
+    assert state.current_step.step_id == "retrieve_evidence"
+
+    durable_step = repository.get(
+        context.run_id,
+        "retrieve_evidence",
+    )
+    assert durable_step is not None
+    assert durable_step.status is AgentRunStepStatus.CANCELLED
+
+    cancelled_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.ORCHESTRATION_STEP_CANCELLED
+    ]
+
+    assert len(cancelled_events) == 1
+    assert cancelled_events[0].step_id == "retrieve_evidence"
+    assert cancelled_events[0].step_index == 0
+
+    assert not any(
+        event.event_type is AgentExecutionEventType.AGENT_FAILED for event in observer.events
+    )
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_resume_completes_current_orchestration_step_from_after_tool_checkpoint() -> (
     None
 ):
