@@ -872,6 +872,181 @@ async def test_llm_agent_completes_orchestration_step() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_keeps_durable_steps_consistent_across_runtime_replanning() -> None:
+    class ReplanningPlanProvider:
+        def __init__(self) -> None:
+            self.plans: list[OrchestrationPlan] = []
+
+        def build_plan(
+            self,
+            context: AgentExecutionContext,
+        ) -> OrchestrationPlan:
+            plan_number = len(self.plans) + 2
+            plan = OrchestrationPlan(
+                steps=(
+                    OrchestrationStep(
+                        step_id=f"answer-{plan_number}",
+                        step_index=0,
+                        name="Produce answer",
+                        status=OrchestrationStepStatus.PENDING,
+                        completion_policy=(OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE),
+                    ),
+                )
+            )
+            self.plans.append(plan)
+            return plan
+
+    class ReplanningDecisionProvider:
+        def __init__(self) -> None:
+            self.results: list[AgentRuntimeDecision] = []
+            self.evaluations: list[AgentRuntimeEvaluationSnapshot] = []
+
+        def evaluate(
+            self,
+            context: AgentExecutionContext,
+            evaluation: AgentRuntimeEvaluationSnapshot,
+        ):
+            self.evaluations.append(evaluation)
+
+            decision = (
+                AgentRuntimeDecision.CONTINUE if not self.results else AgentRuntimeDecision.STOP
+            )
+            self.results.append(decision)
+
+            reason = (
+                "iteration_budget_remaining"
+                if decision is AgentRuntimeDecision.CONTINUE
+                else "iteration_budget_exhausted"
+            )
+
+            from ai_platform.agents.decision_provider import (
+                AgentRuntimeDecisionReason,
+                AgentRuntimeDecisionResult,
+            )
+
+            return AgentRuntimeDecisionResult(
+                decision=decision,
+                reason=AgentRuntimeDecisionReason(reason),
+            )
+
+    repository = InMemoryAgentRunStepsRepository()
+    plan_provider = ReplanningPlanProvider()
+    decision_provider = ReplanningDecisionProvider()
+    observer = FakeAgentExecutionObserver()
+
+    context, _ = make_context(
+        run_id="run-runtime-replanning-steps",
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    initial_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer-1",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=(OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE),
+            ),
+        )
+    )
+    context.install_orchestration_plan(initial_plan)
+    context.plan_provider = plan_provider
+    context.decision_provider = decision_provider
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test LLM-backed agent.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        ),
+        observer=observer,
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "Generated answer."
+
+    assert decision_provider.results == [
+        AgentRuntimeDecision.CONTINUE,
+        AgentRuntimeDecision.STOP,
+    ]
+    assert [evaluation.iteration for evaluation in decision_provider.evaluations] == [
+        1,
+        2,
+    ]
+
+    assert len(plan_provider.plans) == 1
+    assert plan_provider.plans[0].steps[0].step_id == "answer-2"
+
+    first_step = repository.get(
+        "run-runtime-replanning-steps",
+        "answer-1",
+    )
+    second_step = repository.get(
+        "run-runtime-replanning-steps",
+        "answer-2",
+    )
+
+    assert first_step is not None
+    assert second_step is not None
+
+    assert first_step.status is AgentRunStepStatus.COMPLETED
+    assert first_step.completed_at is not None
+    assert first_step.attempt == 1
+
+    assert second_step.status is AgentRunStepStatus.COMPLETED
+    assert second_step.completed_at is not None
+    assert second_step.attempt == 1
+
+    assert context.runtime_state.phase is AgentRuntimePhase.EVALUATE
+    assert context.runtime_state.iteration == 2
+    assert context.runtime_state.decision is AgentRuntimeDecision.STOP
+    assert context.runtime_state.current_step_index == 0
+
+    assert first_step.metadata["runtime"]["iteration"] == 1
+    assert second_step.metadata["runtime"]["iteration"] == 2
+
+    assert first_step.status is not AgentRunStepStatus.RUNNING
+    assert second_step.status is not AgentRunStepStatus.RUNNING
+
+    orchestration_events = [
+        event
+        for event in observer.events
+        if event.event_type
+        in {
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+            AgentExecutionEventType.RUNTIME_DECISION,
+        }
+    ]
+
+    assert [(event.event_type, event.step_id) for event in orchestration_events] == [
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "answer-1"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "answer-1"),
+        (AgentExecutionEventType.RUNTIME_DECISION, None),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "answer-2"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "answer-2"),
+        (AgentExecutionEventType.RUNTIME_DECISION, None),
+    ]
+
+    first_runtime_decision = orchestration_events[2]
+    assert first_runtime_decision.metadata == {
+        "decision": "continue",
+        "reason": "iteration_budget_remaining",
+        "iteration": 1,
+    }
+
+    second_runtime_decision = orchestration_events[5]
+    assert second_runtime_decision.metadata == {
+        "decision": "stop",
+        "reason": "iteration_budget_exhausted",
+        "iteration": 2,
+    }
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
     context, _ = make_context()
 
