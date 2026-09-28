@@ -1,6 +1,9 @@
 import pytest
 
 from ai_platform.agents.orchestration import (
+    AgentRuntimeDecision,
+    AgentRuntimePhase,
+    AgentRuntimeState,
     OrchestrationStepResult,
     OrchestrationPlan,
     OrchestrationState,
@@ -673,3 +676,437 @@ def test_orchestration_state_results_are_independent_per_state() -> None:
 
     assert first.get_step_result("retrieve") is not None
     assert second.get_step_result("retrieve") is None
+
+
+def test_runtime_phase_contract_allows_valid_loop_transitions():
+    from ai_platform.agents.orchestration import (
+        AgentRuntimePhase,
+        validate_runtime_phase_transition,
+    )
+
+    transitions = [
+        (AgentRuntimePhase.PLAN, AgentRuntimePhase.ACT),
+        (AgentRuntimePhase.ACT, AgentRuntimePhase.OBSERVE),
+        (AgentRuntimePhase.OBSERVE, AgentRuntimePhase.EVALUATE),
+    ]
+
+    for current, target in transitions:
+        validate_runtime_phase_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("plan", "plan"),
+        ("plan", "observe"),
+        ("plan", "evaluate"),
+        ("act", "plan"),
+        ("act", "evaluate"),
+        ("observe", "plan"),
+        ("observe", "act"),
+        ("evaluate", "plan"),
+        ("evaluate", "act"),
+    ],
+)
+def test_runtime_phase_contract_rejects_invalid_transitions(current, target):
+    from ai_platform.agents.orchestration import (
+        AgentRuntimePhase,
+        validate_runtime_phase_transition,
+    )
+
+    with pytest.raises(ValueError, match="Invalid agent runtime phase transition"):
+        validate_runtime_phase_transition(
+            AgentRuntimePhase(current),
+            AgentRuntimePhase(target),
+        )
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "continue",
+        "stop",
+    ],
+)
+def test_runtime_decision_is_valid_only_from_evaluate(decision):
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        validate_runtime_decision,
+    )
+
+    validate_runtime_decision(
+        AgentRuntimePhase.EVALUATE,
+        AgentRuntimeDecision(decision),
+    )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "plan",
+        "act",
+        "observe",
+    ],
+)
+def test_runtime_decision_is_rejected_before_evaluate(phase):
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        validate_runtime_decision,
+    )
+
+    with pytest.raises(ValueError, match="only valid from the evaluate phase"):
+        validate_runtime_decision(
+            AgentRuntimePhase(phase),
+            AgentRuntimeDecision.CONTINUE,
+        )
+
+
+def test_runtime_state_starts_at_plan_without_decision() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+
+    assert state.phase is AgentRuntimePhase.PLAN
+    assert state.decision is None
+    assert state.current_step_index is None
+    assert AgentRuntimeDecision.CONTINUE.value == "continue"
+
+
+def test_runtime_state_progresses_through_semantic_loop() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+
+    state.transition_to(
+        AgentRuntimePhase.ACT,
+        current_step_index=0,
+    )
+    assert state.phase is AgentRuntimePhase.ACT
+    assert state.current_step_index == 0
+    assert state.decision is None
+
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    assert state.phase is AgentRuntimePhase.OBSERVE
+    assert state.current_step_index is None
+
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+    assert state.phase is AgentRuntimePhase.EVALUATE
+    assert state.decision is None
+
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    assert state.decision is AgentRuntimeDecision.CONTINUE
+
+
+def test_runtime_state_continue_returns_to_plan() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    state.continue_to_plan(current_step_index=1)
+
+    assert state.phase is AgentRuntimePhase.PLAN
+    assert state.decision is None
+    assert state.current_step_index == 1
+
+
+def test_runtime_state_stop_is_terminal_decision() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+    state.evaluate(AgentRuntimeDecision.STOP)
+
+    state.stop()
+
+    assert state.phase is AgentRuntimePhase.EVALUATE
+    assert state.decision is AgentRuntimeDecision.STOP
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "plan",
+        "act",
+        "observe",
+    ],
+)
+def test_runtime_state_rejects_decision_before_evaluate(phase) -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState(phase=AgentRuntimePhase(phase))
+
+    with pytest.raises(ValueError, match="only valid from the evaluate phase"):
+        state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+
+def test_runtime_state_rejects_continue_without_continue_decision() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+
+    with pytest.raises(ValueError, match="CONTINUE decision"):
+        state.continue_to_plan()
+
+    state.evaluate(AgentRuntimeDecision.STOP)
+
+    with pytest.raises(ValueError, match="CONTINUE decision"):
+        state.continue_to_plan()
+
+
+def test_runtime_state_rejects_stop_without_stop_decision() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimeDecision,
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState()
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+
+    with pytest.raises(ValueError, match="STOP decision"):
+        state.stop()
+
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    with pytest.raises(ValueError, match="STOP decision"):
+        state.stop()
+
+
+@pytest.mark.parametrize(
+    ("phase", "target"),
+    [
+        ("plan", "observe"),
+        ("act", "evaluate"),
+        ("observe", "plan"),
+        ("evaluate", "act"),
+    ],
+)
+def test_runtime_state_rejects_invalid_phase_transitions(phase, target) -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    state = AgentRuntimeState(phase=AgentRuntimePhase(phase))
+
+    with pytest.raises(ValueError, match="Invalid agent runtime phase transition"):
+        state.transition_to(AgentRuntimePhase(target))
+
+
+def test_runtime_state_rejects_invalid_current_step_index() -> None:
+    from ai_platform.agents.orchestration import (
+        AgentRuntimePhase,
+        AgentRuntimeState,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="current_step_index must not be negative",
+    ):
+        AgentRuntimeState(current_step_index=-1)
+
+    state = AgentRuntimeState()
+
+    with pytest.raises(
+        ValueError,
+        match="current_step_index must not be negative",
+    ):
+        state.transition_to(
+            AgentRuntimePhase.ACT,
+            current_step_index=-1,
+        )
+
+
+def test_runtime_state_to_metadata_serializes_plan_state():
+    state = AgentRuntimeState(current_step_index=0)
+
+    assert state.to_metadata() == {
+        "runtime": {
+            "phase": "plan",
+            "decision": None,
+            "current_step_index": 0,
+        }
+    }
+
+
+def test_runtime_state_to_metadata_serializes_evaluate_continue_state():
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=2,
+    )
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    assert state.to_metadata() == {
+        "runtime": {
+            "phase": "evaluate",
+            "decision": "continue",
+            "current_step_index": 2,
+        }
+    }
+
+
+def test_runtime_state_to_metadata_serializes_evaluate_stop_state():
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=3,
+    )
+    state.evaluate(AgentRuntimeDecision.STOP)
+    state.stop()
+
+    assert state.to_metadata() == {
+        "runtime": {
+            "phase": "evaluate",
+            "decision": "stop",
+            "current_step_index": 3,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        AgentRuntimeState(
+            phase=AgentRuntimePhase.PLAN,
+            current_step_index=0,
+        ),
+        AgentRuntimeState(
+            phase=AgentRuntimePhase.ACT,
+            current_step_index=1,
+        ),
+        AgentRuntimeState(
+            phase=AgentRuntimePhase.OBSERVE,
+            current_step_index=1,
+        ),
+    ],
+)
+def test_runtime_state_metadata_round_trip_without_decision(state):
+    restored = AgentRuntimeState.from_metadata(state.to_metadata())
+
+    assert restored == state
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        AgentRuntimeDecision.CONTINUE,
+        AgentRuntimeDecision.STOP,
+    ],
+)
+def test_runtime_state_metadata_round_trip_from_evaluate(decision):
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=2,
+    )
+    state.evaluate(decision)
+
+    restored = AgentRuntimeState.from_metadata(state.to_metadata())
+
+    assert restored == state
+
+
+def test_runtime_state_from_metadata_returns_none_when_runtime_missing():
+    assert AgentRuntimeState.from_metadata({"source": "test"}) is None
+
+
+def test_runtime_state_from_metadata_rejects_non_dictionary_runtime():
+    with pytest.raises(
+        ValueError,
+        match="dictionary under 'runtime'",
+    ):
+        AgentRuntimeState.from_metadata({"runtime": "invalid"})
+
+
+def test_runtime_state_from_metadata_rejects_missing_phase():
+    with pytest.raises(
+        ValueError,
+        match="missing 'phase'",
+    ):
+        AgentRuntimeState.from_metadata({"runtime": {}})
+
+
+def test_runtime_state_from_metadata_rejects_invalid_phase():
+    with pytest.raises(
+        ValueError,
+        match="invalid phase",
+    ):
+        AgentRuntimeState.from_metadata(
+            {
+                "runtime": {
+                    "phase": "invalid",
+                    "decision": None,
+                    "current_step_index": 0,
+                }
+            }
+        )
+
+
+def test_runtime_state_from_metadata_rejects_invalid_decision():
+    with pytest.raises(
+        ValueError,
+        match="invalid decision",
+    ):
+        AgentRuntimeState.from_metadata(
+            {
+                "runtime": {
+                    "phase": "evaluate",
+                    "decision": "invalid",
+                    "current_step_index": 0,
+                }
+            }
+        )
+
+
+def test_runtime_state_from_metadata_rejects_decision_before_evaluate():
+    with pytest.raises(
+        ValueError,
+        match="decision must be None before the evaluate phase",
+    ):
+        AgentRuntimeState.from_metadata(
+            {
+                "runtime": {
+                    "phase": "act",
+                    "decision": "continue",
+                    "current_step_index": 0,
+                }
+            }
+        )

@@ -10,6 +10,226 @@ class OrchestrationStepCompletionPolicy(StrEnum):
     ON_TOOL_RESULT = "on_tool_result"
 
 
+class AgentRuntimePhase(StrEnum):
+    """Semantic phase of one agent runtime loop iteration."""
+
+    PLAN = "plan"
+    ACT = "act"
+    OBSERVE = "observe"
+    EVALUATE = "evaluate"
+
+
+class AgentRuntimeDecision(StrEnum):
+    """Decision produced by the evaluation phase."""
+
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+_RUNTIME_PHASE_TRANSITIONS: dict[AgentRuntimePhase, frozenset[AgentRuntimePhase]] = {
+    AgentRuntimePhase.PLAN: frozenset({AgentRuntimePhase.ACT}),
+    AgentRuntimePhase.ACT: frozenset({AgentRuntimePhase.OBSERVE}),
+    AgentRuntimePhase.OBSERVE: frozenset({AgentRuntimePhase.EVALUATE}),
+    AgentRuntimePhase.EVALUATE: frozenset(),
+}
+
+
+def validate_runtime_phase_transition(
+    current: AgentRuntimePhase,
+    target: AgentRuntimePhase,
+) -> None:
+    """Validate a phase transition in the Runtime V1 loop."""
+
+    if target not in _RUNTIME_PHASE_TRANSITIONS[current]:
+        raise ValueError(
+            f"Invalid agent runtime phase transition: " f"{current.value} -> {target.value}"
+        )
+
+
+def validate_runtime_decision(
+    phase: AgentRuntimePhase,
+    decision: AgentRuntimeDecision,
+) -> None:
+    """Validate that a runtime decision is emitted only from EVALUATE."""
+
+    if phase is not AgentRuntimePhase.EVALUATE:
+        raise ValueError(
+            f"Agent runtime decision {decision.value!r} is only valid "
+            f"from the evaluate phase; current phase is {phase.value!r}"
+        )
+
+
+@dataclass
+class AgentRuntimeState:
+    """
+    Typed semantic state for one Runtime V1 loop.
+
+    This state is deliberately separate from OrchestrationState:
+    OrchestrationState owns logical step lifecycle, while this object owns
+    the semantic Plan -> Act -> Observe -> Evaluate loop.
+    """
+
+    phase: AgentRuntimePhase = AgentRuntimePhase.PLAN
+    decision: AgentRuntimeDecision | None = None
+    current_step_index: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.phase, AgentRuntimePhase):
+            raise TypeError("Agent runtime phase must be an AgentRuntimePhase.")
+
+        if self.decision is not None and not isinstance(
+            self.decision,
+            AgentRuntimeDecision,
+        ):
+            raise TypeError("Agent runtime decision must be an AgentRuntimeDecision or None.")
+
+        if self.current_step_index is not None:
+            if not isinstance(self.current_step_index, int) or isinstance(
+                self.current_step_index,
+                bool,
+            ):
+                raise TypeError("Agent runtime current_step_index must be an integer.")
+
+            if self.current_step_index < 0:
+                raise ValueError("Agent runtime current_step_index must not be negative.")
+
+        if self.phase is not AgentRuntimePhase.EVALUATE and self.decision is not None:
+            raise ValueError("Agent runtime decision must be None before the evaluate phase.")
+
+    def transition_to(
+        self,
+        target: AgentRuntimePhase,
+        *,
+        current_step_index: int | None = None,
+    ) -> None:
+        """Advance the runtime to the next valid semantic phase."""
+
+        if not isinstance(target, AgentRuntimePhase):
+            raise TypeError("Agent runtime target phase must be an AgentRuntimePhase.")
+
+        validate_runtime_phase_transition(self.phase, target)
+
+        if current_step_index is not None:
+            if not isinstance(current_step_index, int) or isinstance(
+                current_step_index,
+                bool,
+            ):
+                raise TypeError("Agent runtime current_step_index must be an integer.")
+
+            if current_step_index < 0:
+                raise ValueError("Agent runtime current_step_index must not be negative.")
+
+        self.phase = target
+        self.decision = None
+        self.current_step_index = current_step_index
+
+    def evaluate(
+        self,
+        decision: AgentRuntimeDecision,
+    ) -> None:
+        """Record the decision produced by the evaluation phase."""
+
+        if not isinstance(decision, AgentRuntimeDecision):
+            raise TypeError("Agent runtime decision must be an AgentRuntimeDecision.")
+
+        validate_runtime_decision(self.phase, decision)
+        self.decision = decision
+
+    def continue_to_plan(
+        self,
+        *,
+        current_step_index: int | None = None,
+    ) -> None:
+        """
+        Apply a CONTINUE decision and begin the next loop at PLAN.
+        """
+
+        if self.phase is not AgentRuntimePhase.EVALUATE:
+            raise ValueError("Agent runtime can continue only from the evaluate phase.")
+
+        if self.decision is not AgentRuntimeDecision.CONTINUE:
+            raise ValueError(
+                "Agent runtime must have a CONTINUE decision before returning to plan."
+            )
+
+        if current_step_index is not None:
+            if not isinstance(current_step_index, int) or isinstance(
+                current_step_index,
+                bool,
+            ):
+                raise TypeError("Agent runtime current_step_index must be an integer.")
+
+            if current_step_index < 0:
+                raise ValueError("Agent runtime current_step_index must not be negative.")
+
+        self.phase = AgentRuntimePhase.PLAN
+        self.decision = None
+        self.current_step_index = current_step_index
+
+    def stop(self) -> None:
+        """Validate and retain a terminal STOP decision."""
+
+        if self.phase is not AgentRuntimePhase.EVALUATE:
+            raise ValueError("Agent runtime can stop only from the evaluate phase.")
+
+        if self.decision is not AgentRuntimeDecision.STOP:
+            raise ValueError("Agent runtime must have a STOP decision before stopping.")
+
+    def to_metadata(self) -> dict[str, Any]:
+        """Serialize runtime state for durable agent-step metadata."""
+
+        return {
+            "runtime": {
+                "phase": self.phase.value,
+                "decision": (self.decision.value if self.decision is not None else None),
+                "current_step_index": self.current_step_index,
+            }
+        }
+
+    @classmethod
+    def from_metadata(
+        cls,
+        metadata: dict[str, Any],
+    ) -> "AgentRuntimeState | None":
+        """Restore runtime state from durable agent-step metadata."""
+
+        if not isinstance(metadata, dict):
+            raise TypeError("Agent runtime metadata must be a dictionary.")
+
+        runtime_metadata = metadata.get("runtime")
+
+        if runtime_metadata is None:
+            return None
+
+        if not isinstance(runtime_metadata, dict):
+            raise ValueError("Agent runtime metadata must contain a dictionary under 'runtime'.")
+
+        if "phase" not in runtime_metadata:
+            raise ValueError("Agent runtime metadata is missing 'phase'.")
+
+        try:
+            phase = AgentRuntimePhase(runtime_metadata["phase"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Agent runtime metadata contains an invalid phase.") from exc
+
+        decision_value = runtime_metadata.get("decision")
+        if decision_value is None:
+            decision = None
+        else:
+            try:
+                decision = AgentRuntimeDecision(decision_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Agent runtime metadata contains an invalid decision.") from exc
+
+        current_step_index = runtime_metadata.get("current_step_index")
+
+        return cls(
+            phase=phase,
+            decision=decision,
+            current_step_index=current_step_index,
+        )
+
+
 class OrchestrationStepStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
