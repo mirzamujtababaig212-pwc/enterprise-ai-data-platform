@@ -350,6 +350,71 @@ async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owne
 
 
 @pytest.mark.asyncio
+async def test_recovery_cancellation_is_observed_before_runtime_resume():
+    class CancellationDuringCheckpointRepository(RecordingRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancelled_during_checkpoint = False
+
+        def mark_cancelled_during_checkpoint(self, run_id):
+            run = super().get(run_id)
+            assert run is not None
+            assert run.status is AgentRunStatus.RUNNING
+            run.cancellation_requested = True
+            self.cancelled_during_checkpoint = True
+
+    class CancellationDuringCheckpointRepositoryWrapper:
+        def __init__(self, repository, checkpoint_repository):
+            self.repository = repository
+            self.checkpoint_repository = checkpoint_repository
+
+        def __getattr__(self, name):
+            return getattr(self.repository, name)
+
+        def get_latest(self, run_id):
+            checkpoint = self.checkpoint_repository.get_latest(run_id)
+            self.repository.mark_cancelled_during_checkpoint(run_id)
+            return checkpoint
+
+    repository = CancellationDuringCheckpointRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    checkpoint_repository = FakeCheckpointRepository(checkpoint())
+    wrapped_checkpoint_repository = CancellationDuringCheckpointRepositoryWrapper(
+        repository,
+        checkpoint_repository,
+    )
+    runtime = FakeRuntime()
+    cancellation_registry = AgentRunCancellationRegistry()
+
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=wrapped_checkpoint_repository,
+        cancellation_registry=cancellation_registry,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.recover("run-123")
+
+    assert repository.cancelled_during_checkpoint is True
+    assert runtime.calls == []
+
+    recovered = repository.get("run-123")
+
+    assert recovered is not None
+    assert recovered.status is AgentRunStatus.CANCELLED
+    assert recovered.cancellation_requested is True
+    assert repository.complete_call is None
+    assert repository.fail_call is None
+    assert "run-123" not in cancellation_registry._registrations
+
+
+@pytest.mark.asyncio
 async def test_recovery_cancellation_does_not_mutate_run_after_lease_loss():
     class LeaseLostRepository(RecordingRepository):
         def __init__(self) -> None:

@@ -357,6 +357,16 @@ class AgentRunRecoveryService:
                         operation="write",
                     )
 
+            if execution_task is not None:
+                current_run = self._repository.get(run.run_id)
+                if current_run is not None and current_run.cancellation_requested:
+                    cancellation_requested.set()
+
+            if cancellation_requested.is_set():
+                raise asyncio.CancelledError(
+                    "Agent run cancellation requested before runtime resume."
+                )
+
             response = await self._runtime.resume(
                 run.agent_name,
                 request,
