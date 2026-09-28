@@ -809,7 +809,7 @@ async def test_llm_agent_completes_orchestration_step() -> None:
 
     assert context.runtime_state.phase.value == "evaluate"
     assert context.runtime_state.current_step_index == 0
-    assert context.runtime_state.decision.value == "stop"
+    assert context.runtime_state.decision is None
 
     durable_step = repository.get(
         "run-durable-complete",
@@ -821,7 +821,7 @@ async def test_llm_agent_completes_orchestration_step() -> None:
     assert durable_step.completed_at is not None
     assert durable_step.metadata["runtime"] == {
         "phase": "evaluate",
-        "decision": "stop",
+        "decision": None,
         "current_step_index": 0,
     }
 

@@ -5,6 +5,7 @@ import pytest
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.lifecycle import AgentExecutionLifecyclePhase
+from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.llm_messages import (
     assistant_message,
     system_message,
@@ -16,6 +17,14 @@ from ai_platform.agents.models import (
     AgentResponse,
 )
 from ai_platform.agents.observability import AgentExecutionEventType
+from ai_platform.agents.orchestration import (
+    AgentRuntimeDecision,
+    AgentRuntimePhase,
+    OrchestrationPlan,
+    OrchestrationStep,
+    OrchestrationStepCompletionPolicy,
+    OrchestrationStepStatus,
+)
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from memory.context.builder import MemoryContext
@@ -40,6 +49,71 @@ class EmptyMemoryBuilder:
             semantic=(),
             episodic=(),
         )
+
+
+class RuntimeFakeLLMGateway:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    async def route_chat(
+        self,
+        request: dict[str, object],
+    ) -> dict[str, object]:
+        self.requests.append(request)
+
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": "Generated answer.",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+
+class ReplanningPlanProvider:
+    def __init__(self) -> None:
+        self.plans: list[OrchestrationPlan] = []
+
+    def build_plan(
+        self,
+        context: AgentExecutionContext,
+    ) -> OrchestrationPlan:
+        plan = OrchestrationPlan(
+            steps=(
+                OrchestrationStep(
+                    step_id=f"answer-{len(self.plans) + 1}",
+                    step_index=0,
+                    name="Produce answer",
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=(OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE),
+                ),
+            )
+        )
+        self.plans.append(plan)
+        return plan
+
+
+class ReplanningDecisionProvider:
+    def __init__(self) -> None:
+        self.decisions: list[AgentRuntimeDecision] = []
+        self.contexts: list[AgentExecutionContext] = []
+        self.states: list[object] = []
+
+    def evaluate(
+        self,
+        context: AgentExecutionContext,
+    ) -> AgentRuntimeDecision:
+        self.contexts.append(context)
+        self.states.append(context.orchestration_state)
+
+        decision = (
+            AgentRuntimeDecision.CONTINUE if not self.decisions else AgentRuntimeDecision.STOP
+        )
+        self.decisions.append(decision)
+        return decision
 
 
 class FakeAgent:
@@ -460,6 +534,60 @@ async def test_runtime_injects_orchestration_plan_for_known_agent() -> None:
         "analyze_evidence",
         "produce_answer",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_replans_between_semantic_iterations() -> None:
+    registry = InMemoryAgentRegistry()
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="replanning-llm-agent",
+            description="LLM agent used to test runtime replanning.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        )
+    )
+    await registry.register(agent)
+
+    gateway = RuntimeFakeLLMGateway()
+    plan_provider = ReplanningPlanProvider()
+    decision_provider = ReplanningDecisionProvider()
+
+    runtime = AgentRuntime(
+        registry,
+        llm_gateway=gateway,
+        plan_provider=plan_provider,
+        decision_provider=decision_provider,
+    )
+
+    response = await runtime.run(
+        "replanning-llm-agent",
+        AgentRequest(input="Run the agent."),
+    )
+
+    assert response.output == "Generated answer."
+
+    assert len(plan_provider.plans) == 2
+    assert plan_provider.plans[0] is not plan_provider.plans[1]
+    assert plan_provider.plans[0].steps[0].step_id == "answer-1"
+    assert plan_provider.plans[1].steps[0].step_id == "answer-2"
+
+    assert decision_provider.decisions == [
+        AgentRuntimeDecision.CONTINUE,
+        AgentRuntimeDecision.STOP,
+    ]
+
+    assert len(decision_provider.contexts) == 2
+    assert decision_provider.contexts[0] is decision_provider.contexts[1]
+
+    assert len(decision_provider.states) == 2
+    assert decision_provider.states[0] is not decision_provider.states[1]
+
+    assert len(gateway.requests) == 2
+
+    assert decision_provider.contexts[-1].runtime_state.phase is (AgentRuntimePhase.EVALUATE)
+    assert decision_provider.contexts[-1].runtime_state.decision is (AgentRuntimeDecision.STOP)
 
 
 @pytest.mark.asyncio

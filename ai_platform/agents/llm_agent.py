@@ -1113,7 +1113,7 @@ class LLMAgent:
         context: AgentExecutionContext,
         step_index: int,
     ) -> None:
-        """Transition Runtime V1 from OBSERVE to EVALUATE and emit STOP."""
+        """Transition Runtime V1 from OBSERVE to EVALUATE."""
 
         if context.runtime_state.phase is not AgentRuntimePhase.OBSERVE:
             raise RuntimeError("Runtime V1 must be in OBSERVE before entering EVALUATE")
@@ -1122,7 +1122,23 @@ class LLMAgent:
             AgentRuntimePhase.EVALUATE,
             current_step_index=step_index,
         )
-        context.runtime_state.evaluate(AgentRuntimeDecision.STOP)
+
+    @staticmethod
+    def _evaluate_runtime_decision(
+        context: AgentExecutionContext,
+    ) -> AgentRuntimeDecision:
+        """Evaluate the completed semantic iteration."""
+
+        if context.runtime_state.phase is not AgentRuntimePhase.EVALUATE:
+            raise RuntimeError("Runtime V1 must be in EVALUATE before producing a decision")
+
+        decision = context.decision_provider.evaluate(context)
+
+        if not isinstance(decision, AgentRuntimeDecision):
+            raise TypeError("Runtime decision provider must return an AgentRuntimeDecision.")
+
+        context.runtime_state.evaluate(decision)
+        return decision
 
     async def _complete_orchestration_step(
         self,
@@ -1692,20 +1708,40 @@ class LLMAgent:
                 if continuation.response is None:
                     raise RuntimeError("Final orchestration step completed without a response.")
 
-                await self._emit(
-                    AgentExecutionEvent(
-                        event_type=AgentExecutionEventType.AGENT_COMPLETED,
-                        agent_name=self.definition.name,
-                        run_id=context.run_id,
-                        session_id=context.session_id,
-                        user_id=context.user_id,
-                        tool_round=continuation.tool_rounds,
-                        provider=continuation.response.metadata.get("provider"),
-                        model=continuation.response.metadata.get("model"),
-                    )
-                )
+                decision = self._evaluate_runtime_decision(context)
 
-                return continuation.response
+                if decision is AgentRuntimeDecision.STOP:
+                    await self._emit(
+                        AgentExecutionEvent(
+                            event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                            agent_name=self.definition.name,
+                            run_id=context.run_id,
+                            session_id=context.session_id,
+                            user_id=context.user_id,
+                            tool_round=continuation.tool_rounds,
+                            provider=continuation.response.metadata.get("provider"),
+                            model=continuation.response.metadata.get("model"),
+                        )
+                    )
+
+                    return continuation.response
+
+                if decision is not AgentRuntimeDecision.CONTINUE:
+                    raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
+
+                context.runtime_state.continue_to_plan()
+
+                try:
+                    next_plan = context.plan_provider.build_plan(context)
+                except LookupError:
+                    raise RuntimeError(
+                        "Runtime continuation requested but no orchestration "
+                        "plan is available for the agent."
+                    ) from None
+
+                context.install_orchestration_plan(next_plan)
+                orchestration_step_index = await self._start_orchestration_step(context)
+                continue
 
             orchestration_step_index = await self._start_orchestration_step(context)
 
@@ -1936,7 +1972,28 @@ class LLMAgent:
                         "Final orchestration recovery step completed without " "an agent response."
                     )
 
-                return response
+                decision = self._evaluate_runtime_decision(context)
+
+                if decision is AgentRuntimeDecision.STOP:
+                    return response
+
+                if decision is not AgentRuntimeDecision.CONTINUE:
+                    raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
+
+                context.runtime_state.continue_to_plan()
+
+                try:
+                    next_plan = context.plan_provider.build_plan(context)
+                except LookupError:
+                    raise RuntimeError(
+                        "Runtime continuation requested but no orchestration "
+                        "plan is available for the agent."
+                    ) from None
+
+                context.install_orchestration_plan(next_plan)
+                orchestration_step_index = await self._start_orchestration_step(context)
+                tool_rounds = continuation.tool_rounds
+                continue
 
             orchestration_step_index = await self._start_orchestration_step(context)
             tool_rounds = continuation.tool_rounds

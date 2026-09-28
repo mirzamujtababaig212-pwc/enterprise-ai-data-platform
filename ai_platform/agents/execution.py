@@ -20,6 +20,10 @@ from ai_platform.agents.plan_provider import (
     AgentPlanProvider,
     DeterministicAgentPlanProvider,
 )
+from ai_platform.agents.decision_provider import (
+    AgentRuntimeDecisionProvider,
+    DeterministicAgentRuntimeDecisionProvider,
+)
 from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
 from ai_platform.agents.llm_messages import (
     AgentMessage,
@@ -68,6 +72,7 @@ class AgentExecutionContext:
         execution_ownership_lost: asyncio.Event | None = None,
         orchestration_plan: OrchestrationPlan | None = None,
         plan_provider: AgentPlanProvider | None = None,
+        decision_provider: AgentRuntimeDecisionProvider | None = None,
         agent_run_steps_repository_factory=None,
         lifecycle_state: AgentExecutionLifecycleState | None = None,
     ) -> None:
@@ -81,6 +86,7 @@ class AgentExecutionContext:
         self.lease_id = lease_id
         self.execution_ownership_lost = execution_ownership_lost
         self.plan_provider = plan_provider or DeterministicAgentPlanProvider()
+        self.decision_provider = decision_provider or DeterministicAgentRuntimeDecisionProvider()
         self.agent_run_steps_repository_factory = agent_run_steps_repository_factory
 
         self.execution_budget = request.execution_budget or ExecutionBudget()

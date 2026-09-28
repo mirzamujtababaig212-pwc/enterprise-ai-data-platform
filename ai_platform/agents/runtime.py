@@ -4,6 +4,14 @@ import asyncio
 import time
 
 from ai_platform.agents.checkpoint import AgentExecutionCheckpoint
+from ai_platform.agents.decision_provider import (
+    AgentRuntimeDecisionProvider,
+    DeterministicAgentRuntimeDecisionProvider,
+)
+from ai_platform.agents.plan_provider import (
+    AgentPlanProvider,
+    DeterministicAgentPlanProvider,
+)
 from ai_platform.agents.contracts import (
     AgentExecutionContract,
     AgentRegistry,
@@ -78,6 +86,8 @@ class AgentRuntime:
         observer: AgentExecutionObserver | None = None,
         agent_run_steps_repository_factory=None,
         tenant_policy_engine: TenantPolicyEngine | None = None,
+        plan_provider: AgentPlanProvider | None = None,
+        decision_provider: AgentRuntimeDecisionProvider | None = None,
     ) -> None:
         self._registry = registry
         self._tool_registry = tool_registry
@@ -98,6 +108,8 @@ class AgentRuntime:
         self._observer = observer
         self._agent_run_steps_repository_factory = agent_run_steps_repository_factory
         self._tenant_policy_engine = tenant_policy_engine
+        self._plan_provider = plan_provider or DeterministicAgentPlanProvider()
+        self._decision_provider = decision_provider or DeterministicAgentRuntimeDecisionProvider()
 
     async def get_agent_definition(self, agent_name: str) -> AgentDefinition:
         """Retrieve the AgentDefinition for a given agent name from the registry."""
@@ -212,6 +224,8 @@ class AgentRuntime:
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
+            plan_provider=self._plan_provider,
+            decision_provider=self._decision_provider,
         )
 
         try:
@@ -325,6 +339,8 @@ class AgentRuntime:
             execution_ownership_lost=execution_ownership_lost,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
             lifecycle_state=lifecycle_state,
+            plan_provider=self._plan_provider,
+            decision_provider=self._decision_provider,
         )
 
         try:
