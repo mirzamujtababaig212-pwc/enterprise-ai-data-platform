@@ -18,6 +18,7 @@ from ai_platform.agents.exceptions import (
     AgentOutputPolicyError,
     AgentTokenLimitError,
 )
+from ai_platform.agents.decision_provider import AgentRuntimeDecisionResult
 from ai_platform.agents.orchestration import (
     AgentRuntimeDecision,
     AgentRuntimePhase,
@@ -1143,13 +1144,16 @@ class LLMAgent:
             tool_rounds=tool_rounds,
         )
 
-        decision = context.decision_provider.evaluate(context, evaluation)
+        result = context.decision_provider.evaluate(context, evaluation)
 
-        if not isinstance(decision, AgentRuntimeDecision):
-            raise TypeError("Runtime decision provider must return an AgentRuntimeDecision.")
+        if not isinstance(result, AgentRuntimeDecisionResult):
+            raise TypeError("Runtime decision provider must return an AgentRuntimeDecisionResult.")
 
-        context.runtime_state.evaluate(decision)
-        return decision
+        context.runtime_state.evaluate(
+            result.decision,
+            reason=result.reason.value,
+        )
+        return result.decision
 
     async def _complete_orchestration_step(
         self,

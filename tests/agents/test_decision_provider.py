@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from ai_platform.agents.decision_provider import (
+    AgentRuntimeDecisionReason,
+    AgentRuntimeDecisionResult,
     DeterministicAgentRuntimeDecisionProvider,
 )
 from ai_platform.agents.execution import AgentExecutionContext
@@ -57,7 +59,12 @@ def test_deterministic_decision_provider_returns_stop() -> None:
         tool_rounds=0,
     )
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.STOP,
+        reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+    )
 
 
 def test_execution_context_defaults_to_deterministic_decision_provider() -> None:
@@ -71,8 +78,11 @@ def test_execution_context_defaults_to_deterministic_decision_provider() -> None
 
 def test_execution_context_accepts_custom_decision_provider() -> None:
     class StubDecisionProvider:
-        def evaluate(self, context):
-            return AgentRuntimeDecision.CONTINUE
+        def evaluate(self, context, evaluation):
+            return AgentRuntimeDecisionResult(
+                decision=AgentRuntimeDecision.CONTINUE,
+                reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_REMAINING,
+            )
 
     definition = AgentDefinition(
         name="enterprise-rag-analyst",
@@ -131,7 +141,12 @@ def test_deterministic_decision_provider_stops_on_none_output() -> None:
     context = make_context()
     evaluation = make_evaluation(output=None)
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.STOP,
+        reason=AgentRuntimeDecisionReason.RESPONSE_OUTPUT_MISSING,
+    )
 
 
 def test_deterministic_decision_provider_stops_on_blank_string_output() -> None:
@@ -140,7 +155,12 @@ def test_deterministic_decision_provider_stops_on_blank_string_output() -> None:
     context = make_context()
     evaluation = make_evaluation(output="   ")
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.STOP,
+        reason=AgentRuntimeDecisionReason.RESPONSE_OUTPUT_BLANK,
+    )
 
 
 def test_deterministic_decision_provider_continues_before_iteration_limit() -> None:
@@ -151,7 +171,12 @@ def test_deterministic_decision_provider_continues_before_iteration_limit() -> N
 
     evaluation = make_evaluation(iteration=1)
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.CONTINUE
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.CONTINUE,
+        reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_REMAINING,
+    )
 
 
 def test_deterministic_decision_provider_stops_at_iteration_limit() -> None:
@@ -162,7 +187,12 @@ def test_deterministic_decision_provider_stops_at_iteration_limit() -> None:
 
     evaluation = make_evaluation(iteration=3)
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.STOP,
+        reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+    )
 
 
 def test_deterministic_decision_provider_accepts_non_string_output() -> None:
@@ -171,4 +201,9 @@ def test_deterministic_decision_provider_accepts_non_string_output() -> None:
     context = make_context()
     evaluation = make_evaluation(output={"answer": "structured"})
 
-    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+    result = provider.evaluate(context, evaluation)
+
+    assert result == AgentRuntimeDecisionResult(
+        decision=AgentRuntimeDecision.STOP,
+        reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+    )

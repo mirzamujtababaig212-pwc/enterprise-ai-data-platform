@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from ai_platform.agents.decision_provider import (
+    AgentRuntimeDecisionReason,
+    AgentRuntimeDecisionResult,
+)
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.lifecycle import AgentExecutionLifecyclePhase
@@ -108,7 +112,7 @@ class ReplanningDecisionProvider:
         self,
         context: AgentExecutionContext,
         evaluation: AgentRuntimeEvaluationSnapshot,
-    ) -> AgentRuntimeDecision:
+    ) -> AgentRuntimeDecisionResult:
         self.contexts.append(context)
         self.states.append(context.orchestration_state)
         self.evaluations.append(evaluation)
@@ -117,7 +121,17 @@ class ReplanningDecisionProvider:
             AgentRuntimeDecision.CONTINUE if not self.decisions else AgentRuntimeDecision.STOP
         )
         self.decisions.append(decision)
-        return decision
+
+        reason = (
+            AgentRuntimeDecisionReason.ITERATION_BUDGET_REMAINING
+            if decision is AgentRuntimeDecision.CONTINUE
+            else AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED
+        )
+
+        return AgentRuntimeDecisionResult(
+            decision=decision,
+            reason=reason,
+        )
 
 
 class FakeAgent:

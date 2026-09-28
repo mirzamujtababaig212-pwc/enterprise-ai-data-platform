@@ -660,6 +660,7 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
     assert planned_step.metadata["runtime"] == {
         "phase": "plan",
         "decision": None,
+        "decision_reason": None,
         "current_step_index": None,
         "iteration": 1,
     }
@@ -686,6 +687,7 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
     assert durable_step.metadata["runtime"] == {
         "phase": "act",
         "decision": None,
+        "decision_reason": None,
         "current_step_index": 0,
         "iteration": 1,
     }
@@ -824,6 +826,7 @@ async def test_llm_agent_completes_orchestration_step() -> None:
     assert durable_step.metadata["runtime"] == {
         "phase": "evaluate",
         "decision": None,
+        "decision_reason": None,
         "current_step_index": 0,
         "iteration": 1,
     }
@@ -2652,6 +2655,7 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
     assert step.metadata["runtime"] == {
         "phase": "act",
         "decision": None,
+        "decision_reason": None,
         "current_step_index": 0,
         "iteration": 1,
     }

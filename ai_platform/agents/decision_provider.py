@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from ai_platform.agents.orchestration import AgentRuntimeDecision
@@ -7,6 +9,30 @@ from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 
 if TYPE_CHECKING:
     from ai_platform.agents.execution import AgentExecutionContext
+
+
+class AgentRuntimeDecisionReason(StrEnum):
+    """Deterministic reason explaining a Runtime V1 decision."""
+
+    RESPONSE_OUTPUT_MISSING = "response_output_missing"
+    RESPONSE_OUTPUT_BLANK = "response_output_blank"
+    ITERATION_BUDGET_REMAINING = "iteration_budget_remaining"
+    ITERATION_BUDGET_EXHAUSTED = "iteration_budget_exhausted"
+
+
+@dataclass(frozen=True)
+class AgentRuntimeDecisionResult:
+    """Immutable result produced by a Runtime V1 decision provider."""
+
+    decision: AgentRuntimeDecision
+    reason: AgentRuntimeDecisionReason
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision, AgentRuntimeDecision):
+            raise TypeError("Runtime decision result decision must be an AgentRuntimeDecision.")
+
+        if not isinstance(self.reason, AgentRuntimeDecisionReason):
+            raise TypeError("Runtime decision result reason must be an AgentRuntimeDecisionReason.")
 
 
 class AgentRuntimeDecisionProvider(Protocol):
@@ -21,7 +47,7 @@ class AgentRuntimeDecisionProvider(Protocol):
         self,
         context: AgentExecutionContext,
         evaluation: AgentRuntimeEvaluationSnapshot,
-    ) -> AgentRuntimeDecision:
+    ) -> AgentRuntimeDecisionResult:
         """Produce the runtime decision for the completed iteration."""
         ...
 
@@ -38,18 +64,30 @@ class DeterministicAgentRuntimeDecisionProvider:
         self,
         context: AgentExecutionContext,
         evaluation: AgentRuntimeEvaluationSnapshot,
-    ) -> AgentRuntimeDecision:
+    ) -> AgentRuntimeDecisionResult:
         """Evaluate response validity before applying the iteration bound."""
         if not hasattr(context, "agent_name"):
             raise TypeError("Agent runtime decision provider requires an agent execution context.")
 
         if evaluation.response.output is None:
-            return AgentRuntimeDecision.STOP
+            return AgentRuntimeDecisionResult(
+                decision=AgentRuntimeDecision.STOP,
+                reason=AgentRuntimeDecisionReason.RESPONSE_OUTPUT_MISSING,
+            )
 
         if isinstance(evaluation.response.output, str) and not evaluation.response.output.strip():
-            return AgentRuntimeDecision.STOP
+            return AgentRuntimeDecisionResult(
+                decision=AgentRuntimeDecision.STOP,
+                reason=AgentRuntimeDecisionReason.RESPONSE_OUTPUT_BLANK,
+            )
 
         if evaluation.iteration < context.execution_budget.max_iterations:
-            return AgentRuntimeDecision.CONTINUE
+            return AgentRuntimeDecisionResult(
+                decision=AgentRuntimeDecision.CONTINUE,
+                reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_REMAINING,
+            )
 
-        return AgentRuntimeDecision.STOP
+        return AgentRuntimeDecisionResult(
+            decision=AgentRuntimeDecision.STOP,
+            reason=AgentRuntimeDecisionReason.ITERATION_BUDGET_EXHAUSTED,
+        )

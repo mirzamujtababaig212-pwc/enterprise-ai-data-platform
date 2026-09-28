@@ -831,6 +831,72 @@ def test_runtime_state_continue_returns_to_plan() -> None:
     assert state.iteration == 2
 
 
+def test_runtime_state_evaluate_stores_decision_reason() -> None:
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=0,
+    )
+
+    state.evaluate(
+        AgentRuntimeDecision.STOP,
+        reason="iteration_budget_exhausted",
+    )
+
+    assert state.decision is AgentRuntimeDecision.STOP
+    assert state.decision_reason == "iteration_budget_exhausted"
+
+
+def test_runtime_state_continue_clears_decision_reason() -> None:
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=0,
+    )
+
+    state.evaluate(
+        AgentRuntimeDecision.CONTINUE,
+        reason="iteration_budget_remaining",
+    )
+    state.continue_to_plan(current_step_index=1)
+
+    assert state.phase is AgentRuntimePhase.PLAN
+    assert state.decision is None
+    assert state.decision_reason is None
+    assert state.iteration == 2
+
+
+def test_runtime_state_metadata_round_trip_preserves_decision_reason() -> None:
+    state = AgentRuntimeState(
+        phase=AgentRuntimePhase.EVALUATE,
+        current_step_index=2,
+    )
+    state.evaluate(
+        AgentRuntimeDecision.STOP,
+        reason="response_output_blank",
+    )
+
+    restored = AgentRuntimeState.from_metadata(state.to_metadata())
+
+    assert restored == state
+    assert restored is not None
+    assert restored.decision_reason == "response_output_blank"
+
+
+def test_runtime_state_metadata_defaults_missing_decision_reason() -> None:
+    restored = AgentRuntimeState.from_metadata(
+        {
+            "runtime": {
+                "phase": "evaluate",
+                "decision": "stop",
+                "current_step_index": 0,
+            }
+        }
+    )
+
+    assert restored is not None
+    assert restored.decision is AgentRuntimeDecision.STOP
+    assert restored.decision_reason is None
+
+
 def test_runtime_state_stop_is_terminal_decision() -> None:
     from ai_platform.agents.orchestration import (
         AgentRuntimeDecision,
@@ -966,6 +1032,7 @@ def test_runtime_state_to_metadata_serializes_plan_state():
         "runtime": {
             "phase": "plan",
             "decision": None,
+            "decision_reason": None,
             "current_step_index": 0,
             "iteration": 1,
         }
@@ -983,6 +1050,7 @@ def test_runtime_state_to_metadata_serializes_evaluate_continue_state():
         "runtime": {
             "phase": "evaluate",
             "decision": "continue",
+            "decision_reason": None,
             "current_step_index": 2,
             "iteration": 1,
         }
@@ -1001,6 +1069,7 @@ def test_runtime_state_to_metadata_serializes_evaluate_stop_state():
         "runtime": {
             "phase": "evaluate",
             "decision": "stop",
+            "decision_reason": None,
             "current_step_index": 3,
             "iteration": 1,
         }

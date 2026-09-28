@@ -71,6 +71,7 @@ class AgentRuntimeState:
 
     phase: AgentRuntimePhase = AgentRuntimePhase.PLAN
     decision: AgentRuntimeDecision | None = None
+    decision_reason: str | None = None
     current_step_index: int | None = None
     iteration: int = 1
 
@@ -83,6 +84,13 @@ class AgentRuntimeState:
             AgentRuntimeDecision,
         ):
             raise TypeError("Agent runtime decision must be an AgentRuntimeDecision or None.")
+
+        if self.decision_reason is not None:
+            if not isinstance(self.decision_reason, str):
+                raise TypeError("Agent runtime decision_reason must be a string or None.")
+
+            if not self.decision_reason.strip():
+                raise ValueError("Agent runtime decision_reason must not be empty.")
 
         if self.current_step_index is not None:
             if not isinstance(self.current_step_index, int) or isinstance(
@@ -102,6 +110,11 @@ class AgentRuntimeState:
 
         if self.phase is not AgentRuntimePhase.EVALUATE and self.decision is not None:
             raise ValueError("Agent runtime decision must be None before the evaluate phase.")
+
+        if self.phase is not AgentRuntimePhase.EVALUATE and self.decision_reason is not None:
+            raise ValueError(
+                "Agent runtime decision_reason must be None before the evaluate phase."
+            )
 
     def transition_to(
         self,
@@ -128,11 +141,14 @@ class AgentRuntimeState:
 
         self.phase = target
         self.decision = None
+        self.decision_reason = None
         self.current_step_index = current_step_index
 
     def evaluate(
         self,
         decision: AgentRuntimeDecision,
+        *,
+        reason: str | None = None,
     ) -> None:
         """Record the decision produced by the evaluation phase."""
 
@@ -140,7 +156,16 @@ class AgentRuntimeState:
             raise TypeError("Agent runtime decision must be an AgentRuntimeDecision.")
 
         validate_runtime_decision(self.phase, decision)
+
+        if reason is not None:
+            if not isinstance(reason, str):
+                raise TypeError("Agent runtime decision reason must be a string or None.")
+
+            if not reason.strip():
+                raise ValueError("Agent runtime decision reason must not be empty.")
+
         self.decision = decision
+        self.decision_reason = reason
 
     def continue_to_plan(
         self,
@@ -171,6 +196,7 @@ class AgentRuntimeState:
 
         self.phase = AgentRuntimePhase.PLAN
         self.decision = None
+        self.decision_reason = None
         self.current_step_index = current_step_index
         self.iteration += 1
 
@@ -190,6 +216,7 @@ class AgentRuntimeState:
             "runtime": {
                 "phase": self.phase.value,
                 "decision": (self.decision.value if self.decision is not None else None),
+                "decision_reason": self.decision_reason,
                 "current_step_index": self.current_step_index,
                 "iteration": self.iteration,
             }
@@ -230,12 +257,14 @@ class AgentRuntimeState:
             except (TypeError, ValueError) as exc:
                 raise ValueError("Agent runtime metadata contains an invalid decision.") from exc
 
+        decision_reason = runtime_metadata.get("decision_reason")
         current_step_index = runtime_metadata.get("current_step_index")
         iteration = runtime_metadata.get("iteration", 1)
 
         return cls(
             phase=phase,
             decision=decision,
+            decision_reason=decision_reason,
             current_step_index=current_step_index,
             iteration=iteration,
         )
