@@ -105,3 +105,70 @@ def test_execution_context_accepts_custom_decision_provider() -> None:
     )
 
     assert context.decision_provider is provider
+
+
+def make_evaluation(
+    *,
+    iteration: int = 1,
+    output="test",
+    step_index: int | None = None,
+    tool_rounds: int = 0,
+) -> AgentRuntimeEvaluationSnapshot:
+    return AgentRuntimeEvaluationSnapshot(
+        iteration=iteration,
+        step_index=step_index,
+        response=AgentResponse(
+            agent_name="test-agent",
+            output=output,
+        ),
+        tool_rounds=tool_rounds,
+    )
+
+
+def test_deterministic_decision_provider_stops_on_none_output() -> None:
+    provider = DeterministicAgentRuntimeDecisionProvider()
+
+    context = make_context()
+    evaluation = make_evaluation(output=None)
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+
+
+def test_deterministic_decision_provider_stops_on_blank_string_output() -> None:
+    provider = DeterministicAgentRuntimeDecisionProvider()
+
+    context = make_context()
+    evaluation = make_evaluation(output="   ")
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+
+
+def test_deterministic_decision_provider_continues_before_iteration_limit() -> None:
+    provider = DeterministicAgentRuntimeDecisionProvider()
+
+    context = make_context()
+    context.execution_budget = context.execution_budget.__class__(max_iterations=3)
+
+    evaluation = make_evaluation(iteration=1)
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.CONTINUE
+
+
+def test_deterministic_decision_provider_stops_at_iteration_limit() -> None:
+    provider = DeterministicAgentRuntimeDecisionProvider()
+
+    context = make_context()
+    context.execution_budget = context.execution_budget.__class__(max_iterations=3)
+
+    evaluation = make_evaluation(iteration=3)
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
+
+
+def test_deterministic_decision_provider_accepts_non_string_output() -> None:
+    provider = DeterministicAgentRuntimeDecisionProvider()
+
+    context = make_context()
+    evaluation = make_evaluation(output={"answer": "structured"})
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP

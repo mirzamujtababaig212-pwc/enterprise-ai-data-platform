@@ -39,11 +39,17 @@ class DeterministicAgentRuntimeDecisionProvider:
         context: AgentExecutionContext,
         evaluation: AgentRuntimeEvaluationSnapshot,
     ) -> AgentRuntimeDecision:
-        """Continue until the configured semantic iteration limit is reached."""
+        """Evaluate response validity before applying the iteration bound."""
         if not hasattr(context, "agent_name"):
             raise TypeError("Agent runtime decision provider requires an agent execution context.")
 
-        if context.runtime_state.iteration < context.execution_budget.max_iterations:
+        if evaluation.response.output is None:
+            return AgentRuntimeDecision.STOP
+
+        if isinstance(evaluation.response.output, str) and not evaluation.response.output.strip():
+            return AgentRuntimeDecision.STOP
+
+        if evaluation.iteration < context.execution_budget.max_iterations:
             return AgentRuntimeDecision.CONTINUE
 
         return AgentRuntimeDecision.STOP
