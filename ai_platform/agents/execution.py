@@ -70,6 +70,7 @@ class AgentExecutionContext:
         run_id: str | None = None,
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
+        cancellation_requested: asyncio.Event | None = None,
         orchestration_plan: OrchestrationPlan | None = None,
         plan_provider: AgentPlanProvider | None = None,
         decision_provider: AgentRuntimeDecisionProvider | None = None,
@@ -85,6 +86,7 @@ class AgentExecutionContext:
         self.run_id = run_id
         self.lease_id = lease_id
         self.execution_ownership_lost = execution_ownership_lost
+        self.cancellation_requested = cancellation_requested
         self.plan_provider = plan_provider or DeterministicAgentPlanProvider()
         self.decision_provider = decision_provider or DeterministicAgentRuntimeDecisionProvider()
         self.agent_run_steps_repository_factory = agent_run_steps_repository_factory
@@ -147,6 +149,17 @@ class AgentExecutionContext:
         """
         if self.execution_ownership_lost is not None and self.execution_ownership_lost.is_set():
             raise AgentExecutionOwnershipLostError("Agent execution lost durable run ownership.")
+
+    def raise_if_cancellation_requested(self) -> None:
+        """
+        Stop execution when cooperative run cancellation has been requested.
+
+        The control plane owns durable cancellation state and signals the
+        runtime through the execution event. Agent code only observes the
+        signal; it does not know how cancellation is persisted or requested.
+        """
+        if self.cancellation_requested is not None and self.cancellation_requested.is_set():
+            raise asyncio.CancelledError("Agent execution cancellation requested.")
 
     def build_llm_messages(
         self,

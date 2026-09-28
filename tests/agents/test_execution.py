@@ -243,6 +243,43 @@ def test_execution_context_raises_when_ownership_is_lost() -> None:
         context.raise_if_execution_ownership_lost()
 
 
+def test_execution_context_defaults_to_no_cancellation_signal() -> None:
+    context = make_context()
+
+    assert context.cancellation_requested is None
+
+
+def test_execution_context_allows_execution_when_cancellation_is_not_requested() -> None:
+    cancellation_requested = asyncio.Event()
+
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        cancellation_requested=cancellation_requested,
+    )
+
+    context.raise_if_cancellation_requested()
+
+
+def test_execution_context_raises_when_cancellation_is_requested() -> None:
+    cancellation_requested = asyncio.Event()
+    cancellation_requested.set()
+
+    context = AgentExecutionContext(
+        make_context().request,
+        tools=make_context().tools,
+        llm=make_context().llm,
+        cancellation_requested=cancellation_requested,
+    )
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        context.raise_if_cancellation_requested()
+
+
 def test_execution_context_defaults_to_no_run_id() -> None:
     context = make_context()
 

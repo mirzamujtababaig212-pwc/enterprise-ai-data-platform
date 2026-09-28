@@ -1140,6 +1140,32 @@ async def test_runtime_passes_run_id_to_agent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_passes_cancellation_signal_to_agent() -> None:
+    import asyncio
+
+    registry = InMemoryAgentRegistry()
+
+    agent = FakeAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+    )
+
+    cancellation_requested = asyncio.Event()
+
+    await runtime.run(
+        "test-agent",
+        AgentRequest(
+            input="Trace this execution.",
+        ),
+        cancellation_requested=cancellation_requested,
+    )
+
+    assert agent.last_context.cancellation_requested is cancellation_requested
+
+
+@pytest.mark.asyncio
 async def test_runtime_rejects_invalid_history() -> None:
     registry = InMemoryAgentRegistry()
 
@@ -1890,6 +1916,79 @@ async def test_runtime_resume_propagates_execution_ownership_loss_signal():
 
     assert response.output == "recovered"
     assert agent.last_context.execution_ownership_lost is ownership_lost
+
+
+@pytest.mark.asyncio
+async def test_runtime_resume_passes_cancellation_signal_to_agent():
+    import asyncio
+
+    from ai_platform.agents.checkpoint import (
+        AgentCheckpointPosition,
+        AgentExecutionCheckpoint,
+    )
+    from ai_platform.agents.llm_messages import user_message
+
+    registry = InMemoryAgentRegistry()
+
+    class RecoverableTestAgent:
+        def __init__(self):
+            self._definition = AgentDefinition(
+                name="recoverable-cancellation-agent",
+                description="Recoverable test agent.",
+                system_prompt="You are a recoverable test agent.",
+                model="test-model",
+            )
+            self.last_context = None
+
+        @property
+        def definition(self):
+            return self._definition
+
+        async def run(self, context):
+            raise AssertionError("run() must not be called during recovery")
+
+        async def resume(self, context, checkpoint):
+            self.last_context = context
+            return AgentResponse(
+                agent_name=self.definition.name,
+                output="recovered",
+                session_id=context.session_id,
+            )
+
+    agent = RecoverableTestAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(registry)
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=1,
+        run_id="run-cancellation-123",
+        agent_name="recoverable-cancellation-agent",
+        session_id="session-123",
+        user_id="user-123",
+        messages=(user_message("Original request"),),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    cancellation_requested = asyncio.Event()
+
+    response = await runtime.resume(
+        "recoverable-cancellation-agent",
+        AgentRequest(
+            input="Original request",
+            session_id="session-123",
+            user_id="user-123",
+            memory_namespace="project-a",
+        ),
+        checkpoint,
+        run_id="run-cancellation-123",
+        cancellation_requested=cancellation_requested,
+    )
+
+    assert response.output == "recovered"
+    assert agent.last_context.cancellation_requested is cancellation_requested
 
 
 @pytest.mark.asyncio

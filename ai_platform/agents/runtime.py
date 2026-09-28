@@ -129,6 +129,7 @@ class AgentRuntime:
         run_id: str | None = None,
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
+        cancellation_requested: asyncio.Event | None = None,
     ) -> AgentResponse:
         """
         Resume a recoverable agent from a durable execution checkpoint.
@@ -223,6 +224,7 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
+            cancellation_requested=cancellation_requested,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
             plan_provider=self._plan_provider,
             decision_provider=self._decision_provider,
@@ -244,6 +246,7 @@ class AgentRuntime:
         run_id: str | None = None,
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
+        cancellation_requested: asyncio.Event | None = None,
     ) -> AgentResponse:
         if not agent_name.strip():
             raise ValueError("Agent name must not be empty.")
@@ -337,6 +340,7 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
+            cancellation_requested=cancellation_requested,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
             lifecycle_state=lifecycle_state,
             plan_provider=self._plan_provider,

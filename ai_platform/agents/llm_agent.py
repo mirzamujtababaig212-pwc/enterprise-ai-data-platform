@@ -1918,6 +1918,8 @@ class LLMAgent:
                     "Orchestration boundary was reached before the current " "step completed."
                 )
 
+            context.raise_if_cancellation_requested()
+
             next_step_index = self._advance_orchestration_step(context)
 
             if next_step_index is None:
@@ -1954,6 +1956,8 @@ class LLMAgent:
 
                 if decision is not AgentRuntimeDecision.CONTINUE:
                     raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
+
+                context.raise_if_cancellation_requested()
 
                 context.runtime_state.continue_to_plan()
 
@@ -2145,6 +2149,8 @@ class LLMAgent:
             and current_step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
             and current_step.status is OrchestrationStepStatus.COMPLETED
         ):
+            context.raise_if_cancellation_requested()
+
             next_step_index = self._advance_orchestration_step(context)
 
             if next_step_index is None:
@@ -2155,6 +2161,8 @@ class LLMAgent:
             orchestration_step_index = await self._start_orchestration_step(context)
 
         elif current_step is not None and current_step.status is OrchestrationStepStatus.COMPLETED:
+            context.raise_if_cancellation_requested()
+
             next_step_index = self._advance_orchestration_step(context)
 
             if next_step_index is None:
@@ -2208,6 +2216,8 @@ class LLMAgent:
             if current_step is None:
                 raise RuntimeError("Orchestration recovery lost the current step after completion.")
 
+            context.raise_if_cancellation_requested()
+
             next_step_index = self._advance_orchestration_step(context)
 
             if next_step_index is None:
@@ -2233,6 +2243,8 @@ class LLMAgent:
 
                 if decision is not AgentRuntimeDecision.CONTINUE:
                     raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
+
+                context.raise_if_cancellation_requested()
 
                 context.runtime_state.continue_to_plan()
 

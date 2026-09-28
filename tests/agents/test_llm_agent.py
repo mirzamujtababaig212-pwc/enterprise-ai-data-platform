@@ -1054,6 +1054,120 @@ async def test_llm_agent_keeps_durable_steps_consistent_across_runtime_replannin
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_cancellation_stops_before_runtime_replanned_step() -> None:
+    class ReplanningPlanProvider:
+        def __init__(self) -> None:
+            self.plans: list[OrchestrationPlan] = []
+
+        def build_plan(
+            self,
+            context: AgentExecutionContext,
+        ) -> OrchestrationPlan:
+            plan_number = len(self.plans) + 2
+            plan = OrchestrationPlan(
+                steps=(
+                    OrchestrationStep(
+                        step_id=f"answer-{plan_number}",
+                        step_index=0,
+                        name="Produce answer",
+                        status=OrchestrationStepStatus.PENDING,
+                        completion_policy=(OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE),
+                    ),
+                )
+            )
+            self.plans.append(plan)
+            return plan
+
+    class ReplanningDecisionProvider:
+        def __init__(self, cancellation_requested: asyncio.Event) -> None:
+            self.cancellation_requested = cancellation_requested
+            self.results: list[AgentRuntimeDecision] = []
+
+        def evaluate(
+            self,
+            context: AgentExecutionContext,
+            evaluation: AgentRuntimeEvaluationSnapshot,
+        ):
+            decision = (
+                AgentRuntimeDecision.CONTINUE if not self.results else AgentRuntimeDecision.STOP
+            )
+            self.results.append(decision)
+
+            if decision is AgentRuntimeDecision.CONTINUE:
+                self.cancellation_requested.set()
+
+            from ai_platform.agents.decision_provider import (
+                AgentRuntimeDecisionReason,
+                AgentRuntimeDecisionResult,
+            )
+
+            return AgentRuntimeDecisionResult(
+                decision=decision,
+                reason=AgentRuntimeDecisionReason(
+                    "iteration_budget_remaining"
+                    if decision is AgentRuntimeDecision.CONTINUE
+                    else "iteration_budget_exhausted"
+                ),
+            )
+
+    repository = InMemoryAgentRunStepsRepository()
+    cancellation_requested = asyncio.Event()
+    plan_provider = ReplanningPlanProvider()
+    decision_provider = ReplanningDecisionProvider(cancellation_requested)
+
+    context, gateway = make_context(
+        run_id="run-runtime-replanning-cancellation",
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    initial_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer-1",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+    context.install_orchestration_plan(initial_plan)
+    context.plan_provider = plan_provider
+    context.decision_provider = decision_provider
+    context.cancellation_requested = cancellation_requested
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test LLM-backed agent.",
+            system_prompt="You are a test LLM agent.",
+            model="mock-gpt",
+        )
+    )
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        await agent.run(context)
+
+    first_step = repository.get(
+        "run-runtime-replanning-cancellation",
+        "answer-1",
+    )
+
+    assert first_step is not None
+    assert first_step.status is AgentRunStepStatus.COMPLETED
+
+    assert plan_provider.plans == []
+    assert decision_provider.results == [AgentRuntimeDecision.CONTINUE]
+    assert len(gateway.requests) == 1
+
+    assert context.orchestration_state.steps[0].step_id == "answer-1"
+    assert context.orchestration_state.steps[0].status is OrchestrationStepStatus.COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_completion_is_noop_without_orchestration_step() -> None:
     context, _ = make_context()
 
@@ -3911,6 +4025,70 @@ async def test_llm_agent_stops_at_rag_orchestration_boundary_before_next_llm_cal
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_cancellation_stops_before_next_rag_orchestration_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+    cancellation_requested = asyncio.Event()
+
+    class CancellingRAGTool(FakeRAGTool):
+        async def execute(self, arguments):
+            result = await super().execute(arguments)
+            cancellation_requested.set()
+            return result
+
+    tool = CancellingRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            session_id="session-rag-cancellation-boundary",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        cancellation_requested=cancellation_requested,
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        await agent.run(context)
+
+    state = context.orchestration_state
+
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+    assert state.steps[0].step_id == "retrieve_evidence"
+
+    assert state.steps[1].status is OrchestrationStepStatus.PENDING
+    assert state.steps[1].step_id == "analyze_evidence"
+
+    assert state.steps[2].status is OrchestrationStepStatus.PENDING
+    assert state.steps[2].step_id == "produce_answer"
+
+    assert state.current_step_index == 0
+    assert len(gateway.requests) == 1
+    assert tool.execute_count == 1
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_rag_tool_event_captures_sanitized_provenance() -> None:
     definition = AgentDefinition(
         name="production-llm-agent",
@@ -4992,6 +5170,433 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
     assert state.steps[2].step_id == "produce_answer"
     assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
     assert state.get_step_result("produce_answer") is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_cancellation_stops_before_recovery_next_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="mock-gpt",
+        tool_names=("rag.search",),
+    )
+
+    cancellation_requested = asyncio.Event()
+
+    class CancellingGateway(FakeLLMGateway):
+        async def route_chat(
+            self,
+            request: dict[str, Any],
+        ) -> dict[str, Any]:
+            response = await super().route_chat(request)
+            if len(self.requests) == 1:
+                cancellation_requested.set()
+            return response
+
+    gateway = CancellingGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-recovery-next-step-cancellation",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-recovery-next-step-cancellation",
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+        cancellation_requested=cancellation_requested,
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-recovery-next-step-cancellation",
+        agent_name=definition.name,
+        session_id="session-recovery-next-step-cancellation",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-recovery-next-step-cancel-1",
+                        name="rag.search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+            tool_result_message(
+                call_id="call-recovery-next-step-cancel-1",
+                tool_name="rag.search",
+                output={
+                    "query": "RAG",
+                    "retrieved_count": 2,
+                },
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        await agent.resume(context, checkpoint)
+
+    state = context.orchestration_state
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+
+    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
+
+    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].status is OrchestrationStepStatus.PENDING
+
+    assert state.current_step_index == 1
+    assert tool.execute_count == 0
+    assert len(gateway.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_cancellation_stops_before_runtime_replanned_step() -> None:
+    class ReplanningPlanProvider:
+        def __init__(self) -> None:
+            self.plans: list[OrchestrationPlan] = []
+
+        def build_plan(
+            self,
+            context: AgentExecutionContext,
+        ) -> OrchestrationPlan:
+            plan_number = len(self.plans) + 2
+            plan = OrchestrationPlan(
+                steps=(
+                    OrchestrationStep(
+                        step_id=f"answer-{plan_number}",
+                        step_index=0,
+                        name="Produce answer",
+                        status=OrchestrationStepStatus.PENDING,
+                        completion_policy=(OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE),
+                    ),
+                )
+            )
+            self.plans.append(plan)
+            return plan
+
+    class ReplanningDecisionProvider:
+        def __init__(self, cancellation_requested: asyncio.Event) -> None:
+            self.cancellation_requested = cancellation_requested
+            self.results: list[AgentRuntimeDecision] = []
+
+        def evaluate(
+            self,
+            context: AgentExecutionContext,
+            evaluation: AgentRuntimeEvaluationSnapshot,
+        ):
+            decision = (
+                AgentRuntimeDecision.CONTINUE if not self.results else AgentRuntimeDecision.STOP
+            )
+            self.results.append(decision)
+
+            if decision is AgentRuntimeDecision.CONTINUE:
+                self.cancellation_requested.set()
+
+            from ai_platform.agents.decision_provider import (
+                AgentRuntimeDecisionReason,
+                AgentRuntimeDecisionResult,
+            )
+
+            return AgentRuntimeDecisionResult(
+                decision=decision,
+                reason=AgentRuntimeDecisionReason(
+                    "iteration_budget_remaining"
+                    if decision is AgentRuntimeDecision.CONTINUE
+                    else "iteration_budget_exhausted"
+                ),
+            )
+
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    cancellation_requested = asyncio.Event()
+    plan_provider = ReplanningPlanProvider()
+    decision_provider = ReplanningDecisionProvider(cancellation_requested)
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    recovery_plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve enterprise evidence",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={
+                    "phase": "evidence_retrieval",
+                    "completion_tool_name": "rag.search",
+                },
+            ),
+            OrchestrationStep(
+                step_id="produce_answer",
+                step_index=1,
+                name="Produce grounded answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+                metadata={"phase": "response_generation"},
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-recovery-replanning-cancellation",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=llm_context,
+        run_id="run-recovery-replanning-cancellation",
+        orchestration_plan=recovery_plan,
+        cancellation_requested=cancellation_requested,
+    )
+
+    context.plan_provider = plan_provider
+    context.decision_provider = decision_provider
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-recovery-replanning-cancellation",
+        agent_name=definition.name,
+        session_id="session-recovery-replanning-cancellation",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-recovery-replanning-cancel-1",
+                        name="rag.search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+            tool_result_message(
+                call_id="call-recovery-replanning-cancel-1",
+                tool_name="rag.search",
+                output={
+                    "query": "RAG",
+                    "retrieved_count": 2,
+                },
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
+    )
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        await agent.resume(context, checkpoint)
+
+    assert decision_provider.results == [AgentRuntimeDecision.CONTINUE]
+    assert plan_provider.plans == []
+
+    state = context.orchestration_state
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+
+    assert state.steps[1].step_id == "produce_answer"
+    assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
+
+    assert state.current_step is None
+    assert len(gateway.requests) == 1
+    assert tool.execute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_cancellation_stops_before_next_orchestration_step() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="mock-gpt",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeLLMGateway()
+
+    llm_context = AgentLLMContext(
+        gateway,
+        AgentLLMConfig(
+            model=definition.model,
+            system_prompt=definition.system_prompt,
+        ),
+    )
+
+    tool_registry = InMemoryToolRegistry()
+    tool = FakeRAGTool(name="rag.search")
+    await tool_registry.register(tool)
+
+    tools = AgentToolContext(
+        tool_registry,
+        definition,
+    )
+
+    cancellation_requested = asyncio.Event()
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-123",
+            session_id="session-orchestration-resume-cancellation",
+        ),
+        tools=tools,
+        llm=llm_context,
+        run_id="run-orchestration-resume-cancellation",
+        orchestration_plan=build_enterprise_rag_analyst_plan(),
+        cancellation_requested=cancellation_requested,
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-orchestration-resume-cancellation",
+        agent_name=definition.name,
+        session_id="session-orchestration-resume-cancellation",
+        user_id="user-123",
+        messages=(
+            system_message("You are an enterprise RAG analyst."),
+            user_message("Find information about RAG."),
+            assistant_tool_call_message(
+                tool_calls=(
+                    AgentToolCall(
+                        call_id="call-resume-cancel-1",
+                        name="rag.search",
+                        arguments={"query": "RAG"},
+                    ),
+                ),
+                content="I searched for the information.",
+            ),
+            tool_result_message(
+                call_id="call-resume-cancel-1",
+                tool_name="rag.search",
+                output={
+                    "query": "RAG",
+                    "retrieved_count": 2,
+                },
+            ),
+        ),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={
+            "orchestration": {
+                "current_step_index": 0,
+                "steps": {
+                    "retrieve_evidence": {
+                        "status": OrchestrationStepStatus.COMPLETED.value,
+                        "tool_round": 1,
+                    },
+                },
+            },
+        },
+    )
+
+    cancellation_requested.set()
+
+    agent = LLMAgent(definition)
+
+    with pytest.raises(
+        asyncio.CancelledError,
+        match="Agent execution cancellation requested.",
+    ):
+        await agent.resume(context, checkpoint)
+
+    state = context.orchestration_state
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
+
+    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].status is OrchestrationStepStatus.PENDING
+
+    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].status is OrchestrationStepStatus.PENDING
+
+    assert state.current_step_index == 0
+    assert tool.execute_count == 0
+    assert len(gateway.requests) == 0
 
 
 @pytest.mark.asyncio
