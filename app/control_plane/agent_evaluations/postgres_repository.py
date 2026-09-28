@@ -197,6 +197,12 @@ class PostgreSQLAgentEvaluationRunsRepository:
                     "rag_unique_chunks_count",
                     0,
                 ),
+                retrieval_score_min=metrics_data.get("retrieval_score_min"),
+                retrieval_score_max=metrics_data.get("retrieval_score_max"),
+                retrieval_score_avg=metrics_data.get("retrieval_score_avg"),
+                reranker_score_min=metrics_data.get("reranker_score_min"),
+                reranker_score_max=metrics_data.get("reranker_score_max"),
+                reranker_score_avg=metrics_data.get("reranker_score_avg"),
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(
