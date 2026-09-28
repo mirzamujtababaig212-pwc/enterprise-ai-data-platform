@@ -243,6 +243,7 @@ class FakeRuntime:
         run_id=None,
         lease_id=None,
         execution_ownership_lost=None,
+        cancellation_requested=None,
     ):
         self.calls.append(
             {
@@ -265,6 +266,7 @@ class CancellationBlockingRuntime:
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.cancelled = False
+        self.resume_args = {}
 
     async def resume(
         self,
@@ -275,14 +277,23 @@ class CancellationBlockingRuntime:
         run_id=None,
         lease_id=None,
         execution_ownership_lost=None,
+        cancellation_requested=None,
     ):
+        self.resume_args = {
+            "run_id": run_id,
+            "lease_id": lease_id,
+            "execution_ownership_lost": execution_ownership_lost,
+            "cancellation_requested": cancellation_requested,
+        }
         self.started.set()
 
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            self.cancelled = True
-            raise
+        if cancellation_requested is None:
+            raise AssertionError("Recovery runtime must receive a cancellation signal.")
+
+        await cancellation_requested.wait()
+
+        self.cancelled = True
+        raise asyncio.CancelledError("Agent run cancellation requested.")
 
 
 @pytest.mark.asyncio
@@ -311,7 +322,7 @@ async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owne
 
     await runtime.started.wait()
 
-    registered_task = cancellation_registry._tasks.get("run-123")
+    registered_task = cancellation_registry._registrations.get("run-123").task
     assert registered_task is recovery_task
 
     cancelled = cancellation_registry.cancel("run-123")
@@ -323,6 +334,9 @@ async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owne
 
     assert runtime.cancelled is True
 
+    cancellation_requested = runtime.resume_args["cancellation_requested"]
+    assert cancellation_requested.is_set() is True
+
     recovered = repository.get("run-123")
 
     assert recovered is not None
@@ -332,7 +346,7 @@ async def test_recovery_cancellation_interrupts_active_recovery_and_cancels_owne
     assert repository.complete_call is None
     assert repository.fail_call is None
 
-    assert "run-123" not in cancellation_registry._tasks
+    assert "run-123" not in cancellation_registry._registrations
 
 
 @pytest.mark.asyncio
@@ -376,7 +390,7 @@ async def test_recovery_cancellation_does_not_mutate_run_after_lease_loss():
 
     await runtime.started.wait()
 
-    registered_task = cancellation_registry._tasks.get("run-123")
+    registered_task = cancellation_registry._registrations.get("run-123").task
     assert registered_task is recovery_task
 
     cancelled = cancellation_registry.cancel("run-123")
@@ -395,7 +409,7 @@ async def test_recovery_cancellation_does_not_mutate_run_after_lease_loss():
 
     assert recovered is not None
     assert recovered.status is AgentRunStatus.RUNNING
-    assert "run-123" not in cancellation_registry._tasks
+    assert "run-123" not in cancellation_registry._registrations
 
 
 @pytest.mark.asyncio
@@ -643,6 +657,7 @@ async def test_recovery_propagates_execution_ownership_loss_without_marking_fail
             run_id=None,
             lease_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             raise AgentExecutionOwnershipLostError("Agent execution lost durable run ownership.")
 
@@ -692,6 +707,7 @@ async def test_recovery_emits_started_and_failed_events_on_resume_failure():
             run_id=None,
             lease_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             raise ValueError("LLM provider unavailable")
 
@@ -891,6 +907,7 @@ async def test_recovery_marks_run_failed_when_runtime_resume_fails():
             run_id=None,
             lease_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             raise ValueError("LLM provider unavailable")
 
@@ -941,6 +958,7 @@ async def test_final_recovery_attempt_failure_exhausts_recovery_budget():
             run_id=None,
             lease_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             raise ValueError("LLM provider unavailable")
 
@@ -1545,6 +1563,7 @@ async def test_recover_stale_runs_continues_after_one_run_fails():
             run_id=None,
             lease_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             self.calls.append(
                 {

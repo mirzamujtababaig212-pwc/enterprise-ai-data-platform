@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+
+
+@dataclass
+class _CancellationRegistration:
+    task: asyncio.Task[object]
+    cancellation_requested: asyncio.Event
 
 
 class AgentRunCancellationRegistry:
@@ -13,19 +20,30 @@ class AgentRunCancellationRegistry:
     """
 
     def __init__(self) -> None:
-        self._tasks: dict[str, asyncio.Task[object]] = {}
+        self._registrations: dict[str, _CancellationRegistration] = {}
 
-    def register(self, run_id: str, task: asyncio.Task[object]) -> None:
-        self._tasks[run_id] = task
+    def register(
+        self,
+        run_id: str,
+        task: asyncio.Task[object],
+        cancellation_requested: asyncio.Event,
+    ) -> None:
+        self._registrations[run_id] = _CancellationRegistration(
+            task=task,
+            cancellation_requested=cancellation_requested,
+        )
 
     def unregister(self, run_id: str, task: asyncio.Task[object]) -> None:
-        if self._tasks.get(run_id) is task:
-            self._tasks.pop(run_id, None)
+        registration = self._registrations.get(run_id)
+
+        if registration is not None and registration.task is task:
+            self._registrations.pop(run_id, None)
 
     def cancel(self, run_id: str) -> bool:
-        task = self._tasks.get(run_id)
+        registration = self._registrations.get(run_id)
 
-        if task is None or task.done():
+        if registration is None or registration.task.done():
             return False
 
-        return task.cancel()
+        registration.cancellation_requested.set()
+        return True

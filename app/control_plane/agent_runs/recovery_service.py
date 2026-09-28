@@ -292,10 +292,15 @@ class AgentRunRecoveryService:
 
         recovery_started_at = time.perf_counter()
         ownership_lost = asyncio.Event()
+        cancellation_requested = asyncio.Event()
         execution_task = asyncio.current_task()
 
         if execution_task is not None and self._cancellation_registry is not None:
-            self._cancellation_registry.register(run.run_id, execution_task)
+            self._cancellation_registry.register(
+                run.run_id,
+                execution_task,
+                cancellation_requested,
+            )
 
         heartbeat_task = asyncio.create_task(
             heartbeat_loop(
@@ -311,7 +316,10 @@ class AgentRunRecoveryService:
             if execution_task is not None:
                 current_run = self._repository.get(run.run_id)
                 if current_run is not None and current_run.cancellation_requested:
-                    execution_task.cancel()
+                    cancellation_requested.set()
+
+            if cancellation_requested.is_set():
+                raise asyncio.CancelledError("Agent run cancellation requested before recovery.")
 
             checkpoint = self._checkpoints_repository.get_latest(run.run_id)
 
@@ -356,6 +364,7 @@ class AgentRunRecoveryService:
                 run_id=run.run_id,
                 lease_id=run.lease_id,
                 execution_ownership_lost=ownership_lost,
+                cancellation_requested=cancellation_requested,
             )
         except asyncio.CancelledError:
             cancelled_at = datetime.now(UTC)

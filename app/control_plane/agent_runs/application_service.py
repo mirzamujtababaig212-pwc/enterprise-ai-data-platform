@@ -473,6 +473,7 @@ class AgentRunApplicationService:
         self._repository.update(run)
 
         ownership_lost = asyncio.Event()
+        cancellation_requested = asyncio.Event()
 
         heartbeat_task = asyncio.create_task(
             heartbeat_loop(
@@ -494,12 +495,19 @@ class AgentRunApplicationService:
             raise RuntimeError("Agent run execution is not attached to an asyncio task.")
 
         if self._cancellation_registry is not None:
-            self._cancellation_registry.register(run.run_id, execution_task)
+            self._cancellation_registry.register(
+                run.run_id,
+                execution_task,
+                cancellation_requested,
+            )
 
         try:
             current_run = self._repository.get(run.run_id)
             if current_run is not None and current_run.cancellation_requested:
-                execution_task.cancel()
+                cancellation_requested.set()
+
+            if cancellation_requested.is_set():
+                raise asyncio.CancelledError("Agent run cancellation requested before execution.")
 
             response = await self._runtime.run(
                 agent_name,
@@ -507,6 +515,7 @@ class AgentRunApplicationService:
                 lease_id=lease_id,
                 run_id=run.run_id,
                 execution_ownership_lost=ownership_lost,
+                cancellation_requested=cancellation_requested,
             )
         except asyncio.CancelledError:
             cancelled_at = datetime.now(UTC)

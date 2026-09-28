@@ -69,7 +69,12 @@ def _response(
 
 def _repository() -> Mock:
     repository = Mock(spec=AgentRunRepository)
-    repository.create.side_effect = lambda run: run
+
+    def create_run(run: AgentRun) -> AgentRun:
+        repository.get.return_value = run
+        return run
+
+    repository.create.side_effect = create_run
     repository.update.side_effect = lambda run: run
 
     def complete_if_owner(
@@ -974,7 +979,10 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     assert completed.lease_id is None
     assert completed.lease_expires_at is None
 
-    runtime.run.assert_awaited_once_with(
+    runtime.run.assert_awaited_once()
+
+    runtime_call = runtime.run.await_args
+    assert runtime_call.args == (
         "enterprise-analyst",
         AgentRequest(
             input="Explain the platform",
@@ -982,10 +990,12 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
             user_id="user-1",
             execution_budget=ExecutionBudget(),
         ),
-        lease_id=running.lease_id,
-        run_id=pending.run_id,
-        execution_ownership_lost=runtime.run.await_args.kwargs["execution_ownership_lost"],
     )
+    assert runtime_call.kwargs["lease_id"] == running.lease_id
+    assert runtime_call.kwargs["run_id"] == pending.run_id
+    assert runtime_call.kwargs["execution_ownership_lost"] is not None
+    assert runtime_call.kwargs["cancellation_requested"] is not None
+    assert runtime_call.kwargs["cancellation_requested"].is_set() is False
 
 
 @pytest.mark.asyncio
@@ -1065,6 +1075,7 @@ async def test_execute_cancels_when_cancellation_is_requested_during_registratio
             lease_id=None,
             run_id=None,
             execution_ownership_lost=None,
+            cancellation_requested=None,
         ):
             self.started.set()
 
@@ -1127,7 +1138,7 @@ async def test_execute_cancels_when_cancellation_is_requested_during_registratio
         await execution_task
 
     assert cancellation_checked is True
-    assert runtime.cancelled is True
+    assert runtime.cancelled is False
     repository.cancel_if_owner.assert_called_once()
     assert hasattr(repository, "cancelled_run")
     assert repository.cancelled_run.status is AgentRunStatus.CANCELLED
@@ -1944,7 +1955,11 @@ async def test_execute_persists_cancelled_run_and_emits_audit_event() -> None:
 
     async def run_agent(*args, **kwargs):
         started.set()
-        await asyncio.Future()
+
+        cancellation_requested = kwargs["cancellation_requested"]
+        await cancellation_requested.wait()
+
+        raise asyncio.CancelledError("Agent run cancellation requested.")
 
     runtime.run = AsyncMock(side_effect=run_agent)
 
@@ -1984,6 +1999,10 @@ async def test_execute_persists_cancelled_run_and_emits_audit_event() -> None:
         await execution_task
 
     repository.cancel_if_owner.assert_called_once()
+
+    runtime_call = runtime.run.await_args
+    cancellation_requested = runtime_call.kwargs["cancellation_requested"]
+    assert cancellation_requested.is_set() is True
 
     cancelled = repository.cancelled_run
 
@@ -2047,7 +2066,11 @@ async def test_execute_cancellation_does_not_emit_event_after_ownership_loss() -
 
     async def run_agent(*args, **kwargs):
         started.set()
-        await asyncio.Future()
+
+        cancellation_requested = kwargs["cancellation_requested"]
+        await cancellation_requested.wait()
+
+        raise asyncio.CancelledError("Agent run cancellation requested.")
 
     runtime.run = AsyncMock(side_effect=run_agent)
 
@@ -2108,7 +2131,11 @@ async def test_execute_cancellation_continues_when_observer_fails() -> None:
 
     async def run_agent(*args, **kwargs):
         started.set()
-        await asyncio.Future()
+
+        cancellation_requested = kwargs["cancellation_requested"]
+        await cancellation_requested.wait()
+
+        raise asyncio.CancelledError("Agent run cancellation requested.")
 
     runtime.run = AsyncMock(side_effect=run_agent)
 
@@ -2151,6 +2178,37 @@ async def test_execute_cancellation_continues_when_observer_fails() -> None:
     cancelled = repository.cancelled_run
     assert cancelled.status == AgentRunStatus.CANCELLED
     assert observer.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_cancellation_registry_sets_signal_without_cancelling_task():
+    from app.control_plane.agent_runs.cancellation import (
+        AgentRunCancellationRegistry,
+    )
+
+    registry = AgentRunCancellationRegistry()
+    cancellation_requested = asyncio.Event()
+
+    async def worker():
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(worker())
+
+    registry.register(
+        "run-123",
+        task,
+        cancellation_requested,
+    )
+
+    assert registry.cancel("run-123") is True
+    assert cancellation_requested.is_set() is True
+    assert task.cancelled() is False
+    assert task.done() is False
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 def test_cancel_raises_lookup_error_for_missing_run() -> None:
