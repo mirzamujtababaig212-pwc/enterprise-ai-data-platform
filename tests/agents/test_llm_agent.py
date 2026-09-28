@@ -72,6 +72,7 @@ from tools.models import (
     ToolDefinition,
     ToolExecutionFailureCategory,
     ToolExecutionPolicy,
+    ToolProvider,
 )
 from tools.rag.search import RAGSearchTool
 from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
@@ -3227,6 +3228,119 @@ async def test_llm_agent_propagates_execution_provenance_to_event_and_durable_st
     assert "classification" not in event_provenance
     assert "arguments" not in event_provenance
     assert "output" not in event_provenance
+
+
+class FailingMCPTool:
+    def __init__(self, name: str = "rag.search") -> None:
+        self._definition = ToolDefinition(
+            name=name,
+            description="A failing MCP search tool.",
+            provider=ToolProvider(
+                kind="mcp",
+                name="document-server",
+            ),
+            metadata={
+                "source": "mcp",
+                "mcp_server": "document-server",
+                "sensitive_internal_config": "secret-token-12345",
+            },
+        )
+        self.execute_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.execute_count += 1
+        raise RuntimeError("Remote MCP protocol failure: Connection lost to document-server")
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_mcp_failure_produces_bounded_event_metadata() -> None:
+    definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise RAG analyst.",
+        system_prompt="You are an enterprise RAG analyst.",
+        model="gpt-test",
+        tool_names=("rag.search",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="rag.search")
+    tool_registry = InMemoryToolRegistry()
+
+    mcp_tool = FailingMCPTool()
+    await tool_registry.register(mcp_tool)
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=ToolAuthorizationService(
+            ProvenanceToolAuthorizer(),
+        ),
+        idempotency_store=InMemoryToolExecutionIdempotencyStore(),
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Find information about RAG.",
+            user_id="user-provenance",
+            principal="agent:research",
+            tenant_id="tenant-acme",
+            session_id="session-provenance",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+            execution_service=execution_service,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id="run-mcp-failure",
+    )
+
+    observer = FakeAgentExecutionObserver()
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+    )
+
+    await agent.run(context)
+
+    failed_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.TOOL_CALL_FAILED
+    ]
+
+    assert len(failed_events) == 1
+    failed_event = failed_events[0]
+
+    assert failed_event.metadata["failure_category"] == "execution_error"
+
+    event_provenance = failed_event.metadata["execution_provenance"]
+
+    expected_provenance = {
+        "tool_source": "mcp",
+        "mcp_server": "document-server",
+        "tool_provider": {
+            "kind": "mcp",
+            "name": "document-server",
+        },
+        "execution_status": "failed",
+        "tenant_id": "tenant-acme",
+        "authorization_decision": True,
+        "authorization_policy_id": "policy-enterprise-tools",
+        "authorization_policy_version": "v7",
+        "idempotency_key": "deldai:run-mcp-failure:call-123:rag.search",
+    }
+
+    assert event_provenance == expected_provenance
+
+    assert "Remote MCP protocol failure" not in str(failed_event.metadata)
+    assert "sensitive_internal_config" not in str(failed_event.metadata)
+    assert "secret-token-12345" not in str(failed_event.metadata)
 
 
 @pytest.mark.asyncio
