@@ -598,6 +598,45 @@ async def test_authorized_principal_can_execute_tool():
 
 
 @pytest.mark.asyncio
+async def test_authorized_principal_can_execute_tool_from_execution_context():
+    registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+
+    tool = FakeTool()
+
+    await registry.register(tool)
+
+    await authorizer.allow(
+        "agent:context-principal",
+        "test_tool",
+    )
+
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    execution_context = ToolExecutionContext(
+        principal="agent:context-principal",
+    )
+
+    result = await service.execute(
+        "test_tool",
+        {"value": 42},
+        execution_context=execution_context,
+    )
+
+    assert result.success is True
+    assert result.output == {
+        "status": "success",
+        "arguments": {"value": 42},
+    }
+    assert tool.execution_count == 1
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_principal_cannot_execute_tool():
     registry = InMemoryToolRegistry()
     authorizer = InMemoryToolAuthorizer()

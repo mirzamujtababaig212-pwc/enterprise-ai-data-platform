@@ -34,6 +34,9 @@ def test_definition_name_is_vehicle_data_query():
     tool, _ = _build_tool()
 
     assert tool.definition.name == "vehicle.data.query"
+    assert tool.definition.provider is not None
+    assert tool.definition.provider.kind == "native"
+    assert tool.definition.provider.name == "internal"
 
 
 def test_definition_has_expected_input_schema():

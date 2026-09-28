@@ -5,6 +5,19 @@ from enum import StrEnum
 from typing import Any
 
 
+@dataclass(frozen=True)
+class ToolProvider:
+    kind: str
+    name: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, str) or not self.kind.strip():
+            raise ValueError("Tool provider kind must not be empty.")
+
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("Tool provider name must not be empty.")
+
+
 class ToolExecutionFailureCategory(StrEnum):
     TOOL_NOT_FOUND = "tool_not_found"
     TOOL_DISABLED = "tool_disabled"
@@ -51,6 +64,7 @@ class ToolDefinition:
     input_schema: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
+    provider: ToolProvider | None = None
     execution_policy: ToolExecutionPolicy = field(
         default_factory=ToolExecutionPolicy,
     )

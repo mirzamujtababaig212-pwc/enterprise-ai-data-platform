@@ -5,7 +5,7 @@ from typing import Any
 
 from data_platform.vehicle.service import VehicleDataService
 from tools.execution.context import ToolExecutionContext
-from tools.models import ToolDefinition, ToolExecutionPolicy
+from tools.models import ToolDefinition, ToolProvider, ToolExecutionPolicy
 
 
 class VehicleDataQueryTool:
@@ -49,6 +49,10 @@ class VehicleDataQueryTool:
                 },
                 "additionalProperties": False,
             },
+            provider=ToolProvider(
+                kind="native",
+                name="internal",
+            ),
             metadata={
                 "category": "enterprise_data",
                 "read_only": True,

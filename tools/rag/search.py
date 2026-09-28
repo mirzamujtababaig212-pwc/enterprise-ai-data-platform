@@ -4,7 +4,7 @@ from typing import Any
 
 from rag.contracts import Retriever
 from rag.governance import GovernancePolicy
-from tools.models import ToolDefinition
+from tools.models import ToolDefinition, ToolProvider
 from tools.execution.context import ToolExecutionContext
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -70,6 +70,10 @@ class RAGSearchTool:
                 },
                 "required": ["query"],
             },
+            provider=ToolProvider(
+                kind="native",
+                name="internal",
+            ),
             metadata={
                 "category": "retrieval",
                 "read_only": True,

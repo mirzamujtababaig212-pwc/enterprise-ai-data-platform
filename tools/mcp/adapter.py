@@ -7,7 +7,7 @@ from tools.execution.idempotency import build_external_idempotency_key
 from tools.mcp.client import MCPClient
 from tools.mcp.config import MCPToolCapability
 from tools.mcp.models import MCPToolDefinition
-from tools.models import ToolDefinition
+from tools.models import ToolDefinition, ToolProvider
 
 
 class MCPToolAdapter:
@@ -58,6 +58,14 @@ class MCPToolAdapter:
             description=self._definition.description,
             input_schema=dict(self._definition.input_schema),
             metadata=metadata,
+            provider=(
+                ToolProvider(
+                    kind="mcp",
+                    name=self._server_name,
+                )
+                if self._server_name is not None
+                else None
+            ),
         )
 
     async def execute(

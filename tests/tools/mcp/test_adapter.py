@@ -101,6 +101,7 @@ async def test_mcp_adapter_exposes_internal_tool_definition():
     assert tool.definition.metadata == {
         "source": "mcp",
     }
+    assert tool.definition.provider is None
 
 
 @pytest.mark.asyncio
@@ -330,3 +331,6 @@ async def test_mcp_adapter_exposes_deldai_capability_metadata():
         "side_effect": False,
         "permission_scope": "document:read",
     }
+    assert tool.definition.provider is not None
+    assert tool.definition.provider.kind == "mcp"
+    assert tool.definition.provider.name == "document-server"

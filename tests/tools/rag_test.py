@@ -162,6 +162,9 @@ def test_rag_search_definition() -> None:
     definition = tool.definition
 
     assert definition.name == "rag.search"
+    assert definition.provider is not None
+    assert definition.provider.kind == "native"
+    assert definition.provider.name == "internal"
     assert "knowledge base" in definition.description
     assert definition.input_schema["required"] == ["query"]
     assert definition.input_schema["properties"]["top_k"]["default"] == 5

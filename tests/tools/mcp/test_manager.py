@@ -13,7 +13,7 @@ from tools.mcp.health import MCPHealthHistory
 from tools.mcp.manager import MCPServerManager
 from tools.mcp.models import MCPToolDefinition
 from tools.mcp.recovery import MCPRecoveryPolicy
-from tools.models import ToolDefinition
+from tools.models import ToolDefinition, ToolProvider
 from tools.registry.in_memory import InMemoryToolRegistry
 
 
@@ -225,6 +225,10 @@ async def test_discover_server_registers_tools():
                 "risk_tier": "unknown",
                 "side_effect": True,
             },
+            provider=ToolProvider(
+                kind="mcp",
+                name="server-a",
+            ),
         )
     ]
 
@@ -912,6 +916,10 @@ async def test_recover_server_reconnects_verifies_and_discovers():
                 "risk_tier": "unknown",
                 "side_effect": True,
             },
+            provider=ToolProvider(
+                kind="mcp",
+                name="server-a",
+            ),
         )
     ]
 

@@ -175,6 +175,9 @@ class ToolExecutionService:
     ) -> ToolExecutionResult:
         execution_context = self._normalize_execution_context(execution_context)
 
+        if principal is None and execution_context is not None:
+            principal = execution_context.principal
+
         if not tool_name.strip():
             raise ValueError("Tool name must not be empty.")
 
