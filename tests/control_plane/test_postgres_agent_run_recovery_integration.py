@@ -1347,3 +1347,312 @@ def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
         session.commit()
         session.close()
         engine.dispose()
+
+
+def test_postgres_recovery_live_heartbeat_blocks_second_worker_claim() -> None:
+    import asyncio
+
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "a0000000-0000-4000-8000-000000000001"
+
+    session = session_factory()
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Recover while another worker is actively executing.",
+            session_id="session-live-heartbeat",
+            user_id="user-live-heartbeat",
+            metadata={"source": "multi-worker-recovery-test"},
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="live-heartbeat-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC) - timedelta(minutes=5),
+                lease_id="expired-worker-a",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        checkpoint_repository.save(
+            make_checkpoint(run_id),
+            lease_id="expired-worker-a",
+        )
+
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                lease_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+        )
+        session.commit()
+
+        class HeartbeatObservingRepository(PostgreSQLAgentRunRepository):
+            def __init__(self, db_session, heartbeat_observed):
+                super().__init__(db_session)
+                self.heartbeat_observed = heartbeat_observed
+
+            def heartbeat(
+                self,
+                run_id,
+                *,
+                lease_id,
+                lease_expires_at,
+            ):
+                result = super().heartbeat(
+                    run_id,
+                    lease_id=lease_id,
+                    lease_expires_at=lease_expires_at,
+                )
+                if result is not None:
+                    self.heartbeat_observed.set()
+                return result
+
+        heartbeat_observed = asyncio.Event()
+        execution_started = asyncio.Event()
+        release_execution = asyncio.Event()
+
+        worker_a_session = session_factory()
+        worker_b_session = session_factory()
+
+        worker_a_repository = HeartbeatObservingRepository(
+            worker_a_session,
+            heartbeat_observed,
+        )
+        worker_b_repository = PostgreSQLAgentRunRepository(worker_b_session)
+
+        class BlockingRuntime(FakeRuntime):
+            async def resume(
+                self,
+                agent_name,
+                request,
+                checkpoint,
+                *,
+                run_id=None,
+                lease_id=None,
+                execution_ownership_lost=None,
+            ):
+                execution_started.set()
+                await release_execution.wait()
+                return await super().resume(
+                    agent_name,
+                    request,
+                    checkpoint,
+                    run_id=run_id,
+                    lease_id=lease_id,
+                    execution_ownership_lost=execution_ownership_lost,
+                )
+
+        worker_a_service = AgentRunRecoveryService(
+            runtime=BlockingRuntime(),
+            repository=worker_a_repository,
+            checkpoints_repository=PostgreSQLAgentCheckpointsRepository(
+                worker_a_session,
+            ),
+            lease_seconds=3,
+            max_recovery_attempts=3,
+        )
+
+        worker_b_service = AgentRunRecoveryService(
+            runtime=FakeRuntime(),
+            repository=worker_b_repository,
+            checkpoints_repository=PostgreSQLAgentCheckpointsRepository(
+                worker_b_session,
+            ),
+            lease_seconds=3,
+            max_recovery_attempts=3,
+        )
+
+        async def exercise_two_workers():
+            worker_a_task = asyncio.create_task(
+                worker_a_service.recover_stale_runs(
+                    stale_before=datetime.now(UTC),
+                    limit=10,
+                )
+            )
+
+            await execution_started.wait()
+            await asyncio.wait_for(heartbeat_observed.wait(), timeout=5)
+
+            worker_b_result = await worker_b_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+
+            release_execution.set()
+            worker_a_result = await worker_a_task
+
+            return worker_a_result, worker_b_result
+
+        try:
+            worker_a_result, worker_b_result = asyncio.run(exercise_two_workers())
+
+            assert len(worker_a_result.recovered) == 1
+            assert worker_a_result.recovered[0].run_id == run_id
+            assert worker_a_result.failed_run_ids == ()
+
+            # Worker B must see no stale candidate because worker A's
+            # heartbeat extended the active lease.
+            assert worker_b_result.recovered == ()
+            assert worker_b_result.failed_run_ids == ()
+
+            session.expire_all()
+            restored = run_repository.get(run_id)
+
+            assert restored is not None
+            assert restored.status is AgentRunStatus.COMPLETED
+            assert restored.lease_id is None
+            assert restored.lease_expires_at is None
+        finally:
+            worker_a_session.close()
+            worker_b_session.close()
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
+        engine.dispose()
+
+
+def test_postgres_recovery_fences_previous_worker_after_lease_transfer() -> None:
+
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "a0000000-0000-4000-8000-000000000002"
+
+    session = session_factory()
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Verify recovery ownership transfer fencing.",
+            session_id="session-lease-transfer",
+            user_id="user-lease-transfer",
+            metadata={"source": "multi-worker-recovery-test"},
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="lease-transfer-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC) - timedelta(minutes=5),
+                lease_id="worker-a-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        checkpoint_repository.save(
+            make_checkpoint(run_id),
+            lease_id="worker-a-lease",
+        )
+
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                lease_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+        )
+        session.commit()
+
+        worker_a_session = session_factory()
+        worker_b_session = session_factory()
+
+        worker_a_repository = PostgreSQLAgentRunRepository(worker_a_session)
+        worker_b_repository = PostgreSQLAgentRunRepository(worker_b_session)
+
+        try:
+            worker_b_claim = worker_b_repository.claim_expired_running_run(
+                run_id,
+                stale_before=datetime.now(UTC),
+                started_at=datetime.now(UTC),
+                lease_id="worker-b-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+                max_recovery_attempts=3,
+            )
+
+            assert worker_b_claim is not None
+            assert worker_b_claim.status is AgentRunStatus.RUNNING
+            assert worker_b_claim.lease_id == "worker-b-lease"
+
+            # Worker A is now fenced out. Its heartbeat must not renew the
+            # lease after worker B has atomically taken ownership.
+            heartbeat_result = worker_a_repository.heartbeat(
+                run_id,
+                lease_id="worker-a-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            )
+
+            assert heartbeat_result is None
+
+            # A terminal update using the stale lease must also be rejected.
+            completion_result = worker_a_repository.complete_if_owner(
+                run_id,
+                lease_id="worker-a-lease",
+                completed_at=datetime.now(UTC),
+                output={"worker": "A"},
+            )
+
+            assert completion_result is None
+
+            worker_b_view = worker_b_repository.get(run_id)
+
+            assert worker_b_view is not None
+            assert worker_b_view.status is AgentRunStatus.RUNNING
+            assert worker_b_view.lease_id == "worker-b-lease"
+            assert worker_b_view.lease_expires_at is not None
+        finally:
+            worker_a_session.close()
+            worker_b_session.close()
+
+    finally:
+        session.rollback()
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
+        session.close()
+        engine.dispose()
