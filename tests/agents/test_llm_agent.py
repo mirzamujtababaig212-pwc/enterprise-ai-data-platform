@@ -12,6 +12,7 @@ from datetime import datetime
 from time import monotonic
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -67,7 +68,11 @@ from ai_platform.agents.models import (
 )
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
-from tools.models import ToolDefinition, ToolExecutionFailureCategory
+from tools.models import (
+    ToolDefinition,
+    ToolExecutionFailureCategory,
+    ToolExecutionPolicy,
+)
 from tools.rag.search import RAGSearchTool
 from tools.execution.idempotency import InMemoryToolExecutionIdempotencyStore
 from tools.execution.service import ToolExecutionService
@@ -3329,6 +3334,100 @@ async def test_llm_agent_persists_failed_durable_tool_step() -> None:
     assert step.status is AgentRunStepStatus.FAILED
     assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
     assert step.error == "RuntimeError: simulated tool failure"
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> None:
+    class RetryPolicyFailingTool:
+        def __init__(self) -> None:
+            self._definition = ToolDefinition(
+                name="policy_failing_tool",
+                description="A policy-aware failing test tool.",
+                execution_policy=ToolExecutionPolicy(
+                    retryable_failure_categories=frozenset(
+                        {ToolExecutionFailureCategory.EXECUTION_ERROR}
+                    ),
+                ),
+            )
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments):
+            raise RuntimeError("simulated policy failure")
+
+    definition = AgentDefinition(
+        name="test-policy-failure-agent",
+        description="Test agent for runtime failure classification.",
+        system_prompt="You are a test agent.",
+        model="gpt-test",
+        tool_names=("policy_failing_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="policy_failing_tool")
+    tool_registry = InMemoryToolRegistry()
+    await tool_registry.register(RetryPolicyFailingTool())
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute policy-aware failing tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "policy_failing_tool"},
+            ),
+        )
+    )
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-policy-tool-failed"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the policy-aware failing tool.",
+            session_id="session-policy-failed",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    with patch(
+        "ai_platform.agents.llm_agent.classify_runtime_failure",
+        wraps=__import__(
+            "ai_platform.agents.failure_classification",
+            fromlist=["classify_runtime_failure"],
+        ).classify_runtime_failure,
+    ) as classifier:
+        with pytest.raises(Exception):
+            await agent.run(context)
+
+    classifier.assert_called_once_with(
+        ToolExecutionFailureCategory.EXECUTION_ERROR,
+        retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
+    )
+
+    step = repository.get(run_id, "execute_tool")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
+    assert step.error == "RuntimeError: simulated policy failure"
     assert step.completed_at is not None
 
 

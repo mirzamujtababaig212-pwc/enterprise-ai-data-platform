@@ -19,6 +19,10 @@ from ai_platform.agents.exceptions import (
     AgentOutputPolicyError,
     AgentTokenLimitError,
 )
+from ai_platform.agents.failure_classification import (
+    RuntimeFailureCategory,
+    classify_runtime_failure,
+)
 from ai_platform.agents.decision_provider import AgentRuntimeDecisionResult
 from ai_platform.agents.orchestration import (
     AgentRuntimeDecision,
@@ -313,12 +317,17 @@ class LLMAgent:
                 tool_calls,
             )
         except AgentExecutionOwnershipLostError as exc:
+            runtime_failure = classify_runtime_failure(
+                exception=exc,
+            )
+
             if context.orchestration_plan is not None:
                 step = context.orchestration_state.current_step
 
                 if (
                     step is not None
                     and step.completion_policy is OrchestrationStepCompletionPolicy.ON_TOOL_RESULT
+                    and runtime_failure is RuntimeFailureCategory.AMBIGUOUS
                 ):
                     await self._persist_orchestration_step_ambiguous(
                         context,
@@ -361,6 +370,17 @@ class LLMAgent:
                     tool_round=tool_round,
                 )
             else:
+                tool = await context.tools.get_tool(tool_call.name)
+                retryable_failure_categories = (
+                    tool.definition.execution_policy.retryable_failure_categories
+                    if tool is not None
+                    else frozenset()
+                )
+                runtime_failure = classify_runtime_failure(
+                    tool_result.failure_category,
+                    retryable_failure_categories=retryable_failure_categories,
+                )
+
                 if (
                     context.orchestration_plan is not None
                     and context.orchestration_state.current_step is not None
@@ -377,20 +397,14 @@ class LLMAgent:
                             else None
                         )
 
-                        if (
-                            tool_result.failure_category
-                            is ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS
-                        ):
+                        if runtime_failure is RuntimeFailureCategory.AMBIGUOUS:
                             await self._persist_orchestration_step_ambiguous(
                                 context,
                                 step,
                                 error=(tool_result.error or "Tool execution outcome is ambiguous."),
                                 failure_category=failure_category,
                             )
-                        elif (
-                            tool_result.failure_category
-                            is not ToolExecutionFailureCategory.EXECUTION_IN_PROGRESS
-                        ):
+                        elif runtime_failure is not RuntimeFailureCategory.IN_PROGRESS:
                             await self._persist_orchestration_step_failed(
                                 context,
                                 step,
