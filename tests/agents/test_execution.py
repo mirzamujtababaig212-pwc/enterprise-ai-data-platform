@@ -11,7 +11,10 @@ from ai_platform.agents.exceptions import (
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.models import AgentDefinition, AgentRequest
-from ai_platform.agents.orchestration import OrchestrationStepStatus
+from ai_platform.agents.orchestration import (
+    AgentRuntimePhase,
+    OrchestrationStepStatus,
+)
 from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
 from ai_platform.agents.tool_context import AgentToolContext
 from ai_platform.agents.tool_calls import (
@@ -90,6 +93,30 @@ def test_execution_context_defaults_to_empty_orchestration_state() -> None:
     assert context.orchestration_plan is None
     assert context.orchestration_state.steps == []
     assert context.orchestration_state.current_step_index is None
+
+
+def test_execution_context_defaults_to_plan_runtime_state() -> None:
+    context = make_context()
+
+    assert context.runtime_state.phase is AgentRuntimePhase.PLAN
+    assert context.runtime_state.decision is None
+    assert context.runtime_state.current_step_index is None
+
+
+def test_execution_context_runtime_state_is_independent_per_context() -> None:
+    first = make_context()
+    second = make_context()
+
+    first.runtime_state.transition_to(
+        AgentRuntimePhase.ACT,
+        current_step_index=0,
+    )
+
+    assert first.runtime_state.phase is AgentRuntimePhase.ACT
+    assert first.runtime_state.current_step_index == 0
+
+    assert second.runtime_state.phase is AgentRuntimePhase.PLAN
+    assert second.runtime_state.current_step_index is None
 
 
 def test_execution_context_creates_lifecycle_state_per_context() -> None:

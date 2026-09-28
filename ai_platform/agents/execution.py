@@ -11,7 +11,11 @@ from ai_platform.agents.exceptions import (
 )
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
-from ai_platform.agents.orchestration import OrchestrationPlan, OrchestrationState
+from ai_platform.agents.orchestration import (
+    AgentRuntimeState,
+    OrchestrationPlan,
+    OrchestrationState,
+)
 from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
 from ai_platform.agents.llm_messages import (
     AgentMessage,
@@ -82,6 +86,7 @@ class AgentExecutionContext:
             if orchestration_plan is not None
             else OrchestrationState()
         )
+        self.runtime_state = AgentRuntimeState()
 
         if self.run_id is not None:
             if not isinstance(self.run_id, str):

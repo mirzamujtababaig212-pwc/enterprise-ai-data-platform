@@ -19,6 +19,7 @@ from ai_platform.agents.exceptions import (
     AgentTokenLimitError,
 )
 from ai_platform.agents.orchestration import (
+    AgentRuntimePhase,
     OrchestrationStep,
     OrchestrationStepCompletionPolicy,
     OrchestrationStepStatus,
@@ -758,6 +759,17 @@ class LLMAgent:
 
         return "model"
 
+    @staticmethod
+    def _runtime_step_metadata(
+        context: AgentExecutionContext,
+        metadata: dict[str, object],
+    ) -> dict[str, object]:
+        """Merge Runtime V1 state into existing step metadata."""
+
+        merged = dict(metadata)
+        merged.update(context.runtime_state.to_metadata())
+        return merged
+
     async def _persist_orchestration_step_planned(
         self,
         context: AgentExecutionContext,
@@ -787,7 +799,10 @@ class LLMAgent:
                     step_index=step.step_index,
                     step_type=self._durable_step_type(step),
                     status=AgentRunStepStatus.PLANNED,
-                    metadata=dict(step.metadata),
+                    metadata=self._runtime_step_metadata(
+                        context,
+                        dict(step.metadata),
+                    ),
                 )
             )
         finally:
@@ -851,6 +866,10 @@ class LLMAgent:
                 status=AgentRunStepStatus.RUNNING,
                 updated_at=now,
                 started_at=now,
+                metadata=self._runtime_step_metadata(
+                    context,
+                    dict(existing.metadata),
+                ),
             )
         finally:
             repository.close()
@@ -1022,6 +1041,11 @@ class LLMAgent:
 
             state.start_step(0)
 
+            context.runtime_state.transition_to(
+                AgentRuntimePhase.ACT,
+                current_step_index=step.step_index,
+            )
+
         elif step.status is OrchestrationStepStatus.PENDING:
             await self._persist_orchestration_step_planned(
                 context,
@@ -1029,6 +1053,11 @@ class LLMAgent:
             )
 
             state.start_step(step.step_index)
+
+            context.runtime_state.transition_to(
+                AgentRuntimePhase.ACT,
+                current_step_index=step.step_index,
+            )
 
         await self._persist_orchestration_step_running(
             context,

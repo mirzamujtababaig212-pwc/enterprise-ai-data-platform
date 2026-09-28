@@ -628,6 +628,7 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
                 step_index=0,
                 name="First step",
                 status=OrchestrationStepStatus.PENDING,
+                metadata={"phase": "test", "custom": "preserved"},
             ),
         )
     )
@@ -642,6 +643,26 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
         )
     )
 
+    await agent._persist_orchestration_step_planned(
+        context,
+        context.orchestration_state.steps[0],
+    )
+
+    planned_step = repository.get(
+        "run-durable-step",
+        "step-1",
+    )
+
+    assert planned_step is not None
+    assert planned_step.status is AgentRunStepStatus.PLANNED
+    assert planned_step.metadata["phase"] == "test"
+    assert planned_step.metadata["custom"] == "preserved"
+    assert planned_step.metadata["runtime"] == {
+        "phase": "plan",
+        "decision": None,
+        "current_step_index": None,
+    }
+
     await agent._start_orchestration_step(context)
 
     durable_step = repository.get(
@@ -654,6 +675,18 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
     assert durable_step.step_index == 0
     assert durable_step.step_type == "model"
     assert durable_step.attempt == 1
+
+    assert context.runtime_state.phase.value == "act"
+    assert context.runtime_state.current_step_index == 0
+    assert context.runtime_state.decision is None
+
+    assert durable_step.metadata["phase"] == "test"
+    assert durable_step.metadata["custom"] == "preserved"
+    assert durable_step.metadata["runtime"] == {
+        "phase": "act",
+        "decision": None,
+        "current_step_index": 0,
+    }
 
 
 @pytest.mark.asyncio
