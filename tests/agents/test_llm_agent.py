@@ -3432,6 +3432,109 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_classifies_timeout_using_execution_policy() -> None:
+    class TimeoutTool:
+        def __init__(self) -> None:
+            self._definition = ToolDefinition(
+                name="timeout_tool",
+                description="A timeout test tool.",
+                execution_policy=ToolExecutionPolicy(
+                    max_retries=0,
+                    retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
+                ),
+            )
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments):
+            await asyncio.sleep(0.2)
+
+    definition = AgentDefinition(
+        name="test-timeout-agent",
+        description="Test agent for runtime timeout classification.",
+        system_prompt="You are a test agent.",
+        model="gpt-test",
+        tool_names=("timeout_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(tool_name="timeout_tool")
+    tool_registry = InMemoryToolRegistry()
+    tool = TimeoutTool()
+    await tool_registry.register(tool)
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        idempotency_store=InMemoryToolExecutionIdempotencyStore(),
+        default_timeout_seconds=0.05,
+    )
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute timeout tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "timeout_tool"},
+            ),
+        )
+    )
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-timeout-tool-failed"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the timeout tool.",
+            session_id="session-timeout-failed",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+            execution_service=execution_service,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    agent = LLMAgent(definition)
+
+    await agent._start_orchestration_step(context)
+
+    with patch(
+        "ai_platform.agents.llm_agent.classify_runtime_failure",
+        wraps=__import__(
+            "ai_platform.agents.failure_classification",
+            fromlist=["classify_runtime_failure"],
+        ).classify_runtime_failure,
+    ) as classifier:
+        with pytest.raises(Exception):
+            await agent.run(context)
+
+    classifier.assert_called_once_with(
+        ToolExecutionFailureCategory.TIMEOUT,
+        retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
+    )
+
+    step = repository.get(run_id, "execute_tool")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.failure_category == ToolExecutionFailureCategory.TIMEOUT.value
+    assert step.error == "Tool execution timed out after 0.05 seconds: timeout_tool"
+    assert step.completed_at is not None
+    assert gateway.requests
+    assert tool.definition.execution_policy.max_retries == 0
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_persists_duration_limit_failure_for_running_durable_step() -> None:
     definition = AgentDefinition(
         name="test-duration-limit-agent",
