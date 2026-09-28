@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from ai_platform.agents.orchestration import AgentRuntimeDecision
+from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 
 if TYPE_CHECKING:
     from ai_platform.agents.execution import AgentExecutionContext
@@ -19,6 +20,7 @@ class AgentRuntimeDecisionProvider(Protocol):
     def evaluate(
         self,
         context: AgentExecutionContext,
+        evaluation: AgentRuntimeEvaluationSnapshot,
     ) -> AgentRuntimeDecision:
         """Produce the runtime decision for the completed iteration."""
         ...
@@ -35,6 +37,7 @@ class DeterministicAgentRuntimeDecisionProvider:
     def evaluate(
         self,
         context: AgentExecutionContext,
+        evaluation: AgentRuntimeEvaluationSnapshot,
     ) -> AgentRuntimeDecision:
         """Continue until the configured semantic iteration limit is reached."""
         if not hasattr(context, "agent_name"):

@@ -25,6 +25,7 @@ from ai_platform.agents.orchestration import (
     OrchestrationStepCompletionPolicy,
     OrchestrationStepStatus,
 )
+from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from memory.context.builder import MemoryContext
@@ -101,13 +102,16 @@ class ReplanningDecisionProvider:
         self.decisions: list[AgentRuntimeDecision] = []
         self.contexts: list[AgentExecutionContext] = []
         self.states: list[object] = []
+        self.evaluations: list[AgentRuntimeEvaluationSnapshot] = []
 
     def evaluate(
         self,
         context: AgentExecutionContext,
+        evaluation: AgentRuntimeEvaluationSnapshot,
     ) -> AgentRuntimeDecision:
         self.contexts.append(context)
         self.states.append(context.orchestration_state)
+        self.evaluations.append(evaluation)
 
         decision = (
             AgentRuntimeDecision.CONTINUE if not self.decisions else AgentRuntimeDecision.STOP
@@ -580,6 +584,16 @@ async def test_runtime_replans_between_semantic_iterations() -> None:
 
     assert len(decision_provider.contexts) == 2
     assert decision_provider.contexts[0] is decision_provider.contexts[1]
+
+    assert len(decision_provider.evaluations) == 2
+    assert decision_provider.evaluations[0].iteration == 1
+    assert decision_provider.evaluations[1].iteration == 2
+    assert decision_provider.evaluations[0].step_index == 0
+    assert decision_provider.evaluations[1].step_index == 0
+    assert decision_provider.evaluations[0].response.output == "Generated answer."
+    assert decision_provider.evaluations[1].response.output == "Generated answer."
+    assert decision_provider.evaluations[0].tool_rounds == 0
+    assert decision_provider.evaluations[1].tool_rounds == 0
 
     assert len(decision_provider.states) == 2
     assert decision_provider.states[0] is not decision_provider.states[1]

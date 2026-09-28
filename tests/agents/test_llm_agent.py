@@ -661,6 +661,7 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
         "phase": "plan",
         "decision": None,
         "current_step_index": None,
+        "iteration": 1,
     }
 
     await agent._start_orchestration_step(context)
@@ -686,6 +687,7 @@ async def test_llm_agent_persists_orchestration_step_as_running() -> None:
         "phase": "act",
         "decision": None,
         "current_step_index": 0,
+        "iteration": 1,
     }
 
 
@@ -823,6 +825,7 @@ async def test_llm_agent_completes_orchestration_step() -> None:
         "phase": "evaluate",
         "decision": None,
         "current_step_index": 0,
+        "iteration": 1,
     }
 
 
@@ -2650,6 +2653,7 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
         "phase": "act",
         "decision": None,
         "current_step_index": 0,
+        "iteration": 1,
     }
 
 

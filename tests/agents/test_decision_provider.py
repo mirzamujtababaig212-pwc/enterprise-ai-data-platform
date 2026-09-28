@@ -6,7 +6,9 @@ from ai_platform.agents.decision_provider import (
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.llm_context import AgentLLMContext
 from ai_platform.agents.models import AgentDefinition, AgentRequest
+from ai_platform.agents.models import AgentResponse
 from ai_platform.agents.orchestration import AgentRuntimeDecision
+from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
 
@@ -44,7 +46,18 @@ def make_context() -> AgentExecutionContext:
 def test_deterministic_decision_provider_returns_stop() -> None:
     provider = DeterministicAgentRuntimeDecisionProvider()
 
-    assert provider.evaluate(make_context()) is AgentRuntimeDecision.STOP
+    context = make_context()
+    evaluation = AgentRuntimeEvaluationSnapshot(
+        iteration=1,
+        step_index=None,
+        response=AgentResponse(
+            agent_name="test-agent",
+            output="test",
+        ),
+        tool_rounds=0,
+    )
+
+    assert provider.evaluate(context, evaluation) is AgentRuntimeDecision.STOP
 
 
 def test_execution_context_defaults_to_deterministic_decision_provider() -> None:

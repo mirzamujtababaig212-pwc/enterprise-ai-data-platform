@@ -25,6 +25,7 @@ from ai_platform.agents.orchestration import (
     OrchestrationStepCompletionPolicy,
     OrchestrationStepStatus,
 )
+from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 from ai_platform.agents.llm_messages import AgentMessage
 from ai_platform.agents.models import (
     AgentDefinition,
@@ -1126,13 +1127,23 @@ class LLMAgent:
     @staticmethod
     def _evaluate_runtime_decision(
         context: AgentExecutionContext,
+        *,
+        response: AgentResponse,
+        tool_rounds: int,
     ) -> AgentRuntimeDecision:
         """Evaluate the completed semantic iteration."""
 
         if context.runtime_state.phase is not AgentRuntimePhase.EVALUATE:
             raise RuntimeError("Runtime V1 must be in EVALUATE before producing a decision")
 
-        decision = context.decision_provider.evaluate(context)
+        evaluation = AgentRuntimeEvaluationSnapshot(
+            iteration=context.runtime_state.iteration,
+            step_index=context.runtime_state.current_step_index,
+            response=response,
+            tool_rounds=tool_rounds,
+        )
+
+        decision = context.decision_provider.evaluate(context, evaluation)
 
         if not isinstance(decision, AgentRuntimeDecision):
             raise TypeError("Runtime decision provider must return an AgentRuntimeDecision.")
@@ -1708,7 +1719,11 @@ class LLMAgent:
                 if continuation.response is None:
                     raise RuntimeError("Final orchestration step completed without a response.")
 
-                decision = self._evaluate_runtime_decision(context)
+                decision = self._evaluate_runtime_decision(
+                    context,
+                    response=continuation.response,
+                    tool_rounds=continuation.tool_rounds,
+                )
 
                 if decision is AgentRuntimeDecision.STOP:
                     await self._emit(
@@ -1972,7 +1987,11 @@ class LLMAgent:
                         "Final orchestration recovery step completed without " "an agent response."
                     )
 
-                decision = self._evaluate_runtime_decision(context)
+                decision = self._evaluate_runtime_decision(
+                    context,
+                    response=response,
+                    tool_rounds=continuation.tool_rounds,
+                )
 
                 if decision is AgentRuntimeDecision.STOP:
                     return response
