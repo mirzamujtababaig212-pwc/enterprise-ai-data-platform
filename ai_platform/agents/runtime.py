@@ -27,7 +27,6 @@ from ai_platform.agents.observability import (
     AgentExecutionEventType,
 )
 from ai_platform.agents.observer import AgentExecutionObserver
-from ai_platform.agents.plans import build_agent_orchestration_plan
 from ai_platform.agents.tool_context import AgentToolContext
 from memory.context.builder import MemoryContextBuilder
 from memory.service import MemoryService
@@ -140,11 +139,6 @@ class AgentRuntime:
         if not agent.definition.enabled:
             raise RuntimeError(f"Agent '{agent_name}' is disabled.")
 
-        try:
-            orchestration_plan = build_agent_orchestration_plan(agent_name)
-        except LookupError:
-            orchestration_plan = None
-
         resume_agent = getattr(agent, "resume", None)
 
         if resume_agent is None or not callable(resume_agent):
@@ -217,9 +211,13 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
-            orchestration_plan=orchestration_plan,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
         )
+
+        try:
+            context.install_orchestration_plan(context.plan_provider.build_plan(context))
+        except LookupError:
+            pass
 
         return await resume_agent(context, checkpoint)
 
@@ -243,11 +241,6 @@ class AgentRuntime:
 
         if not agent.definition.enabled:
             raise RuntimeError(f"Agent '{agent_name}' is disabled.")
-
-        try:
-            orchestration_plan = build_agent_orchestration_plan(agent_name)
-        except LookupError:
-            orchestration_plan = None
 
         if agent.definition.tool_names:
             if self._tool_registry is None:
@@ -330,10 +323,14 @@ class AgentRuntime:
             run_id=run_id,
             lease_id=lease_id,
             execution_ownership_lost=execution_ownership_lost,
-            orchestration_plan=orchestration_plan,
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
             lifecycle_state=lifecycle_state,
         )
+
+        try:
+            context.install_orchestration_plan(context.plan_provider.build_plan(context))
+        except LookupError:
+            pass
 
         try:
             await lifecycle_state.transition(
