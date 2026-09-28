@@ -1231,3 +1231,40 @@ def test_runtime_state_metadata_defaults_legacy_iteration() -> None:
 
     assert restored is not None
     assert restored.iteration == 1
+
+
+def test_orchestration_state_cancels_running_step() -> None:
+    step = OrchestrationStep(
+        step_id="retrieve",
+        step_index=0,
+        name="Retrieve evidence",
+        status=OrchestrationStepStatus.PENDING,
+        metadata={"source": "vehicle"},
+    )
+
+    state = OrchestrationState(steps=[step])
+
+    state.start_step(0)
+    cancelled = state.cancel_step(metadata={"error_type": "CancelledError"})
+
+    assert cancelled.status is OrchestrationStepStatus.CANCELLED
+    assert cancelled.metadata == {
+        "source": "vehicle",
+        "error_type": "CancelledError",
+    }
+    assert state.current_step is cancelled
+
+
+def test_orchestration_state_cannot_cancel_non_running_step() -> None:
+    step = OrchestrationStep(
+        step_id="retrieve",
+        step_index=0,
+        name="Retrieve evidence",
+        status=OrchestrationStepStatus.PENDING,
+    )
+
+    state = OrchestrationState(steps=[step])
+    state.current_step_index = 0
+
+    with pytest.raises(ValueError, match="must be RUNNING before cancellation"):
+        state.cancel_step()

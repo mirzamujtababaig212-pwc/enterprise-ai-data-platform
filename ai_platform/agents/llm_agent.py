@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from datetime import UTC, datetime
 
 from dataclasses import dataclass
@@ -769,6 +771,17 @@ class LLMAgent:
             metadata=metadata,
         )
 
+    async def _emit_orchestration_step_cancelled(
+        self,
+        context: AgentExecutionContext,
+        step_index: int,
+    ) -> None:
+        await self._emit_orchestration_step_event(
+            context,
+            AgentExecutionEventType.ORCHESTRATION_STEP_CANCELLED,
+            step_index,
+        )
+
     @staticmethod
     def _durable_step_type(step: OrchestrationStep) -> str:
         """Map an orchestration step to its durable ledger type."""
@@ -1033,6 +1046,93 @@ class LLMAgent:
                 completed_at=now,
                 error=error,
                 failure_category=failure_category,
+            )
+        finally:
+            repository.close()
+
+    async def _cancel_current_orchestration_step(
+        self,
+        context: AgentExecutionContext,
+    ) -> None:
+        """Cancel the active orchestration step and record its lifecycle."""
+        if context.orchestration_plan is None:
+            return
+
+        current_step = context.orchestration_state.current_step
+
+        if current_step is None or current_step.status is not OrchestrationStepStatus.RUNNING:
+            return
+
+        cancelled_step_index = current_step.step_index
+
+        context.orchestration_state.cancel_step(
+            cancelled_step_index,
+            metadata={
+                "error_type": "CancelledError",
+            },
+        )
+
+        try:
+            await self._persist_orchestration_step_cancelled(
+                context,
+                current_step,
+            )
+        except Exception:
+            # Cancellation must remain the controlling signal.
+            pass
+
+        try:
+            await self._emit_orchestration_step_cancelled(
+                context,
+                cancelled_step_index,
+            )
+        except Exception:
+            # Observability failure must not mask cancellation.
+            pass
+
+    async def _persist_orchestration_step_cancelled(
+        self,
+        context: AgentExecutionContext,
+        step: OrchestrationStep,
+    ) -> None:
+        """Persist cancellation of an actively running orchestration step."""
+        if context.run_id is None:
+            return
+
+        repository = context.get_agent_run_steps_repository()
+        if repository is None:
+            return
+
+        try:
+            existing = repository.get(
+                context.run_id,
+                step.step_id,
+            )
+
+            if existing is None:
+                return
+
+            if existing.status is AgentRunStepStatus.CANCELLED:
+                return
+
+            if existing.status not in {
+                AgentRunStepStatus.PLANNED,
+                AgentRunStepStatus.RUNNING,
+            }:
+                return
+
+            now = datetime.now(UTC)
+
+            repository.transition(
+                context.run_id,
+                step.step_id,
+                status=AgentRunStepStatus.CANCELLED,
+                updated_at=now,
+                completed_at=now,
+                metadata=self._runtime_step_metadata(
+                    context,
+                    dict(existing.metadata),
+                ),
             )
         finally:
             repository.close()
@@ -1623,6 +1723,10 @@ class LLMAgent:
                         boundary_reached=True,
                     )
 
+        except asyncio.CancelledError:
+            await self._cancel_current_orchestration_step(context)
+            raise
+
         except Exception as exc:
             if context.orchestration_plan is not None:
                 current_step = context.orchestration_state.current_step
@@ -1691,10 +1795,17 @@ class LLMAgent:
             )
         )
 
-        orchestration_step_index = await self._start_orchestration_step(context)
+        try:
+            orchestration_step_index = await self._start_orchestration_step(context)
+        except asyncio.CancelledError:
+            await self._cancel_current_orchestration_step(context)
+            raise
 
         try:
             messages = list(context.build_llm_messages())
+        except asyncio.CancelledError:
+            await self._cancel_current_orchestration_step(context)
+            raise
         except Exception as exc:
             await self._emit(
                 AgentExecutionEvent(

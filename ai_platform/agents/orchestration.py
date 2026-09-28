@@ -275,6 +275,7 @@ class OrchestrationStepStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -641,6 +642,41 @@ class OrchestrationState:
             step_index=step.step_index,
             name=step.name,
             status=OrchestrationStepStatus.FAILED,
+            completion_policy=step.completion_policy,
+            tool_round=step.tool_round,
+            metadata=updated_metadata,
+        )
+
+        self.steps[index] = updated
+        return updated
+
+    def cancel_step(
+        self,
+        step_index: int | None = None,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> OrchestrationStep:
+        """Transition the selected running step to CANCELLED."""
+        index = self._resolve_step_index(step_index)
+        step = self.steps[index]
+
+        if step.status is not OrchestrationStepStatus.RUNNING:
+            raise ValueError(
+                f"Orchestration step {step.step_id!r} must be RUNNING before cancellation."
+            )
+
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("Orchestration cancellation metadata must be a dictionary.")
+
+        updated_metadata = (
+            dict(step.metadata) if metadata is None else {**step.metadata, **metadata}
+        )
+
+        updated = OrchestrationStep(
+            step_id=step.step_id,
+            step_index=step.step_index,
+            name=step.name,
+            status=OrchestrationStepStatus.CANCELLED,
             completion_policy=step.completion_policy,
             tool_round=step.tool_round,
             metadata=updated_metadata,

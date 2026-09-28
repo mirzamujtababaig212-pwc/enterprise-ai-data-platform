@@ -31,6 +31,7 @@ class AgentExecutionEventType(StrEnum):
     ORCHESTRATION_STEP_STARTED = "orchestration.step.started"
     ORCHESTRATION_STEP_COMPLETED = "orchestration.step.completed"
     ORCHESTRATION_STEP_FAILED = "orchestration.step.failed"
+    ORCHESTRATION_STEP_CANCELLED = "orchestration.step.cancelled"
 
     MEMORY_RETRIEVAL_STARTED = "memory.retrieval.started"
     MEMORY_RETRIEVAL_COMPLETED = "memory.retrieval.completed"
