@@ -24,6 +24,7 @@ from tools.models import (
     ToolDefinition,
     ToolExecutionFailureCategory,
     ToolExecutionPolicy,
+    ToolProvider,
 )
 from tools.registry.in_memory import InMemoryToolRegistry
 from tools.authorization.models import ToolAuthorizationResult
@@ -887,6 +888,10 @@ async def test_execution_result_contains_bounded_execution_provenance() -> None:
     tool._definition = ToolDefinition(
         name="test_tool",
         description="A provenance test tool.",
+        provider=ToolProvider(
+            kind="mcp",
+            name="finance-mcp",
+        ),
         metadata={
             "source": "internal_registry",
             "mcp_server": "finance-mcp",
@@ -928,6 +933,10 @@ async def test_execution_result_contains_bounded_execution_provenance() -> None:
         "execution_provenance": {
             "tool_source": "internal_registry",
             "mcp_server": "finance-mcp",
+            "tool_provider": {
+                "kind": "mcp",
+                "name": "finance-mcp",
+            },
             "tenant_id": "tenant-acme",
             "authorization_decision": True,
             "authorization_policy_id": "policy-enterprise-tools",

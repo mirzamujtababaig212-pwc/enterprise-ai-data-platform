@@ -231,6 +231,7 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
             AgentExecutionEventType.TOOL_CALL_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
+            AgentExecutionEventType.RUNTIME_DECISION,
             AgentExecutionEventType.AGENT_COMPLETED,
         ]
 
@@ -240,7 +241,7 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         authorization = observer.events[4]
         tool_completed = observer.events[5]
         final_llm = observer.events[7]
-        completed = observer.events[8]
+        completed = observer.events[9]
 
         assert started.agent_name == "observable-mcp-agent"
         assert started.session_id == "session-observe-123"
@@ -284,6 +285,10 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
             "execution_provenance": {
                 "tool_source": "mcp",
                 "mcp_server": "document-server",
+                "tool_provider": {
+                    "kind": "mcp",
+                    "name": "document-server",
+                },
                 "authorization_decision": True,
                 "authorization_policy_id": "metadata_policy",
                 "authorization_policy_version": "1.0",
@@ -789,6 +794,7 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
             AgentExecutionEventType.TOOL_CALL_FAILED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
+            AgentExecutionEventType.RUNTIME_DECISION,
             AgentExecutionEventType.AGENT_COMPLETED,
         ]
 

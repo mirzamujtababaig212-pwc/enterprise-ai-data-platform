@@ -71,6 +71,13 @@ class ToolExecutionService:
             if isinstance(mcp_server, str) and mcp_server.strip():
                 execution_provenance["mcp_server"] = mcp_server
 
+            provider = tool_definition.provider
+            if provider is not None:
+                execution_provenance["tool_provider"] = {
+                    "kind": provider.kind,
+                    "name": provider.name,
+                }
+
         if execution_context is not None:
             tenant_id = execution_context.tenant_id
             if isinstance(tenant_id, str) and tenant_id.strip():
