@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, delete, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_platform.agents.llm_agent import LLMAgent
+from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.models import AgentDefinition, AgentRequest
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.observability import AgentExecutionEventType
@@ -16,11 +17,20 @@ from ai_platform.llm_gateway.routing.router import Router
 from app.control_plane.agent_run_events.postgres_observer import (
     PostgreSQLAgentRunEventObserver,
 )
+from app.control_plane.agent_evaluations.application_service import (
+    AgentEvaluationApplicationService,
+)
+from app.control_plane.agent_evaluations.postgres_repository import (
+    PostgreSQLAgentEvaluationRunsRepository,
+)
 from app.control_plane.agent_run_events.postgres_repository import (
     PostgreSQLAgentRunEventsRepository,
 )
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
+)
+from app.control_plane.agent_run_steps.postgres_repository import (
+    PostgreSQLAgentRunStepsRepository,
 )
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
@@ -90,7 +100,10 @@ def _seed_postgres(engine, document_id: str) -> None:
                     document_id=document_id,
                     chunk_index=index,
                     content=item.chunk.content,
-                    chunk_metadata=dict(item.chunk.metadata),
+                    chunk_metadata={
+                        **dict(item.chunk.metadata),
+                        "tenant_id": "tenant-cross-backend-rag",
+                    },
                 )
                 for index, item in enumerate(chunks)
             ]
@@ -163,7 +176,10 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
                     id=f"{document_id}:{item.chunk.id}",
                     document_id=document_id,
                     content=item.chunk.content,
-                    metadata=dict(item.chunk.metadata),
+                    metadata={
+                        **dict(item.chunk.metadata),
+                        "tenant_id": "tenant-cross-backend-rag",
+                    },
                     chunk_index=item.chunk.chunk_index,
                 ),
                 embedding=item.embedding,
@@ -216,7 +232,7 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
         )
 
         agent_definition = AgentDefinition(
-            name="enterprise-cross-backend-rag-test",
+            name="enterprise-rag-analyst",
             description="Agent integration test for cross-backend hybrid RAG.",
             system_prompt=(
                 "You are an enterprise RAG analyst. "
@@ -243,26 +259,42 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
 
         gateway = Router()
 
+        step_repositories = []
+
+        def agent_run_steps_repository_factory():
+            repository = PostgreSQLAgentRunStepsRepository(
+                postgres_session_factory(),
+            )
+            step_repositories.append(repository)
+            return repository
+
         runtime = AgentRuntime(
             agent_registry,
             tool_registry=tool_registry,
             llm_gateway=gateway,
+            agent_run_steps_repository_factory=agent_run_steps_repository_factory,
         )
 
         agent_run_session = postgres_session_factory()
         repository = PostgreSQLAgentRunRepository(agent_run_session)
+        agent_run_steps_repository = PostgreSQLAgentRunStepsRepository(
+            postgres_session_factory(),
+        )
 
         application_service = AgentRunApplicationService(
             runtime=runtime,
             repository=repository,
+            agent_run_steps_repository=agent_run_steps_repository,
         )
 
         result = await application_service.execute(
-            agent_name="enterprise-cross-backend-rag-test",
+            agent_name="enterprise-rag-analyst",
             request=AgentRequest(
                 input=query,
                 session_id="session-cross-backend-rag-123",
                 user_id="user-cross-backend-rag-456",
+                principal="user-cross-backend-rag-456",
+                tenant_id="tenant-cross-backend-rag",
                 metadata={
                     "source": "agent-cross-backend-rag-integration",
                     "mock_tool_call": "rag.search",
@@ -274,7 +306,7 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
 
         assert result.run_id
 
-        assert response.agent_name == "enterprise-cross-backend-rag-test"
+        assert response.agent_name == "enterprise-rag-analyst"
         assert response.session_id == "session-cross-backend-rag-123"
         assert response.metadata["provider"] == "mock"
         assert response.metadata["model"] == "mock-gpt"
@@ -288,9 +320,11 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
 
         assert persisted_run is not None
         assert persisted_run.run_id == result.run_id
-        assert persisted_run.agent_name == "enterprise-cross-backend-rag-test"
+        assert persisted_run.agent_name == "enterprise-rag-analyst"
         assert persisted_run.session_id == "session-cross-backend-rag-123"
         assert persisted_run.user_id == "user-cross-backend-rag-456"
+        assert persisted_run.principal == "user-cross-backend-rag-456"
+        assert persisted_run.tenant_id == "tenant-cross-backend-rag"
         assert persisted_run.status == AgentRunStatus.COMPLETED
         assert persisted_run.output == response.output
 
@@ -322,6 +356,11 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
 
         assert rag_completed_event.metadata["execution_provenance"] == {
             "execution_status": "completed",
+            "tool_provider": {
+                "kind": "native",
+                "name": "internal",
+            },
+            "tenant_id": "tenant-cross-backend-rag",
         }
 
         assert rag_completed_event.metadata["rag_provenance"] == {
@@ -331,6 +370,8 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
                     "chunk_id": item.chunk.id,
                     "document_id": item.chunk.document_id,
                     "score": item.score,
+                    "retrieval_score": item.score,
+                    "reranker_score": item.reranker_score,
                 }
                 for item in expected_results
             ],
@@ -359,7 +400,143 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
             for item in semantic_results
         )
 
+        # Verify the RAG provenance survived from the runtime into the
+        # durable agent-run step repository.
+        persisted_steps = agent_run_steps_repository.list(
+            result.run_id,
+            limit=10_000,
+        )
+
+        rag_steps = [
+            step
+            for step in persisted_steps
+            if step.tool_name == "rag.search" and step.metadata.get("rag_provenance")
+        ]
+
+        assert len(rag_steps) == 1
+
+        rag_provenance = rag_steps[0].metadata["rag_provenance"]
+
+        assert rag_provenance["retrieved_count"] == len(expected_results)
+        assert rag_provenance["sources"] == [
+            {
+                "chunk_id": item.chunk.id,
+                "document_id": item.chunk.document_id,
+                "score": item.score,
+                "retrieval_score": item.score,
+                "reranker_score": item.reranker_score,
+            }
+            for item in expected_results
+        ]
+
+        # Evaluate the same durable run through the production evaluation
+        # application service and persist the resulting evaluation artifact.
+        evaluation_run_session = postgres_session_factory()
+        evaluation_steps_session = postgres_session_factory()
+        evaluation_events_session = postgres_session_factory()
+
+        evaluation_repository = PostgreSQLAgentEvaluationRunsRepository(
+            evaluation_run_session,
+        )
+        evaluation_steps_repository = PostgreSQLAgentRunStepsRepository(
+            evaluation_steps_session,
+        )
+        evaluation_events_repository = PostgreSQLAgentRunEventsRepository(
+            evaluation_events_session,
+        )
+
+        evaluation_service = AgentEvaluationApplicationService(
+            agent_run_repository=repository,
+            agent_run_steps_repository=evaluation_steps_repository,
+            agent_run_events_repository=evaluation_events_repository,
+            evaluation_repository=evaluation_repository,
+        )
+
+        evaluation = evaluation_service.evaluate_run(
+            result.run_id,
+            tenant_id=persisted_run.tenant_id,
+            principal=persisted_run.principal,
+            policy=AgentEvaluationPolicy(
+                max_execution_time_ms=60_000,
+                max_steps_per_run=20,
+                max_invalid_tool_calls=0,
+                allow_governance_denials=False,
+                require_task_completed=True,
+                name="cross-backend-rag-regression",
+            ),
+        )
+
+        retrieval_scores = [item.score for item in expected_results]
+        assert retrieval_scores
+
+        assert evaluation.metrics.retrieval_score_min == min(retrieval_scores)
+        assert evaluation.metrics.retrieval_score_max == max(retrieval_scores)
+        assert evaluation.metrics.retrieval_score_avg == pytest.approx(
+            sum(retrieval_scores) / len(retrieval_scores),
+        )
+
+        reranker_scores = [
+            item.reranker_score for item in expected_results if item.reranker_score is not None
+        ]
+
+        if reranker_scores:
+            assert evaluation.metrics.reranker_score_min == min(reranker_scores)
+            assert evaluation.metrics.reranker_score_max == max(reranker_scores)
+            assert evaluation.metrics.reranker_score_avg == pytest.approx(
+                sum(reranker_scores) / len(reranker_scores),
+            )
+        else:
+            assert evaluation.metrics.reranker_score_min is None
+            assert evaluation.metrics.reranker_score_max is None
+            assert evaluation.metrics.reranker_score_avg is None
+
+        # Verify the exact persisted JSON contains the diagnostics.
+        evaluation_record = evaluation_repository.get(evaluation.evaluation_run_id)
+
+        assert evaluation_record is not None
+        assert evaluation_record.metrics.retrieval_score_min == (
+            evaluation.metrics.retrieval_score_min
+        )
+        assert evaluation_record.metrics.retrieval_score_max == (
+            evaluation.metrics.retrieval_score_max
+        )
+        assert evaluation_record.metrics.retrieval_score_avg == pytest.approx(
+            evaluation.metrics.retrieval_score_avg,
+        )
+
+        assert evaluation_record.metrics.reranker_score_min == (
+            evaluation.metrics.reranker_score_min
+        )
+        assert evaluation_record.metrics.reranker_score_max == (
+            evaluation.metrics.reranker_score_max
+        )
+        assert evaluation_record.metrics.reranker_score_avg == (
+            evaluation.metrics.reranker_score_avg
+        )
+
+        evaluation_events_session.close()
+        evaluation_steps_session.close()
+        evaluation_run_session.close()
+
     finally:
+        for step_repository in locals().get("step_repositories", []):
+            step_repository.close()
+
+        if "agent_run_steps_repository" in locals():
+            agent_run_steps_repository.close()
+
+        if "evaluation_events_session" in locals():
+            evaluation_events_session.close()
+
+        if "evaluation_steps_session" in locals():
+            evaluation_steps_session.close()
+
+        if "evaluation_run_session" in locals():
+            evaluation_run_session.close()
+
+        if "evaluation_repository" in locals():
+            evaluation_repository.close()
+
         if "agent_run_session" in locals():
             agent_run_session.close()
 

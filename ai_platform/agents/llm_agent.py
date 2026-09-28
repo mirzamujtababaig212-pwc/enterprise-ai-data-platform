@@ -4,7 +4,7 @@ import asyncio
 
 from datetime import UTC, datetime
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ai_platform.agents.budget import ExecutionBudgetState
 from ai_platform.agents.observer import AgentExecutionObserver
@@ -1878,17 +1878,26 @@ class LLMAgent:
 
             raise RuntimeError("Runtime continuation requested without an orchestration plan.")
 
+        total_tool_rounds = 0
+
         while True:
             context.raise_if_execution_ownership_lost()
+
+            step_tool_rounds = (
+                0
+                if orchestration_step_index is None
+                else context.orchestration_state.steps[orchestration_step_index].tool_round or 0
+            )
 
             continuation = await self._continue(
                 context,
                 messages,
-                tool_rounds=(
-                    0
-                    if orchestration_step_index is None
-                    else context.orchestration_state.steps[orchestration_step_index].tool_round or 0
-                ),
+                tool_rounds=step_tool_rounds,
+            )
+
+            total_tool_rounds += max(
+                0,
+                continuation.tool_rounds - step_tool_rounds,
             )
 
             if continuation.response is not None:
@@ -1898,11 +1907,11 @@ class LLMAgent:
                     continuation.response,
                 )
 
-                await self._complete_orchestration_step(
-                    context,
-                    orchestration_step_index,
-                    tool_round=continuation.tool_rounds,
-                )
+            await self._complete_orchestration_step(
+                context,
+                orchestration_step_index,
+                tool_round=continuation.tool_rounds,
+            )
 
             if not continuation.boundary_reached:
                 raise RuntimeError(
@@ -1926,16 +1935,24 @@ class LLMAgent:
                 if continuation.response is None:
                     raise RuntimeError("Final orchestration step completed without a response.")
 
+                response = replace(
+                    continuation.response,
+                    metadata={
+                        **continuation.response.metadata,
+                        "tool_rounds": total_tool_rounds,
+                    },
+                )
+
                 decision = self._evaluate_runtime_decision(
                     context,
-                    response=continuation.response,
-                    tool_rounds=continuation.tool_rounds,
+                    response=response,
+                    tool_rounds=total_tool_rounds,
                 )
 
                 await self._emit_runtime_decision(
                     context,
-                    response=continuation.response,
-                    tool_rounds=continuation.tool_rounds,
+                    response=response,
+                    tool_rounds=total_tool_rounds,
                 )
 
                 if decision is AgentRuntimeDecision.STOP:
@@ -1946,13 +1963,13 @@ class LLMAgent:
                             run_id=context.run_id,
                             session_id=context.session_id,
                             user_id=context.user_id,
-                            tool_round=continuation.tool_rounds,
-                            provider=continuation.response.metadata.get("provider"),
-                            model=continuation.response.metadata.get("model"),
+                            tool_round=total_tool_rounds,
+                            provider=response.metadata.get("provider"),
+                            model=response.metadata.get("model"),
                         )
                     )
 
-                    return continuation.response
+                    return response
 
                 if decision is not AgentRuntimeDecision.CONTINUE:
                     raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
