@@ -15,6 +15,8 @@ class AgentExecutionEventType(StrEnum):
     AGENT_RECOVERY_FAILED = "agent.recovery.failed"
     AGENT_CANCELLED = "agent.cancelled"
 
+    RUNTIME_DECISION = "runtime.decision"
+
     LLM_REQUESTED = "llm.requested"
     LLM_COMPLETED = "llm.completed"
 

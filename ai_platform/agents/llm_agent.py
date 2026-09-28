@@ -1155,6 +1155,44 @@ class LLMAgent:
         )
         return result.decision
 
+    async def _emit_runtime_decision(
+        self,
+        context: AgentExecutionContext,
+        *,
+        response: AgentResponse,
+        tool_rounds: int,
+    ) -> None:
+        """Emit the accepted Runtime V1 decision as an execution event."""
+
+        runtime_state = context.runtime_state
+
+        if runtime_state.decision is None:
+            raise RuntimeError("Runtime decision event requires an evaluated runtime decision.")
+
+        if runtime_state.decision_reason is None:
+            raise RuntimeError(
+                "Runtime decision event requires an evaluated runtime decision reason."
+            )
+
+        await self._emit(
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.RUNTIME_DECISION,
+                agent_name=self.definition.name,
+                run_id=context.run_id,
+                session_id=context.session_id,
+                user_id=context.user_id,
+                tool_round=tool_rounds,
+                provider=response.metadata.get("provider"),
+                model=response.metadata.get("model"),
+                step_index=runtime_state.current_step_index,
+                metadata={
+                    "decision": runtime_state.decision.value,
+                    "reason": runtime_state.decision_reason,
+                    "iteration": runtime_state.iteration,
+                },
+            )
+        )
+
     async def _complete_orchestration_step(
         self,
         context: AgentExecutionContext,
@@ -1488,20 +1526,6 @@ class LLMAgent:
                 if not result.tool_calls:
                     context.raise_if_execution_ownership_lost()
 
-                    if context.orchestration_plan is None:
-                        await self._emit(
-                            AgentExecutionEvent(
-                                event_type=AgentExecutionEventType.AGENT_COMPLETED,
-                                agent_name=self.definition.name,
-                                run_id=context.run_id,
-                                session_id=context.session_id,
-                                user_id=context.user_id,
-                                tool_round=tool_rounds,
-                                provider=result.provider,
-                                model=result.model,
-                            )
-                        )
-
                     output_governance = context.evaluate_output(result.text or "")
 
                     if not output_governance.allowed:
@@ -1668,14 +1692,60 @@ class LLMAgent:
             raise
 
         if context.orchestration_plan is None:
+            context.runtime_state.transition_to(
+                AgentRuntimePhase.ACT,
+                current_step_index=None,
+            )
+
             continuation = await self._continue(
                 context,
                 messages,
                 tool_rounds=0,
             )
+
             if continuation.response is None:
                 raise RuntimeError("LLM continuation reached a boundary without a response.")
-            return continuation.response
+
+            self._transition_runtime_to_observe(
+                context,
+                step_index=0,
+            )
+            self._transition_runtime_to_evaluate(
+                context,
+                step_index=0,
+            )
+
+            decision = self._evaluate_runtime_decision(
+                context,
+                response=continuation.response,
+                tool_rounds=continuation.tool_rounds,
+            )
+
+            await self._emit_runtime_decision(
+                context,
+                response=continuation.response,
+                tool_rounds=continuation.tool_rounds,
+            )
+
+            if decision is AgentRuntimeDecision.STOP:
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.AGENT_COMPLETED,
+                        agent_name=self.definition.name,
+                        run_id=context.run_id,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                        tool_round=continuation.tool_rounds,
+                        provider=continuation.response.metadata.get("provider"),
+                        model=continuation.response.metadata.get("model"),
+                    )
+                )
+                return continuation.response
+
+            if decision is not AgentRuntimeDecision.CONTINUE:
+                raise RuntimeError(f"Unsupported runtime decision: {decision.value!r}")
+
+            raise RuntimeError("Runtime continuation requested without an orchestration plan.")
 
         while True:
             context.raise_if_execution_ownership_lost()
@@ -1724,6 +1794,12 @@ class LLMAgent:
                     raise RuntimeError("Final orchestration step completed without a response.")
 
                 decision = self._evaluate_runtime_decision(
+                    context,
+                    response=continuation.response,
+                    tool_rounds=continuation.tool_rounds,
+                )
+
+                await self._emit_runtime_decision(
                     context,
                     response=continuation.response,
                     tool_rounds=continuation.tool_rounds,
@@ -1992,6 +2068,12 @@ class LLMAgent:
                     )
 
                 decision = self._evaluate_runtime_decision(
+                    context,
+                    response=response,
+                    tool_rounds=continuation.tool_rounds,
+                )
+
+                await self._emit_runtime_decision(
                     context,
                     response=response,
                     tool_rounds=continuation.tool_rounds,

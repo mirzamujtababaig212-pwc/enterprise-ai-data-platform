@@ -2404,8 +2404,16 @@ async def test_llm_agent_emits_normal_execution_lifecycle_events() -> None:
         AgentExecutionEventType.AGENT_STARTED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.LLM_COMPLETED,
+        AgentExecutionEventType.RUNTIME_DECISION,
         AgentExecutionEventType.AGENT_COMPLETED,
     ]
+
+    runtime_decision = observer.events[3]
+    assert runtime_decision.metadata == {
+        "decision": "stop",
+        "reason": "iteration_budget_exhausted",
+        "iteration": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -2455,7 +2463,8 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     started = observer.events[0]
     llm_requested = observer.events[1]
     llm_completed = observer.events[2]
-    completed = observer.events[3]
+    runtime_decision = observer.events[3]
+    completed = observer.events[4]
 
     assert started.agent_name == "production-llm-agent"
     assert started.session_id == "session-456"
@@ -2474,12 +2483,24 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
         "total_tokens": 15,
     }
 
+    assert runtime_decision.tool_round == 0
+    assert runtime_decision.user_id == "user-123"
+    assert runtime_decision.provider == "fake"
+    assert runtime_decision.model == "gpt-test"
+    assert runtime_decision.step_index == 0
+    assert runtime_decision.metadata == {
+        "decision": "stop",
+        "reason": "iteration_budget_exhausted",
+        "iteration": 1,
+    }
+
     assert completed.tool_round == 0
     assert completed.user_id == "user-123"
     assert completed.provider == "fake"
     assert completed.model == "gpt-test"
 
     assert [event.run_id for event in observer.events] == [
+        "run-123",
         "run-123",
         "run-123",
         "run-123",
@@ -3759,12 +3780,14 @@ async def test_llm_agent_emits_complete_lifecycle_after_tool_execution() -> None
         AgentExecutionEventType.TOOL_CALL_COMPLETED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.LLM_COMPLETED,
+        AgentExecutionEventType.RUNTIME_DECISION,
         AgentExecutionEventType.AGENT_COMPLETED,
     ]
 
     first_llm_completed = observer.events[2]
     final_llm_completed = observer.events[6]
-    agent_completed = observer.events[7]
+    runtime_decision = observer.events[7]
+    agent_completed = observer.events[8]
 
     assert first_llm_completed.tool_round == 0
     assert first_llm_completed.provider == "fake"
@@ -3782,6 +3805,16 @@ async def test_llm_agent_emits_complete_lifecycle_after_tool_execution() -> None
         "prompt_tokens": 25,
         "completion_tokens": 10,
         "total_tokens": 35,
+    }
+
+    assert runtime_decision.tool_round == 1
+    assert runtime_decision.provider == "fake"
+    assert runtime_decision.model == "gpt-test"
+    assert runtime_decision.step_index == 0
+    assert runtime_decision.metadata == {
+        "decision": "stop",
+        "reason": "iteration_budget_exhausted",
+        "iteration": 1,
     }
 
     assert agent_completed.tool_round == 1
