@@ -16,6 +16,10 @@ from ai_platform.agents.orchestration import (
     OrchestrationPlan,
     OrchestrationState,
 )
+from ai_platform.agents.plan_provider import (
+    AgentPlanProvider,
+    DeterministicAgentPlanProvider,
+)
 from app.control_plane.agent_run_steps.repository import AgentRunStepsRepository
 from ai_platform.agents.llm_messages import (
     AgentMessage,
@@ -63,6 +67,7 @@ class AgentExecutionContext:
         lease_id: str | None = None,
         execution_ownership_lost: asyncio.Event | None = None,
         orchestration_plan: OrchestrationPlan | None = None,
+        plan_provider: AgentPlanProvider | None = None,
         agent_run_steps_repository_factory=None,
         lifecycle_state: AgentExecutionLifecycleState | None = None,
     ) -> None:
@@ -75,6 +80,7 @@ class AgentExecutionContext:
         self.run_id = run_id
         self.lease_id = lease_id
         self.execution_ownership_lost = execution_ownership_lost
+        self.plan_provider = plan_provider or DeterministicAgentPlanProvider()
         self.agent_run_steps_repository_factory = agent_run_steps_repository_factory
 
         self.execution_budget = request.execution_budget or ExecutionBudget()

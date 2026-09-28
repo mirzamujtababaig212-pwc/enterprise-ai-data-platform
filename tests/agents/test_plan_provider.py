@@ -12,7 +12,10 @@ from ai_platform.agents.tool_context import AgentToolContext
 from tools.registry.in_memory import InMemoryToolRegistry
 
 
-def make_context() -> AgentExecutionContext:
+def make_context(
+    *,
+    plan_provider=None,
+) -> AgentExecutionContext:
     definition = AgentDefinition(
         name="enterprise-rag-analyst",
         description="Test agent",
@@ -39,6 +42,7 @@ def make_context() -> AgentExecutionContext:
         AgentRequest(input="Hello."),
         tools=tools,
         llm=llm,
+        plan_provider=plan_provider,
     )
 
 
@@ -99,3 +103,20 @@ def test_execution_context_install_none_clears_plan_and_state() -> None:
     assert context.orchestration_plan is None
     assert context.orchestration_state.steps == []
     assert context.orchestration_state.current_step_index is None
+
+
+def test_execution_context_defaults_to_deterministic_plan_provider() -> None:
+    context = make_context()
+
+    assert isinstance(context.plan_provider, DeterministicAgentPlanProvider)
+
+
+def test_execution_context_accepts_custom_plan_provider() -> None:
+    class StubPlanProvider:
+        def build_plan(self, context):
+            return build_agent_orchestration_plan(context.agent_name)
+
+    provider = StubPlanProvider()
+    context = make_context(plan_provider=provider)
+
+    assert context.plan_provider is provider
