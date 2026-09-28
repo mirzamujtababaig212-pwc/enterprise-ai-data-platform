@@ -388,6 +388,7 @@ def test_execution_budget_defaults() -> None:
     assert budget.max_llm_calls == 10
     assert budget.max_tool_calls == 20
     assert budget.max_tool_rounds == 3
+    assert budget.max_iterations == 1
     assert budget.max_duration_seconds == 300.0
 
 
@@ -403,6 +404,9 @@ def test_execution_budget_rejects_non_positive_limits() -> None:
     with pytest.raises(ValueError, match="max_tool_rounds"):
         ExecutionBudget(max_tool_rounds=0)
 
+    with pytest.raises(ValueError, match="max_iterations"):
+        ExecutionBudget(max_iterations=0)
+
     with pytest.raises(ValueError, match="max_duration_seconds"):
         ExecutionBudget(max_duration_seconds=0)
 
@@ -414,6 +418,7 @@ def test_agent_request_accepts_execution_budget() -> None:
         max_llm_calls=5,
         max_tool_calls=8,
         max_tool_rounds=2,
+        max_iterations=3,
         max_duration_seconds=45.0,
     )
 

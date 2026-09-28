@@ -264,3 +264,21 @@ def test_execution_budget_state_from_dict_defaults_missing_total_tokens() -> Non
     )
 
     assert restored.total_tokens == 0
+
+
+def test_execution_budget_accepts_max_iterations() -> None:
+    budget = ExecutionBudget(max_iterations=3)
+
+    assert budget.max_iterations == 3
+
+
+def test_execution_budget_rejects_non_positive_iterations() -> None:
+    with pytest.raises(ValueError, match="max_iterations"):
+        ExecutionBudget(max_iterations=0)
+
+
+def test_execution_budget_remains_immutable_with_max_iterations() -> None:
+    budget = ExecutionBudget(max_iterations=3)
+
+    with pytest.raises(AttributeError):
+        budget.max_iterations = 4  # type: ignore[misc]

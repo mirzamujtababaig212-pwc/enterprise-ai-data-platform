@@ -72,6 +72,7 @@ class AgentRuntimeState:
     phase: AgentRuntimePhase = AgentRuntimePhase.PLAN
     decision: AgentRuntimeDecision | None = None
     current_step_index: int | None = None
+    iteration: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.phase, AgentRuntimePhase):
@@ -92,6 +93,12 @@ class AgentRuntimeState:
 
             if self.current_step_index < 0:
                 raise ValueError("Agent runtime current_step_index must not be negative.")
+
+        if not isinstance(self.iteration, int) or isinstance(self.iteration, bool):
+            raise TypeError("Agent runtime iteration must be an integer.")
+
+        if self.iteration <= 0:
+            raise ValueError("Agent runtime iteration must be greater than zero.")
 
         if self.phase is not AgentRuntimePhase.EVALUATE and self.decision is not None:
             raise ValueError("Agent runtime decision must be None before the evaluate phase.")
@@ -165,6 +172,7 @@ class AgentRuntimeState:
         self.phase = AgentRuntimePhase.PLAN
         self.decision = None
         self.current_step_index = current_step_index
+        self.iteration += 1
 
     def stop(self) -> None:
         """Validate and retain a terminal STOP decision."""
@@ -183,6 +191,7 @@ class AgentRuntimeState:
                 "phase": self.phase.value,
                 "decision": (self.decision.value if self.decision is not None else None),
                 "current_step_index": self.current_step_index,
+                "iteration": self.iteration,
             }
         }
 
@@ -222,11 +231,13 @@ class AgentRuntimeState:
                 raise ValueError("Agent runtime metadata contains an invalid decision.") from exc
 
         current_step_index = runtime_metadata.get("current_step_index")
+        iteration = runtime_metadata.get("iteration", 1)
 
         return cls(
             phase=phase,
             decision=decision,
             current_step_index=current_step_index,
+            iteration=iteration,
         )
 
 

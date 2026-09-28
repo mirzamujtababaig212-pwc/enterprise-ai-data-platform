@@ -21,6 +21,7 @@ class ExecutionBudget:
     max_llm_calls: int = 10
     max_tool_calls: int = 20
     max_tool_rounds: int = 3
+    max_iterations: int = 1
     max_duration_seconds: float = 300.0
     max_tokens_per_run: int | None = None
 
@@ -33,6 +34,9 @@ class ExecutionBudget:
 
         if self.max_tool_rounds <= 0:
             raise ValueError("Execution max_tool_rounds must be greater than zero.")
+
+        if self.max_iterations <= 0:
+            raise ValueError("Execution max_iterations must be greater than zero.")
 
         if self.max_duration_seconds <= 0:
             raise ValueError("Execution max_duration_seconds must be greater than zero.")

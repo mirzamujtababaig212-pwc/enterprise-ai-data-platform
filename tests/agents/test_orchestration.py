@@ -775,6 +775,7 @@ def test_runtime_state_starts_at_plan_without_decision() -> None:
     assert state.phase is AgentRuntimePhase.PLAN
     assert state.decision is None
     assert state.current_step_index is None
+    assert state.iteration == 1
     assert AgentRuntimeDecision.CONTINUE.value == "continue"
 
 
@@ -827,6 +828,7 @@ def test_runtime_state_continue_returns_to_plan() -> None:
     assert state.phase is AgentRuntimePhase.PLAN
     assert state.decision is None
     assert state.current_step_index == 1
+    assert state.iteration == 2
 
 
 def test_runtime_state_stop_is_terminal_decision() -> None:
@@ -965,6 +967,7 @@ def test_runtime_state_to_metadata_serializes_plan_state():
             "phase": "plan",
             "decision": None,
             "current_step_index": 0,
+            "iteration": 1,
         }
     }
 
@@ -981,6 +984,7 @@ def test_runtime_state_to_metadata_serializes_evaluate_continue_state():
             "phase": "evaluate",
             "decision": "continue",
             "current_step_index": 2,
+            "iteration": 1,
         }
     }
 
@@ -998,6 +1002,7 @@ def test_runtime_state_to_metadata_serializes_evaluate_stop_state():
             "phase": "evaluate",
             "decision": "stop",
             "current_step_index": 3,
+            "iteration": 1,
         }
     }
 
@@ -1110,3 +1115,50 @@ def test_runtime_state_from_metadata_rejects_decision_before_evaluate():
                 }
             }
         )
+
+
+def test_runtime_state_continue_increments_iteration() -> None:
+    state = AgentRuntimeState()
+
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    state.continue_to_plan()
+
+    assert state.phase is AgentRuntimePhase.PLAN
+    assert state.iteration == 2
+
+    state.transition_to(AgentRuntimePhase.ACT)
+    state.transition_to(AgentRuntimePhase.OBSERVE)
+    state.transition_to(AgentRuntimePhase.EVALUATE)
+    state.evaluate(AgentRuntimeDecision.CONTINUE)
+
+    state.continue_to_plan()
+
+    assert state.iteration == 3
+
+
+@pytest.mark.parametrize("iteration", [0, -1])
+def test_runtime_state_rejects_non_positive_iteration(iteration: int) -> None:
+    with pytest.raises(
+        ValueError,
+        match="iteration must be greater than zero",
+    ):
+        AgentRuntimeState(iteration=iteration)
+
+
+def test_runtime_state_metadata_defaults_legacy_iteration() -> None:
+    restored = AgentRuntimeState.from_metadata(
+        {
+            "runtime": {
+                "phase": "plan",
+                "decision": None,
+                "current_step_index": 0,
+            }
+        }
+    )
+
+    assert restored is not None
+    assert restored.iteration == 1

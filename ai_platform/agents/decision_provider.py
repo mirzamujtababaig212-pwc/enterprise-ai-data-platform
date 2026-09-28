@@ -28,16 +28,19 @@ class DeterministicAgentRuntimeDecisionProvider:
     """
     Default runtime decision provider.
 
-    Runtime V1 preserves the current single-iteration behavior by
-    deterministically returning STOP.
+    Runtime V1 preserves single-iteration behavior by default while
+    allowing bounded semantic replanning through the execution budget.
     """
 
     def evaluate(
         self,
         context: AgentExecutionContext,
     ) -> AgentRuntimeDecision:
-        """Stop after the current semantic runtime iteration."""
+        """Continue until the configured semantic iteration limit is reached."""
         if not hasattr(context, "agent_name"):
-            raise TypeError("Runtime decision provider requires an agent execution context.")
+            raise TypeError("Agent runtime decision provider requires an agent execution context.")
+
+        if context.runtime_state.iteration < context.execution_budget.max_iterations:
+            return AgentRuntimeDecision.CONTINUE
 
         return AgentRuntimeDecision.STOP
