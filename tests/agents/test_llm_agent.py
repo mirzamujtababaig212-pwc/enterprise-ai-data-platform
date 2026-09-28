@@ -807,9 +807,9 @@ async def test_llm_agent_completes_orchestration_step() -> None:
     assert step.tool_round == 2
     assert context.orchestration_state.current_step_index == 0
 
-    assert context.runtime_state.phase.value == "observe"
+    assert context.runtime_state.phase.value == "evaluate"
     assert context.runtime_state.current_step_index == 0
-    assert context.runtime_state.decision is None
+    assert context.runtime_state.decision.value == "stop"
 
     durable_step = repository.get(
         "run-durable-complete",
@@ -820,8 +820,8 @@ async def test_llm_agent_completes_orchestration_step() -> None:
     assert durable_step.status is AgentRunStepStatus.COMPLETED
     assert durable_step.completed_at is not None
     assert durable_step.metadata["runtime"] == {
-        "phase": "observe",
-        "decision": None,
+        "phase": "evaluate",
+        "decision": "stop",
         "current_step_index": 0,
     }
 
@@ -2552,9 +2552,9 @@ async def test_llm_agent_completes_rag_orchestration_step_on_tool_result() -> No
     assert retrieve_step.status is OrchestrationStepStatus.COMPLETED
     assert retrieve_step.tool_round == 1
 
-    assert context.runtime_state.phase.value == "observe"
+    assert context.runtime_state.phase.value == "evaluate"
     assert context.runtime_state.current_step_index == 2
-    assert context.runtime_state.decision is None
+    assert context.runtime_state.decision.value == "stop"
 
     result = state.get_completed_step_result("retrieve_evidence")
 

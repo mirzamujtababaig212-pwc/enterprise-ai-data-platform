@@ -19,6 +19,7 @@ from ai_platform.agents.exceptions import (
     AgentTokenLimitError,
 )
 from ai_platform.agents.orchestration import (
+    AgentRuntimeDecision,
     AgentRuntimePhase,
     OrchestrationStep,
     OrchestrationStepCompletionPolicy,
@@ -1107,6 +1108,22 @@ class LLMAgent:
             current_step_index=step_index,
         )
 
+    @staticmethod
+    def _transition_runtime_to_evaluate(
+        context: AgentExecutionContext,
+        step_index: int,
+    ) -> None:
+        """Transition Runtime V1 from OBSERVE to EVALUATE and emit STOP."""
+
+        if context.runtime_state.phase is not AgentRuntimePhase.OBSERVE:
+            raise RuntimeError("Runtime V1 must be in OBSERVE before entering EVALUATE")
+
+        context.runtime_state.transition_to(
+            AgentRuntimePhase.EVALUATE,
+            current_step_index=step_index,
+        )
+        context.runtime_state.evaluate(AgentRuntimeDecision.STOP)
+
     async def _complete_orchestration_step(
         self,
         context: AgentExecutionContext,
@@ -1130,6 +1147,10 @@ class LLMAgent:
 
         if step_index == len(state.steps) - 1:
             self._transition_runtime_to_observe(
+                context,
+                step_index,
+            )
+            self._transition_runtime_to_evaluate(
                 context,
                 step_index,
             )
@@ -1202,6 +1223,10 @@ class LLMAgent:
 
         if step.step_index == len(state.steps) - 1:
             self._transition_runtime_to_observe(
+                context,
+                step.step_index,
+            )
+            self._transition_runtime_to_evaluate(
                 context,
                 step.step_index,
             )
