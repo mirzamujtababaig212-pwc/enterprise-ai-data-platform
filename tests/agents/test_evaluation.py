@@ -338,6 +338,74 @@ def test_evaluator_context_quality_reports_no_retrieval_memory_sources():
     assert context_quality.has_episodic_memory_sources is False
 
 
+def test_evaluator_context_quality_reports_working_memory_presence():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "working_memory": 2,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_working_memory_sources is True
+    assert context_quality.has_chat_history_sources is False
+    assert context_quality.has_tool_result_sources is False
+
+
+def test_evaluator_context_quality_reports_chat_history_presence():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "chat_history": 3,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_working_memory_sources is False
+    assert context_quality.has_chat_history_sources is True
+    assert context_quality.has_tool_result_sources is False
+
+
+def test_evaluator_context_quality_reports_tool_result_presence():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "tool_result": 2,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_working_memory_sources is False
+    assert context_quality.has_chat_history_sources is False
+    assert context_quality.has_tool_result_sources is True
+
+
+def test_evaluator_context_quality_reports_multiple_context_components():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "working_memory": 2,
+                "chat_history": 3,
+                "tool_result": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_working_memory_sources is True
+    assert context_quality.has_chat_history_sources is True
+    assert context_quality.has_tool_result_sources is True
+
+
 def test_evaluator_context_quality_reports_missing_retrieval_evidence():
     context_quality = AgentEvaluator.evaluate_context(
         _evidence(
@@ -364,6 +432,9 @@ def test_evaluator_context_quality_retrieval_evidence_is_unavailable_without_con
     assert context_quality.retrieval_evidence_present is None
     assert context_quality.has_semantic_memory_sources is None
     assert context_quality.has_episodic_memory_sources is None
+    assert context_quality.has_working_memory_sources is None
+    assert context_quality.has_chat_history_sources is None
+    assert context_quality.has_tool_result_sources is None
 
 
 def test_evaluator_context_quality_copies_source_counts():

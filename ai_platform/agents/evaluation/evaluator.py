@@ -71,6 +71,15 @@ class AgentEvaluator:
         has_episodic_memory_sources = (
             None if not has_context_evidence else source_counts.get("episodic_memory", 0) > 0
         )
+        has_working_memory_sources = (
+            None if not has_context_evidence else source_counts.get("working_memory", 0) > 0
+        )
+        has_chat_history_sources = (
+            None if not has_context_evidence else source_counts.get("chat_history", 0) > 0
+        )
+        has_tool_result_sources = (
+            None if not has_context_evidence else source_counts.get("tool_result", 0) > 0
+        )
         retrieval_evidence_present = (
             None
             if not has_context_evidence
@@ -84,6 +93,9 @@ class AgentEvaluator:
             retrieval_evidence_present=retrieval_evidence_present,
             has_semantic_memory_sources=has_semantic_memory_sources,
             has_episodic_memory_sources=has_episodic_memory_sources,
+            has_working_memory_sources=has_working_memory_sources,
+            has_chat_history_sources=has_chat_history_sources,
+            has_tool_result_sources=has_tool_result_sources,
             assemblies_total=evidence.context_assembly_events_total,
             messages_total=evidence.context_messages_total,
             estimated_tokens_total=evidence.context_estimated_tokens_total,

@@ -88,6 +88,9 @@ class AgentContextQualityAssessment:
     retrieval_evidence_present: bool | None
     has_semantic_memory_sources: bool | None
     has_episodic_memory_sources: bool | None
+    has_working_memory_sources: bool | None
+    has_chat_history_sources: bool | None
+    has_tool_result_sources: bool | None
     assemblies_total: int
     messages_total: int
     estimated_tokens_total: int
