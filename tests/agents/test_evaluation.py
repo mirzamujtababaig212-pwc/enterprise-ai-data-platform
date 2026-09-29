@@ -338,6 +338,34 @@ def test_evaluator_context_quality_reports_no_retrieval_memory_sources():
     assert context_quality.has_episodic_memory_sources is False
 
 
+def test_evaluator_context_quality_reports_source_profile_changes():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=4,
+            context_source_profile_changes=2,
+            context_source_counts={
+                "system_prompt": 4,
+                "semantic_memory": 4,
+                "user_input": 4,
+                "tool_result": 3,
+            },
+        )
+    )
+
+    assert context_quality.context_source_profile_changes == 2
+
+
+def test_evaluator_context_quality_reports_zero_source_profile_changes():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_profile_changes=0,
+        )
+    )
+
+    assert context_quality.context_source_profile_changes == 0
+
+
 def test_evaluator_context_quality_reports_working_memory_presence():
     context_quality = AgentEvaluator.evaluate_context(
         _evidence(

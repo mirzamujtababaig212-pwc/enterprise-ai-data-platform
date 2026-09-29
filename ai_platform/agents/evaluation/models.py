@@ -45,6 +45,7 @@ class AgentRunEvidence:
     context_estimated_tokens_total: int = 0
     context_estimated_tokens_max: int = 0
     context_budget_exceeded: bool = False
+    context_source_profile_changes: int = 0
     context_source_counts: dict[str, int] | None = None
     error_type: str | None = None
     error_message: str | None = None

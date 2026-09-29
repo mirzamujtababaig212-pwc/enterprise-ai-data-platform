@@ -51,7 +51,9 @@ def _extract_context_diagnostics(
     context_estimated_tokens_total = 0
     context_estimated_tokens_max = 0
     context_budget_exceeded = False
+    context_source_profile_changes = 0
     context_source_counts: dict[str, int] = {}
+    previous_source_profile: frozenset[str] | None = None
 
     for event in events:
         if event.event_type != AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED:
@@ -75,6 +77,23 @@ def _extract_context_diagnostics(
 
         source_counts = metadata.get("source_counts")
         if isinstance(source_counts, dict):
+            current_source_profile = frozenset(
+                source_type
+                for source_type, count in source_counts.items()
+                if isinstance(source_type, str)
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count > 0
+            )
+
+            if (
+                previous_source_profile is not None
+                and current_source_profile != previous_source_profile
+            ):
+                context_source_profile_changes += 1
+
+            previous_source_profile = current_source_profile
+
             for source_type, count in source_counts.items():
                 if not isinstance(source_type, str):
                     continue
@@ -96,6 +115,7 @@ def _extract_context_diagnostics(
         context_estimated_tokens_total,
         context_estimated_tokens_max,
         context_budget_exceeded,
+        context_source_profile_changes,
         context_source_counts,
     )
 
@@ -276,6 +296,7 @@ def extract_evidence(
         context_estimated_tokens_total,
         context_estimated_tokens_max,
         context_budget_exceeded,
+        context_source_profile_changes,
         context_source_counts,
     ) = _extract_context_diagnostics(events)
 
@@ -316,6 +337,7 @@ def extract_evidence(
         context_estimated_tokens_total=context_estimated_tokens_total,
         context_estimated_tokens_max=context_estimated_tokens_max,
         context_budget_exceeded=context_budget_exceeded,
+        context_source_profile_changes=context_source_profile_changes,
         context_source_counts=context_source_counts,
         error_type=run.error_type,
         error_message=run.error_message,

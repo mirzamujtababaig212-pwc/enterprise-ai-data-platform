@@ -96,6 +96,7 @@ class AgentEvaluator:
             has_working_memory_sources=has_working_memory_sources,
             has_chat_history_sources=has_chat_history_sources,
             has_tool_result_sources=has_tool_result_sources,
+            context_source_profile_changes=evidence.context_source_profile_changes,
             assemblies_total=evidence.context_assembly_events_total,
             messages_total=evidence.context_messages_total,
             estimated_tokens_total=evidence.context_estimated_tokens_total,

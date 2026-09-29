@@ -603,6 +603,119 @@ def test_extract_evidence_aggregates_context_assembly_diagnostics() -> None:
     }
 
 
+def test_extract_evidence_counts_context_source_profile_changes() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 3,
+                "estimated_tokens": 12,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "user_input": 1,
+                },
+                "budget_status": {
+                    "within_budget": True,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 3,
+                "estimated_tokens": 12,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "user_input": 1,
+                },
+                "budget_status": {
+                    "within_budget": True,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 4,
+                "estimated_tokens": 18,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "tool_result": 1,
+                    "user_input": 1,
+                },
+                "budget_status": {
+                    "within_budget": True,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 5,
+                "estimated_tokens": 22,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "tool_result": 2,
+                    "user_input": 1,
+                },
+                "budget_status": {
+                    "within_budget": True,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_assembly_events_total == 4
+    assert evidence.context_source_profile_changes == 1
+
+
+def test_extract_evidence_ignores_source_count_only_changes() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "tool_result": 1,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 1,
+                    "tool_result": 2,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_source_profile_changes == 0
+
+
 def test_extract_evidence_ignores_malformed_context_diagnostics() -> None:
     events = [
         AgentExecutionEvent(
