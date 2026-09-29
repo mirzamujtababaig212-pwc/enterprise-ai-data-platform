@@ -42,6 +42,64 @@ def _extract_answer_text(output: Any) -> str | None:
     return None
 
 
+def _extract_context_diagnostics(
+    events: list[AgentExecutionEvent],
+) -> tuple[int, int, int, int, bool, dict[str, int]]:
+    """Aggregate bounded context-assembly diagnostics from durable events."""
+    context_assembly_events_total = 0
+    context_messages_total = 0
+    context_estimated_tokens_total = 0
+    context_estimated_tokens_max = 0
+    context_budget_exceeded = False
+    context_source_counts: dict[str, int] = {}
+
+    for event in events:
+        if event.event_type != AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED:
+            continue
+
+        context_assembly_events_total += 1
+        metadata = event.metadata
+
+        total_messages = metadata.get("total_messages")
+        if isinstance(total_messages, int) and not isinstance(total_messages, bool):
+            context_messages_total += max(0, total_messages)
+
+        estimated_tokens = metadata.get("estimated_tokens")
+        if isinstance(estimated_tokens, int) and not isinstance(estimated_tokens, bool):
+            estimated_tokens = max(0, estimated_tokens)
+            context_estimated_tokens_total += estimated_tokens
+            context_estimated_tokens_max = max(
+                context_estimated_tokens_max,
+                estimated_tokens,
+            )
+
+        source_counts = metadata.get("source_counts")
+        if isinstance(source_counts, dict):
+            for source_type, count in source_counts.items():
+                if not isinstance(source_type, str):
+                    continue
+                if not isinstance(count, int) or isinstance(count, bool):
+                    continue
+                context_source_counts[source_type] = context_source_counts.get(
+                    source_type, 0
+                ) + max(0, count)
+
+        budget_status = metadata.get("budget_status")
+        if isinstance(budget_status, dict):
+            within_budget = budget_status.get("within_budget")
+            if within_budget is False:
+                context_budget_exceeded = True
+
+    return (
+        context_assembly_events_total,
+        context_messages_total,
+        context_estimated_tokens_total,
+        context_estimated_tokens_max,
+        context_budget_exceeded,
+        context_source_counts,
+    )
+
+
 def extract_evidence(
     run: AgentRun,
     steps: list[AgentRunStep],
@@ -212,6 +270,15 @@ def extract_evidence(
         model_policy_id = model_governance.get("policy_id")
         model_policy_version = model_governance.get("policy_version")
 
+    (
+        context_assembly_events_total,
+        context_messages_total,
+        context_estimated_tokens_total,
+        context_estimated_tokens_max,
+        context_budget_exceeded,
+        context_source_counts,
+    ) = _extract_context_diagnostics(events)
+
     return AgentRunEvidence(
         run_id=run.run_id,
         agent_name=run.agent_name,
@@ -244,6 +311,12 @@ def extract_evidence(
         effective_provider=effective_provider,
         model_policy_id=model_policy_id,
         model_policy_version=model_policy_version,
+        context_assembly_events_total=context_assembly_events_total,
+        context_messages_total=context_messages_total,
+        context_estimated_tokens_total=context_estimated_tokens_total,
+        context_estimated_tokens_max=context_estimated_tokens_max,
+        context_budget_exceeded=context_budget_exceeded,
+        context_source_counts=context_source_counts,
         error_type=run.error_type,
         error_message=run.error_message,
     )

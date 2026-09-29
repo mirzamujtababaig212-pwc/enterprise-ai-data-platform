@@ -40,6 +40,12 @@ class AgentRunEvidence:
     effective_provider: str | None = None
     model_policy_id: str | None = None
     model_policy_version: str | None = None
+    context_assembly_events_total: int = 0
+    context_messages_total: int = 0
+    context_estimated_tokens_total: int = 0
+    context_estimated_tokens_max: int = 0
+    context_budget_exceeded: bool = False
+    context_source_counts: dict[str, int] | None = None
     error_type: str | None = None
     error_message: str | None = None
 
@@ -65,6 +71,10 @@ class AgentRunEvidence:
             "final_answer_length",
             "rag_sources_available_count",
             "rag_unique_chunks_count",
+            "context_assembly_events_total",
+            "context_messages_total",
+            "context_estimated_tokens_total",
+            "context_estimated_tokens_max",
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")

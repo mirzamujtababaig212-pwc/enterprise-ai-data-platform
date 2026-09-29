@@ -539,3 +539,142 @@ def test_extract_evidence_counts_rag_output_results_as_available_sources() -> No
     assert evidence.rag_sources_retrieved_total == 2
     assert evidence.rag_sources_available_count == 2
     assert evidence.rag_unique_chunks_count == 2
+
+
+def test_extract_evidence_aggregates_context_assembly_diagnostics() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 4,
+                "estimated_tokens": 12,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 2,
+                    "user_input": 1,
+                },
+                "budget_status": {
+                    "max_tokens_per_run": 100,
+                    "consumed_tokens": 20,
+                    "remaining_run_tokens": 80,
+                    "estimated_remaining_after_context": 68,
+                    "within_budget": True,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 6,
+                "estimated_tokens": 24,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "chat_history": 3,
+                    "tool_result": 2,
+                },
+                "budget_status": {
+                    "max_tokens_per_run": 100,
+                    "consumed_tokens": 44,
+                    "remaining_run_tokens": 56,
+                    "estimated_remaining_after_context": 32,
+                    "within_budget": True,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_assembly_events_total == 2
+    assert evidence.context_messages_total == 10
+    assert evidence.context_estimated_tokens_total == 36
+    assert evidence.context_estimated_tokens_max == 24
+    assert evidence.context_budget_exceeded is False
+    assert evidence.context_source_counts == {
+        "system_prompt": 2,
+        "semantic_memory": 2,
+        "user_input": 1,
+        "chat_history": 3,
+        "tool_result": 2,
+    }
+
+
+def test_extract_evidence_ignores_malformed_context_diagnostics() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": -5,
+                "estimated_tokens": -10,
+                "source_counts": {
+                    "system_prompt": -1,
+                    "semantic_memory": "invalid",
+                    123: 4,
+                },
+                "budget_status": {
+                    "within_budget": "invalid",
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 3,
+                "estimated_tokens": 8,
+                "source_counts": {
+                    "system_prompt": 1,
+                },
+                "budget_status": {
+                    "within_budget": False,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_assembly_events_total == 2
+    assert evidence.context_messages_total == 3
+    assert evidence.context_estimated_tokens_total == 8
+    assert evidence.context_estimated_tokens_max == 8
+    assert evidence.context_budget_exceeded is True
+    assert evidence.context_source_counts == {
+        "system_prompt": 1,
+    }
+
+
+def test_extract_evidence_ignores_unrelated_event_diagnostics() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.LLM_REQUESTED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 999,
+                "estimated_tokens": 999,
+                "source_counts": {
+                    "system_prompt": 999,
+                },
+                "budget_status": {
+                    "within_budget": False,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_assembly_events_total == 0
+    assert evidence.context_messages_total == 0
+    assert evidence.context_estimated_tokens_total == 0
+    assert evidence.context_estimated_tokens_max == 0
+    assert evidence.context_budget_exceeded is False
+    assert evidence.context_source_counts == {}
