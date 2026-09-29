@@ -45,6 +45,9 @@ class AgentEvaluationPolicy:
         if self.policy_version is not None and not self.policy_version.strip():
             raise ValueError("policy_version must not be blank.")
 
+        if (self.policy_id is None) != (self.policy_version is None):
+            raise ValueError("policy_id and policy_version must be provided together.")
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "max_execution_time_ms": self.max_execution_time_ms,

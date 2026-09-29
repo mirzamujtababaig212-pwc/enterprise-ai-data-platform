@@ -364,3 +364,29 @@ def test_evaluation_policy_allows_legacy_missing_identity():
     serialized = policy.as_dict()
     assert serialized["policy_id"] is None
     assert serialized["policy_version"] is None
+
+
+def test_evaluation_policy_rejects_identity_without_version():
+    with pytest.raises(
+        ValueError,
+        match="policy_id and policy_version must be provided together",
+    ):
+        AgentEvaluationPolicy(policy_id="rag-quality")
+
+
+def test_evaluation_policy_rejects_version_without_identity():
+    with pytest.raises(
+        ValueError,
+        match="policy_id and policy_version must be provided together",
+    ):
+        AgentEvaluationPolicy(policy_version="1.0")
+
+
+def test_evaluation_policy_allows_versioned_identity_pair():
+    policy = AgentEvaluationPolicy(
+        policy_id="rag-quality",
+        policy_version="1.0",
+    )
+
+    assert policy.policy_id == "rag-quality"
+    assert policy.policy_version == "1.0"
