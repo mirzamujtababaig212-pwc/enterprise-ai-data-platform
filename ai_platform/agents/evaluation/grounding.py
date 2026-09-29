@@ -167,7 +167,9 @@ class AgentGroundingEvaluator:
                 source_candidates_total=len(candidates),
             )
 
-        source_tokens = [AgentGroundingEvaluator._content_tokens(source) for source in candidates]
+        source_sentences = [
+            AgentGroundingEvaluator._split_sentences(source) for source in candidates
+        ]
 
         supported_sentences = 0
         supporting_sources: set[int] = set()
@@ -180,28 +182,35 @@ class AgentGroundingEvaluator:
 
             sentence_supported = False
 
-            for source_index, tokens in enumerate(source_tokens):
-                if not tokens:
-                    continue
+            for source_index, source_units in enumerate(source_sentences):
+                for source_unit in source_units:
+                    source_tokens = AgentGroundingEvaluator._content_tokens(source_unit)
 
-                overlap = sentence_tokens & tokens
+                    if not source_tokens:
+                        continue
 
-                if len(overlap) < 2:
-                    continue
+                    overlap = sentence_tokens & source_tokens
 
-                coverage = len(overlap) / len(sentence_tokens)
+                    if len(overlap) < 2:
+                        continue
 
-                if coverage < 0.35:
-                    continue
+                    coverage = len(overlap) / len(sentence_tokens)
 
-                if AgentGroundingEvaluator._has_numeric_contradiction(
-                    sentence,
-                    candidates[source_index],
-                ):
-                    continue
+                    if coverage < 0.35:
+                        continue
 
-                sentence_supported = True
-                supporting_sources.add(source_index)
+                    if AgentGroundingEvaluator._has_numeric_contradiction(
+                        sentence,
+                        source_unit,
+                    ):
+                        continue
+
+                    sentence_supported = True
+                    supporting_sources.add(source_index)
+                    break
+
+                if sentence_supported:
+                    break
 
             if sentence_supported:
                 supported_sentences += 1
@@ -231,11 +240,19 @@ class AgentGroundingEvaluator:
 
     @staticmethod
     def _split_sentences(value: str) -> list[str]:
-        return [
-            sentence.strip()
-            for sentence in _SENTENCE_SPLIT_RE.split(value.strip())
-            if sentence.strip()
-        ]
+        normalized = re.sub(r"\\r?\\n+", "\\n", value.strip())
+        normalized = re.sub(r"(?m)^\\s*[-*+]\\s+", "", normalized)
+
+        units: list[str] = []
+
+        for line in normalized.splitlines():
+            units.extend(
+                sentence.strip()
+                for sentence in _SENTENCE_SPLIT_RE.split(line.strip())
+                if sentence.strip()
+            )
+
+        return units
 
     @staticmethod
     def _content_tokens(value: str) -> set[str]:
