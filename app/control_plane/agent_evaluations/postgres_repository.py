@@ -281,6 +281,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
                         "estimated_tokens_max",
                         0,
                     ),
+                    minimum_estimated_remaining_after_context=(
+                        context_quality_data.get("minimum_estimated_remaining_after_context")
+                    ),
                     source_counts=dict(context_quality_data.get("source_counts", {})),
                 )
                 if context_quality_data is not None

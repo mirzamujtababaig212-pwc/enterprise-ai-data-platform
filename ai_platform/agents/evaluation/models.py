@@ -44,6 +44,7 @@ class AgentRunEvidence:
     context_messages_total: int = 0
     context_estimated_tokens_total: int = 0
     context_estimated_tokens_max: int = 0
+    context_estimated_remaining_after_context_min: int | None = None
     context_budget_exceeded: bool = False
     context_source_profile_changes: int = 0
     context_source_counts: dict[str, int] | None = None
@@ -98,6 +99,7 @@ class AgentContextQualityAssessment:
     estimated_tokens_total: int
     estimated_tokens_max: int
     source_counts: dict[str, int]
+    minimum_estimated_remaining_after_context: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -124,6 +126,9 @@ class AgentContextQualityAssessment:
             "messages_total": self.messages_total,
             "estimated_tokens_total": self.estimated_tokens_total,
             "estimated_tokens_max": self.estimated_tokens_max,
+            "minimum_estimated_remaining_after_context": (
+                self.minimum_estimated_remaining_after_context
+            ),
             "source_counts": dict(self.source_counts),
         }
 

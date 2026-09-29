@@ -739,6 +739,7 @@ def test_context_quality_assessment_serializes_complete_contract() -> None:
         messages_total=12,
         estimated_tokens_total=900,
         estimated_tokens_max=400,
+        minimum_estimated_remaining_after_context=120,
         source_counts={
             "system_prompt": 3,
             "semantic_memory": 3,
@@ -762,6 +763,7 @@ def test_context_quality_assessment_serializes_complete_contract() -> None:
         "messages_total": 12,
         "estimated_tokens_total": 900,
         "estimated_tokens_max": 400,
+        "minimum_estimated_remaining_after_context": 120,
         "source_counts": {
             "system_prompt": 3,
             "semantic_memory": 3,

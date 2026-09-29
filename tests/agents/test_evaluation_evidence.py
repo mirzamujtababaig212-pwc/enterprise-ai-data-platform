@@ -541,6 +541,92 @@ def test_extract_evidence_counts_rag_output_results_as_available_sources() -> No
     assert evidence.rag_unique_chunks_count == 2
 
 
+def test_extract_evidence_ignores_malformed_remaining_context_headroom():
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": None,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": True,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": "200",
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(
+        _run(),
+        [],
+        events,
+    )
+
+    assert evidence.context_estimated_remaining_after_context_min is None
+
+
+def test_extract_evidence_aggregates_minimum_remaining_context_headroom():
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": 500,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": 200,
+                },
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="vehicle-agent",
+            run_id="run-1",
+            metadata={
+                "budget_status": {
+                    "estimated_remaining_after_context": -50,
+                },
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(
+        _run(),
+        [],
+        events,
+    )
+
+    assert evidence.context_estimated_remaining_after_context_min == -50
+
+
 def test_extract_evidence_aggregates_context_assembly_diagnostics() -> None:
     events = [
         AgentExecutionEvent(

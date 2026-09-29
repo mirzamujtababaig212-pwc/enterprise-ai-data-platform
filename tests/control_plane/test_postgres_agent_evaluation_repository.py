@@ -87,6 +87,7 @@ def _run(
                 messages_total=12,
                 estimated_tokens_total=900,
                 estimated_tokens_max=400,
+                minimum_estimated_remaining_after_context=120,
                 source_counts={
                     "system_prompt": 3,
                     "semantic_memory": 3,
@@ -218,6 +219,10 @@ def test_save_and_get_round_trip_preserves_context_quality():
         assert restored is not None
         assert restored.context_quality == run.context_quality
         assert restored.context_quality is not None
+        assert (
+            restored.context_quality.minimum_estimated_remaining_after_context
+            == run.context_quality.minimum_estimated_remaining_after_context
+        )
         assert restored.context_quality.budget_compliant is True
         assert restored.context_quality.retrieval_evidence_present is True
         assert restored.context_quality.context_source_profile_changes == 2

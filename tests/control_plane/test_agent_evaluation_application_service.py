@@ -443,4 +443,12 @@ def test_evaluate_run_persists_context_quality_from_context_assembly_events():
     assert result.context_quality.estimated_tokens_max == 128
     assert result.context_quality.source_counts["semantic_memory"] == 2
     assert result.quality_gate.passed is True
+    restored = repository.get(result.evaluation_run_id)
+    assert restored is not None
+    assert restored.context_quality is not None
+    assert result.context_quality is not None
+    assert (
+        restored.context_quality.minimum_estimated_remaining_after_context
+        == result.context_quality.minimum_estimated_remaining_after_context
+    )
     assert repository.get(result.evaluation_run_id) == result

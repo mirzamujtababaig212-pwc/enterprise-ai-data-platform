@@ -64,6 +64,9 @@ class AgentEvaluator:
         """Assess deterministic context-quality signals without changing run evaluation."""
 
         source_counts = dict(evidence.context_source_counts or {})
+        minimum_estimated_remaining_after_context = (
+            evidence.context_estimated_remaining_after_context_min
+        )
         has_context_evidence = evidence.context_assembly_events_total > 0
         has_semantic_memory_sources = (
             None if not has_context_evidence else source_counts.get("semantic_memory", 0) > 0
@@ -101,6 +104,7 @@ class AgentEvaluator:
             messages_total=evidence.context_messages_total,
             estimated_tokens_total=evidence.context_estimated_tokens_total,
             estimated_tokens_max=evidence.context_estimated_tokens_max,
+            minimum_estimated_remaining_after_context=(minimum_estimated_remaining_after_context),
             source_counts=source_counts,
         )
 

@@ -44,12 +44,13 @@ def _extract_answer_text(output: Any) -> str | None:
 
 def _extract_context_diagnostics(
     events: list[AgentExecutionEvent],
-) -> tuple[int, int, int, int, bool, int, dict[str, int]]:
+) -> tuple[int, int, int, int, int | None, bool, int, dict[str, int]]:
     """Aggregate bounded context-assembly diagnostics from durable events."""
     context_assembly_events_total = 0
     context_messages_total = 0
     context_estimated_tokens_total = 0
     context_estimated_tokens_max = 0
+    context_estimated_remaining_after_context_min: int | None = None
     context_budget_exceeded = False
     context_source_profile_changes = 0
     context_source_counts: dict[str, int] = {}
@@ -109,11 +110,22 @@ def _extract_context_diagnostics(
             if within_budget is False:
                 context_budget_exceeded = True
 
+            remaining_after_context = budget_status.get("estimated_remaining_after_context")
+            if isinstance(remaining_after_context, int) and not isinstance(
+                remaining_after_context, bool
+            ):
+                if (
+                    context_estimated_remaining_after_context_min is None
+                    or remaining_after_context < context_estimated_remaining_after_context_min
+                ):
+                    context_estimated_remaining_after_context_min = remaining_after_context
+
     return (
         context_assembly_events_total,
         context_messages_total,
         context_estimated_tokens_total,
         context_estimated_tokens_max,
+        context_estimated_remaining_after_context_min,
         context_budget_exceeded,
         context_source_profile_changes,
         context_source_counts,
@@ -295,6 +307,7 @@ def extract_evidence(
         context_messages_total,
         context_estimated_tokens_total,
         context_estimated_tokens_max,
+        context_estimated_remaining_after_context_min,
         context_budget_exceeded,
         context_source_profile_changes,
         context_source_counts,
@@ -336,6 +349,9 @@ def extract_evidence(
         context_messages_total=context_messages_total,
         context_estimated_tokens_total=context_estimated_tokens_total,
         context_estimated_tokens_max=context_estimated_tokens_max,
+        context_estimated_remaining_after_context_min=(
+            context_estimated_remaining_after_context_min
+        ),
         context_budget_exceeded=context_budget_exceeded,
         context_source_profile_changes=context_source_profile_changes,
         context_source_counts=context_source_counts,
