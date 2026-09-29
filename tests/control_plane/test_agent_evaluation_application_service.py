@@ -191,6 +191,10 @@ def test_evaluate_run_builds_and_persists_immutable_artifact():
     assert result.metrics.governance_denials == 0
     assert result.metrics.task_completed is True
     assert result.passed is True
+    assert result.context_quality is not None
+    assert result.context_quality.budget_compliant is None
+    assert result.context_quality.retrieval_evidence_present is None
+    assert result.context_quality.assemblies_total == 0
     assert repository.get(result.evaluation_run_id) == result
 
 
@@ -392,3 +396,51 @@ def test_evaluate_run_uses_bounded_repository_reads():
 
     assert steps_repository.requested_limit == 10_000
     assert events_repository.requested_limit == 10_000
+
+
+def test_evaluate_run_persists_context_quality_from_context_assembly_events():
+    context_event = AgentExecutionEvent(
+        event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+        agent_name="vehicle-agent",
+        run_id="run-1",
+        metadata={
+            "total_messages": 7,
+            "source_counts": {
+                "system_prompt": 1,
+                "semantic_memory": 2,
+                "chat_history": 1,
+                "user_input": 1,
+                "tool_result": 2,
+            },
+            "estimated_tokens": 128,
+            "budget_status": {
+                "within_budget": True,
+            },
+        },
+    )
+
+    service, _, _, _, repository = make_service(
+        events=[context_event],
+    )
+
+    result = service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert result.context_quality is not None
+    assert result.context_quality.budget_compliant is True
+    assert result.context_quality.retrieval_evidence_present is True
+    assert result.context_quality.has_semantic_memory_sources is True
+    assert result.context_quality.has_episodic_memory_sources is False
+    assert result.context_quality.has_chat_history_sources is True
+    assert result.context_quality.has_tool_result_sources is True
+    assert result.context_quality.assemblies_total == 1
+    assert result.context_quality.messages_total == 7
+    assert result.context_quality.estimated_tokens_total == 128
+    assert result.context_quality.estimated_tokens_max == 128
+    assert result.context_quality.source_counts["semantic_memory"] == 2
+    assert result.quality_gate.passed is True
+    assert repository.get(result.evaluation_run_id) == result

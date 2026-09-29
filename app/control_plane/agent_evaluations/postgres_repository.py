@@ -5,7 +5,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
-from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
+from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
+    AgentEvaluationMetrics,
+)
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
     AgentQualityGateResult,
@@ -60,6 +63,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
             quality_gate=run.quality_gate.as_dict(),
             answer_evaluation=(
                 run.answer_evaluation.as_dict() if run.answer_evaluation is not None else None
+            ),
+            context_quality=(
+                run.context_quality.as_dict() if run.context_quality is not None else None
             ),
         )
 
@@ -160,6 +166,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
         answer_evaluation_data = (
             dict(record.answer_evaluation) if record.answer_evaluation is not None else None
         )
+        context_quality_data = (
+            dict(record.context_quality) if record.context_quality is not None else None
+        )
 
         return AgentEvaluationRun(
             evaluation_run_id=record.evaluation_run_id,
@@ -239,6 +248,42 @@ class PostgreSQLAgentEvaluationRunsRepository:
                     ),
                 )
                 if answer_evaluation_data is not None
+                else None
+            ),
+            context_quality=(
+                AgentContextQualityAssessment(
+                    budget_compliant=context_quality_data.get("budget_compliant"),
+                    retrieval_evidence_present=context_quality_data.get(
+                        "retrieval_evidence_present"
+                    ),
+                    has_semantic_memory_sources=context_quality_data.get(
+                        "has_semantic_memory_sources"
+                    ),
+                    has_episodic_memory_sources=context_quality_data.get(
+                        "has_episodic_memory_sources"
+                    ),
+                    has_working_memory_sources=context_quality_data.get(
+                        "has_working_memory_sources"
+                    ),
+                    has_chat_history_sources=context_quality_data.get("has_chat_history_sources"),
+                    has_tool_result_sources=context_quality_data.get("has_tool_result_sources"),
+                    context_source_profile_changes=context_quality_data.get(
+                        "context_source_profile_changes",
+                        0,
+                    ),
+                    assemblies_total=context_quality_data.get("assemblies_total", 0),
+                    messages_total=context_quality_data.get("messages_total", 0),
+                    estimated_tokens_total=context_quality_data.get(
+                        "estimated_tokens_total",
+                        0,
+                    ),
+                    estimated_tokens_max=context_quality_data.get(
+                        "estimated_tokens_max",
+                        0,
+                    ),
+                    source_counts=dict(context_quality_data.get("source_counts", {})),
+                )
+                if context_quality_data is not None
                 else None
             ),
         )

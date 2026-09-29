@@ -5,7 +5,10 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
+from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
+    AgentEvaluationMetrics,
+)
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
     AgentQualityGateResult,
@@ -36,6 +39,8 @@ def _repository():
 
 def _run(
     evaluation_run_id: str = "evaluation-score-diagnostics",
+    *,
+    include_context_quality: bool = True,
 ) -> AgentEvaluationRun:
     return AgentEvaluationRun(
         evaluation_run_id=evaluation_run_id,
@@ -67,6 +72,32 @@ def _run(
             reranker_score_min=0.88,
             reranker_score_max=0.95,
             reranker_score_avg=0.91,
+        ),
+        context_quality=(
+            AgentContextQualityAssessment(
+                budget_compliant=True,
+                retrieval_evidence_present=True,
+                has_semantic_memory_sources=True,
+                has_episodic_memory_sources=False,
+                has_working_memory_sources=True,
+                has_chat_history_sources=True,
+                has_tool_result_sources=True,
+                context_source_profile_changes=2,
+                assemblies_total=3,
+                messages_total=12,
+                estimated_tokens_total=900,
+                estimated_tokens_max=400,
+                source_counts={
+                    "system_prompt": 3,
+                    "semantic_memory": 3,
+                    "working_memory": 3,
+                    "chat_history": 3,
+                    "user_input": 3,
+                    "tool_result": 2,
+                },
+            )
+            if include_context_quality
+            else None
         ),
         policy=AgentEvaluationPolicy(
             policy_id="rag-quality",
@@ -159,6 +190,71 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
         assert restored.metrics.reranker_score_min is None
         assert restored.metrics.reranker_score_max is None
         assert restored.metrics.reranker_score_avg is None
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_save_and_get_round_trip_preserves_context_quality():
+    repository, engine = _repository()
+
+    try:
+        run = _run("evaluation-context-quality")
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+        assert record is not None
+        assert record.context_quality == run.context_quality.as_dict()
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.context_quality == run.context_quality
+        assert restored.context_quality is not None
+        assert restored.context_quality.budget_compliant is True
+        assert restored.context_quality.retrieval_evidence_present is True
+        assert restored.context_quality.context_source_profile_changes == 2
+        assert restored.context_quality.assemblies_total == 3
+        assert restored.context_quality.estimated_tokens_total == 900
+        assert restored.context_quality.source_counts == run.context_quality.source_counts
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_get_legacy_run_without_context_quality_preserves_compatibility():
+    repository, engine = _repository()
+
+    try:
+        run = _run(
+            "legacy-context-quality",
+            include_context_quality=False,
+        )
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+
+        assert record is not None
+        assert record.context_quality is None
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.context_quality is None
     finally:
         repository.close()
         engine.dispose()

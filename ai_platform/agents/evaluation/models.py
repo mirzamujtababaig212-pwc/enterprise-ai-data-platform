@@ -110,6 +110,23 @@ class AgentContextQualityAssessment:
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
 
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "budget_compliant": self.budget_compliant,
+            "retrieval_evidence_present": self.retrieval_evidence_present,
+            "has_semantic_memory_sources": self.has_semantic_memory_sources,
+            "has_episodic_memory_sources": self.has_episodic_memory_sources,
+            "has_working_memory_sources": self.has_working_memory_sources,
+            "has_chat_history_sources": self.has_chat_history_sources,
+            "has_tool_result_sources": self.has_tool_result_sources,
+            "context_source_profile_changes": self.context_source_profile_changes,
+            "assemblies_total": self.assemblies_total,
+            "messages_total": self.messages_total,
+            "estimated_tokens_total": self.estimated_tokens_total,
+            "estimated_tokens_max": self.estimated_tokens_max,
+            "source_counts": dict(self.source_counts),
+        }
+
 
 @dataclass(frozen=True)
 class AgentEvaluationMetrics:

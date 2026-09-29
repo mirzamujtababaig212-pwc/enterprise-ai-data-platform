@@ -4,7 +4,10 @@ import pytest
 
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluator
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
-from ai_platform.agents.evaluation.models import AgentRunEvidence
+from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
+    AgentRunEvidence,
+)
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.evaluation.run import (
     AgentEvaluationLineage,
@@ -720,3 +723,79 @@ def test_evaluation_policy_allows_versioned_identity_pair():
 
     assert policy.policy_id == "rag-quality"
     assert policy.policy_version == "1.0"
+
+
+def test_context_quality_assessment_serializes_complete_contract() -> None:
+    assessment = AgentContextQualityAssessment(
+        budget_compliant=True,
+        retrieval_evidence_present=True,
+        has_semantic_memory_sources=True,
+        has_episodic_memory_sources=False,
+        has_working_memory_sources=True,
+        has_chat_history_sources=True,
+        has_tool_result_sources=True,
+        context_source_profile_changes=2,
+        assemblies_total=3,
+        messages_total=12,
+        estimated_tokens_total=900,
+        estimated_tokens_max=400,
+        source_counts={
+            "system_prompt": 3,
+            "semantic_memory": 3,
+            "working_memory": 3,
+            "chat_history": 3,
+            "user_input": 3,
+            "tool_result": 2,
+        },
+    )
+
+    assert assessment.as_dict() == {
+        "budget_compliant": True,
+        "retrieval_evidence_present": True,
+        "has_semantic_memory_sources": True,
+        "has_episodic_memory_sources": False,
+        "has_working_memory_sources": True,
+        "has_chat_history_sources": True,
+        "has_tool_result_sources": True,
+        "context_source_profile_changes": 2,
+        "assemblies_total": 3,
+        "messages_total": 12,
+        "estimated_tokens_total": 900,
+        "estimated_tokens_max": 400,
+        "source_counts": {
+            "system_prompt": 3,
+            "semantic_memory": 3,
+            "working_memory": 3,
+            "chat_history": 3,
+            "user_input": 3,
+            "tool_result": 2,
+        },
+    }
+
+
+def test_context_quality_assessment_serialization_copies_source_counts() -> None:
+    source_counts = {
+        "semantic_memory": 2,
+        "user_input": 1,
+    }
+
+    assessment = AgentContextQualityAssessment(
+        budget_compliant=True,
+        retrieval_evidence_present=True,
+        has_semantic_memory_sources=True,
+        has_episodic_memory_sources=False,
+        has_working_memory_sources=False,
+        has_chat_history_sources=False,
+        has_tool_result_sources=False,
+        context_source_profile_changes=0,
+        assemblies_total=1,
+        messages_total=3,
+        estimated_tokens_total=100,
+        estimated_tokens_max=100,
+        source_counts=source_counts,
+    )
+
+    serialized = assessment.as_dict()
+
+    assert serialized["source_counts"] == source_counts
+    assert serialized["source_counts"] is not source_counts

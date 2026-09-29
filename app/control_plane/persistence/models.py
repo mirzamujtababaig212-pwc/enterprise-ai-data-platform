@@ -225,6 +225,11 @@ class AgentEvaluationRunRecord(Base):
         nullable=True,
     )
 
+    context_quality: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+    )
+
 
 class AgentRunRecord(Base):
     __tablename__ = "agent_runs"

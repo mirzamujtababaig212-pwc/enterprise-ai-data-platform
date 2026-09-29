@@ -84,6 +84,7 @@ class AgentEvaluationApplicationService:
             evidence,
             expected_answer=expected_answer,
         )
+        context_quality = self._evaluator.evaluate_context(evidence)
         metrics, quality_gate = self._evaluator.evaluate_run(
             evidence,
             policy,
@@ -107,6 +108,7 @@ class AgentEvaluationApplicationService:
             policy=policy,
             quality_gate=quality_gate,
             answer_evaluation=answer_evaluation,
+            context_quality=context_quality,
         )
 
         return self._evaluation_repository.save(evaluation_run)

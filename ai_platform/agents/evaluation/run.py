@@ -5,7 +5,10 @@ from datetime import datetime
 from typing import Any
 
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
-from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
+from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
+    AgentEvaluationMetrics,
+)
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
     AgentQualityGateResult,
@@ -56,6 +59,7 @@ class AgentEvaluationRun:
     policy: AgentEvaluationPolicy
     quality_gate: AgentQualityGateResult
     answer_evaluation: AgentAnswerEvaluation | None = None
+    context_quality: AgentContextQualityAssessment | None = None
 
     def __post_init__(self) -> None:
         if not self.evaluation_run_id.strip():
@@ -79,5 +83,8 @@ class AgentEvaluationRun:
             "quality_gate": self.quality_gate.as_dict(),
             "answer_evaluation": (
                 self.answer_evaluation.as_dict() if self.answer_evaluation is not None else None
+            ),
+            "context_quality": (
+                self.context_quality.as_dict() if self.context_quality is not None else None
             ),
         }
