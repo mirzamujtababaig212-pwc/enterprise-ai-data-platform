@@ -104,6 +104,52 @@ def test_record_and_list_round_trip() -> None:
         engine.dispose()
 
 
+def test_record_preserves_context_assembly_event_fields() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        event = make_event(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            tool_round=1,
+            step_id="retrieve_evidence",
+            step_index=0,
+            step_name="Retrieve enterprise evidence",
+            metadata={
+                "total_messages": 7,
+                "source_counts": {
+                    "system_prompt": 1,
+                    "semantic_memory": 3,
+                    "chat_history": 1,
+                    "user_input": 1,
+                    "tool_result": 1,
+                },
+            },
+        )
+
+        repository.record(event)
+
+        restored = repository.list("run-1")
+
+        assert restored == [event]
+        assert restored[0].event_type == AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED
+        assert restored[0].step_id == "retrieve_evidence"
+        assert restored[0].step_index == 0
+        assert restored[0].step_name == "Retrieve enterprise evidence"
+        assert restored[0].metadata == {
+            "total_messages": 7,
+            "source_counts": {
+                "system_prompt": 1,
+                "semantic_memory": 3,
+                "chat_history": 1,
+                "user_input": 1,
+                "tool_result": 1,
+            },
+        }
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_record_preserves_tool_event_fields() -> None:
     engine, session, repository = make_repository()
 

@@ -139,6 +139,8 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "require_task_completed": True,
             "require_answer_match": True,
             "name": "production-integration-quality-gate",
+            "policy_id": None,
+            "policy_version": None,
         }
 
         assert evaluation_payload["quality_gate"] == {
@@ -191,6 +193,10 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "require_task_completed": True,
                 "require_answer_match": True,
                 "name": "production-integration-quality-gate",
+                "min_retrieval_score": None,
+                "min_reranker_score": None,
+                "policy_id": None,
+                "policy_version": None,
             }
 
             assert evaluation_record.quality_gate == {
@@ -316,11 +322,29 @@ def test_production_control_plane_persists_agent_run_events() -> None:
             "governance.decision",
             "governance.decision",
             "agent.started",
+            "context.assembly.completed",
             "llm.requested",
             "llm.completed",
             "runtime.decision",
             "agent.completed",
         ]
+
+        context_assembly_payload = next(
+            event
+            for event in events_payload["events"]
+            if event["event_type"] == "context.assembly.completed"
+        )
+
+        assert context_assembly_payload["run_id"] == run_id
+        assert context_assembly_payload["session_id"] == session_id
+        assert context_assembly_payload["user_id"] == "integration-test-user"
+        assert context_assembly_payload["metadata"] == {
+            "total_messages": 2,
+            "source_counts": {
+                "system_prompt": 1,
+                "user_input": 1,
+            },
+        }
 
         runtime_decision_payload = next(
             event for event in events_payload["events"] if event["event_type"] == "runtime.decision"
@@ -372,11 +396,27 @@ def test_production_control_plane_persists_agent_run_events() -> None:
             "governance.decision",
             "governance.decision",
             "agent.started",
+            "context.assembly.completed",
             "llm.requested",
             "llm.completed",
             "runtime.decision",
             "agent.completed",
         ]
+
+        context_assembly_event = next(
+            event for event in events if event.event_type == "context.assembly.completed"
+        )
+
+        assert context_assembly_event.run_id == run_id
+        assert context_assembly_event.session_id == session_id
+        assert context_assembly_event.user_id == "integration-test-user"
+        assert context_assembly_event.event_metadata == {
+            "total_messages": 2,
+            "source_counts": {
+                "system_prompt": 1,
+                "user_input": 1,
+            },
+        }
 
         runtime_decision = next(event for event in events if event.event_type == "runtime.decision")
 
@@ -731,6 +771,7 @@ def test_production_control_plane_persists_failed_agent_run() -> None:
             "governance.decision",
             "governance.decision",
             "agent.started",
+            "context.assembly.completed",
             "llm.requested",
             "agent.failed",
         ]
@@ -1058,6 +1099,7 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             "governance.decision",
             "agent.started",
             "orchestration.step.started",
+            "context.assembly.completed",
             "llm.requested",
             "llm.completed",
             "tool.call.requested",
@@ -1067,10 +1109,12 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
             "tool.call.completed",
             "orchestration.step.completed",
             "orchestration.step.started",
+            "context.assembly.completed",
             "llm.requested",
             "llm.completed",
             "orchestration.step.completed",
             "orchestration.step.started",
+            "context.assembly.completed",
             "llm.requested",
             "llm.completed",
             "orchestration.step.completed",
