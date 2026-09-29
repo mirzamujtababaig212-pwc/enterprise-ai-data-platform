@@ -44,7 +44,7 @@ def _extract_answer_text(output: Any) -> str | None:
 
 def _extract_context_diagnostics(
     events: list[AgentExecutionEvent],
-) -> tuple[int, int, int, int, bool, dict[str, int]]:
+) -> tuple[int, int, int, int, bool, int, dict[str, int]]:
     """Aggregate bounded context-assembly diagnostics from durable events."""
     context_assembly_events_total = 0
     context_messages_total = 0
