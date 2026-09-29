@@ -1,6 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
-from ai_platform.agents.evaluation.evidence import extract_evidence
+from ai_platform.agents.evaluation.evidence import (
+    extract_evidence,
+    extract_rag_source_texts,
+)
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -943,3 +946,76 @@ def test_extract_evidence_defaults_rag_provenance_signals_for_non_rag_runs() -> 
 
     assert evidence.has_rag_provenance is False
     assert evidence.has_rag_sources_available is False
+
+
+def test_extract_rag_source_texts_reads_raw_rag_content_transiently() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "query": "battery temperature",
+                "results": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "content": "Vehicle V001 battery temperature reached 42 degrees Celsius.",
+                    },
+                    {
+                        "chunk_id": "chunk-2",
+                        "content": "Vehicle V001 telemetry was collected in September.",
+                    },
+                ],
+            },
+        ),
+        _step(
+            step_id="step-2",
+            step_index=1,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="search",
+            call_id="call-2",
+            output={
+                "results": [
+                    {
+                        "content": "This must not be treated as RAG grounding evidence.",
+                    }
+                ]
+            },
+        ),
+    ]
+
+    source_texts = extract_rag_source_texts(steps)
+
+    assert source_texts == [
+        "Vehicle V001 battery temperature reached 42 degrees Celsius.",
+        "Vehicle V001 telemetry was collected in September.",
+    ]
+
+
+def test_extract_rag_source_texts_ignores_missing_or_non_string_content() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            output={
+                "results": [
+                    {"chunk_id": "chunk-1"},
+                    {"chunk_id": "chunk-2", "content": ""},
+                    {"chunk_id": "chunk-3", "content": "   "},
+                    {"chunk_id": "chunk-4", "content": 42},
+                    {
+                        "chunk_id": "chunk-5",
+                        "content": "Valid source text.",
+                    },
+                ]
+            },
+        )
+    ]
+
+    source_texts = extract_rag_source_texts(steps)
+
+    assert source_texts == ["Valid source text."]

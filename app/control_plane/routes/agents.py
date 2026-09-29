@@ -559,6 +559,16 @@ async def evaluate_agent_run(
             final_answer_length=evaluation.metrics.final_answer_length,
             rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
             rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
+            grounding_evaluated=evaluation.metrics.grounding_evaluated,
+            grounding_supported=evaluation.metrics.grounding_supported,
+            grounding_support_ratio=evaluation.metrics.grounding_support_ratio,
+            grounding_supported_sources_total=(
+                evaluation.metrics.grounding_supported_sources_total
+            ),
+            grounding_source_candidates_total=(
+                evaluation.metrics.grounding_source_candidates_total
+            ),
+            grounding_method=evaluation.metrics.grounding_method,
             task_completed=evaluation.metrics.task_completed,
         ),
         policy=AgentEvaluationPolicyRequest(
@@ -662,6 +672,16 @@ async def list_agent_run_evaluations(
                     final_answer_length=evaluation.metrics.final_answer_length,
                     rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
                     rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
+                    grounding_evaluated=evaluation.metrics.grounding_evaluated,
+                    grounding_supported=evaluation.metrics.grounding_supported,
+                    grounding_support_ratio=evaluation.metrics.grounding_support_ratio,
+                    grounding_supported_sources_total=(
+                        evaluation.metrics.grounding_supported_sources_total
+                    ),
+                    grounding_source_candidates_total=(
+                        evaluation.metrics.grounding_source_candidates_total
+                    ),
+                    grounding_method=evaluation.metrics.grounding_method,
                     task_completed=evaluation.metrics.task_completed,
                 ),
                 policy=AgentEvaluationPolicyRequest(

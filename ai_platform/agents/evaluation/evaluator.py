@@ -4,6 +4,10 @@ from ai_platform.agents.evaluation.answer_evaluation import (
     AgentAnswerEvaluation,
     AgentAnswerEvaluator,
 )
+from ai_platform.agents.evaluation.grounding import (
+    AgentGroundingEvaluation,
+    AgentGroundingEvaluator,
+)
 from ai_platform.agents.evaluation.models import (
     AgentContextQualityAssessment,
     AgentEvaluationMetrics,
@@ -25,6 +29,7 @@ class AgentEvaluator:
         policy: AgentEvaluationPolicy,
         *,
         answer_evaluation: AgentAnswerEvaluation | None = None,
+        grounding_evaluation: AgentGroundingEvaluation | None = None,
     ) -> tuple[AgentEvaluationMetrics, AgentQualityGateResult]:
         metrics = AgentEvaluationMetrics(
             execution_time_ms=evidence.execution_time_ms,
@@ -48,6 +53,28 @@ class AgentEvaluator:
             reranker_score_min=evidence.reranker_score_min,
             reranker_score_max=evidence.reranker_score_max,
             reranker_score_avg=evidence.reranker_score_avg,
+            grounding_evaluated=(
+                grounding_evaluation.evaluated if grounding_evaluation is not None else False
+            ),
+            grounding_supported=(
+                grounding_evaluation.supported if grounding_evaluation is not None else None
+            ),
+            grounding_support_ratio=(
+                grounding_evaluation.support_ratio if grounding_evaluation is not None else None
+            ),
+            grounding_supported_sources_total=(
+                grounding_evaluation.supported_sources_total
+                if grounding_evaluation is not None
+                else 0
+            ),
+            grounding_source_candidates_total=(
+                grounding_evaluation.source_candidates_total
+                if grounding_evaluation is not None
+                else 0
+            ),
+            grounding_method=(
+                grounding_evaluation.method if grounding_evaluation is not None else None
+            ),
             task_completed=evidence.status == "completed",
         )
 
@@ -58,6 +85,18 @@ class AgentEvaluator:
         )
 
         return metrics, quality_gate
+
+    @staticmethod
+    def evaluate_grounding(
+        evidence: AgentRunEvidence,
+        *,
+        source_texts: list[str] | tuple[str, ...],
+    ) -> AgentGroundingEvaluation:
+        """Evaluate detectable textual support without an LLM judge."""
+        return AgentGroundingEvaluator.evaluate(
+            answer_text=evidence.final_answer_text,
+            source_texts=source_texts,
+        )
 
     @staticmethod
     def evaluate_context(

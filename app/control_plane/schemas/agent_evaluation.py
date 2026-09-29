@@ -67,6 +67,12 @@ class AgentEvaluationMetricsResponse(BaseModel):
     final_answer_length: int
     rag_sources_available_count: int
     rag_unique_chunks_count: int
+    grounding_evaluated: bool
+    grounding_supported: bool | None
+    grounding_support_ratio: float | None
+    grounding_supported_sources_total: int
+    grounding_source_candidates_total: int
+    grounding_method: str | None
     task_completed: bool
 
 

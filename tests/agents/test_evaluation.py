@@ -843,3 +843,60 @@ def test_evaluation_policy_serializes_rag_provenance_requirement():
     policy = AgentEvaluationPolicy(require_rag_provenance=True)
 
     assert policy.as_dict()["require_rag_provenance"] is True
+
+
+def test_evaluator_persists_supported_grounding_aggregates_in_metrics() -> None:
+    evidence = _evidence(
+        final_answer_text="The vehicle battery temperature reached 42 degrees Celsius.",
+    )
+    grounding = AgentEvaluator.evaluate_grounding(
+        evidence,
+        source_texts=[
+            "Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius."
+        ],
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        evidence,
+        AgentEvaluationPolicy(),
+        grounding_evaluation=grounding,
+    )
+
+    assert grounding.evaluated is True
+    assert grounding.supported is True
+    assert grounding.support_ratio == 1.0
+
+    assert metrics.grounding_evaluated is True
+    assert metrics.grounding_supported is True
+    assert metrics.grounding_support_ratio == 1.0
+    assert metrics.grounding_supported_sources_total == 1
+    assert metrics.grounding_source_candidates_total == 1
+    assert metrics.grounding_method == "lexical_sentence_support_v1"
+    assert gate.passed is True
+
+
+def test_evaluator_persists_unsupported_grounding_without_failing_quality_gate() -> None:
+    evidence = _evidence(
+        final_answer_text="The vehicle battery temperature reached 99 degrees Celsius.",
+    )
+    grounding = AgentEvaluator.evaluate_grounding(
+        evidence,
+        source_texts=[
+            "Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius."
+        ],
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        evidence,
+        AgentEvaluationPolicy(),
+        grounding_evaluation=grounding,
+    )
+
+    assert grounding.evaluated is True
+    assert grounding.supported is False
+    assert grounding.support_ratio == 0.0
+
+    assert metrics.grounding_evaluated is True
+    assert metrics.grounding_supported is False
+    assert metrics.grounding_support_ratio == 0.0
+    assert gate.passed is True

@@ -161,6 +161,12 @@ class AgentEvaluationMetrics:
     reranker_score_min: float | None = None
     reranker_score_max: float | None = None
     reranker_score_avg: float | None = None
+    grounding_evaluated: bool = False
+    grounding_supported: bool | None = None
+    grounding_support_ratio: float | None = None
+    grounding_supported_sources_total: int = 0
+    grounding_source_candidates_total: int = 0
+    grounding_method: str | None = None
 
     def __post_init__(self) -> None:
         if self.execution_time_ms < 0:
@@ -205,5 +211,11 @@ class AgentEvaluationMetrics:
             "reranker_score_min": self.reranker_score_min,
             "reranker_score_max": self.reranker_score_max,
             "reranker_score_avg": self.reranker_score_avg,
+            "grounding_evaluated": self.grounding_evaluated,
+            "grounding_supported": self.grounding_supported,
+            "grounding_support_ratio": self.grounding_support_ratio,
+            "grounding_supported_sources_total": self.grounding_supported_sources_total,
+            "grounding_source_candidates_total": self.grounding_source_candidates_total,
+            "grounding_method": self.grounding_method,
             "task_completed": self.task_completed,
         }

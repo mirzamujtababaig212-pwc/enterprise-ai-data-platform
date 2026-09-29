@@ -125,6 +125,12 @@ def make_evaluation(
             task_completed=True,
             rag_queries_total=2,
             rag_sources_retrieved_total=5,
+            grounding_evaluated=True,
+            grounding_supported=True,
+            grounding_support_ratio=1.0,
+            grounding_supported_sources_total=2,
+            grounding_source_candidates_total=5,
+            grounding_method="lexical_sentence_support_v1",
         ),
         policy=AgentEvaluationPolicy(
             policy_id=policy_id,
@@ -196,6 +202,12 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["metrics"]["tool_calls_total"] == 2
     assert body["metrics"]["rag_queries_total"] == 2
     assert body["metrics"]["rag_sources_retrieved_total"] == 5
+    assert body["metrics"]["grounding_evaluated"] is True
+    assert body["metrics"]["grounding_supported"] is True
+    assert body["metrics"]["grounding_support_ratio"] == 1.0
+    assert body["metrics"]["grounding_supported_sources_total"] == 2
+    assert body["metrics"]["grounding_source_candidates_total"] == 5
+    assert body["metrics"]["grounding_method"] == "lexical_sentence_support_v1"
     assert body["metrics"]["task_completed"] is True
     assert body["policy"]["name"] == "default-agent-quality"
     assert body["quality_gate"]["passed"] is True

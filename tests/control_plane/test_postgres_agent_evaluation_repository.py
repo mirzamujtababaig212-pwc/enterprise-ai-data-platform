@@ -74,6 +74,12 @@ def _run(
             reranker_score_min=0.88,
             reranker_score_max=0.95,
             reranker_score_avg=0.91,
+            grounding_evaluated=True,
+            grounding_supported=True,
+            grounding_support_ratio=1.0,
+            grounding_supported_sources_total=2,
+            grounding_source_candidates_total=5,
+            grounding_method="lexical_sentence_support_v1",
         ),
         context_quality=(
             AgentContextQualityAssessment(
@@ -154,6 +160,18 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
         assert restored.metrics.reranker_score_min == run.metrics.reranker_score_min
         assert restored.metrics.reranker_score_max == run.metrics.reranker_score_max
         assert restored.metrics.reranker_score_avg == run.metrics.reranker_score_avg
+        assert restored.metrics.grounding_evaluated is True
+        assert restored.metrics.grounding_supported is True
+        assert restored.metrics.grounding_support_ratio == 1.0
+        assert (
+            restored.metrics.grounding_supported_sources_total
+            == run.metrics.grounding_supported_sources_total
+        )
+        assert (
+            restored.metrics.grounding_source_candidates_total
+            == run.metrics.grounding_source_candidates_total
+        )
+        assert restored.metrics.grounding_method == run.metrics.grounding_method
         assert restored.policy.policy_id == run.policy.policy_id
         assert restored.policy.policy_version == run.policy.policy_version
     finally:
@@ -210,6 +228,50 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
         assert restored.metrics.has_rag_provenance is False
         assert restored.metrics.has_rag_sources_available is False
         assert restored.policy.require_rag_provenance is False
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_get_legacy_run_without_grounding_diagnostics_preserves_compatibility():
+    repository, engine = _repository()
+
+    try:
+        run = _run("legacy-grounding-diagnostics")
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+
+        assert record is not None
+
+        legacy_metrics = dict(record.metrics)
+        for key in (
+            "grounding_evaluated",
+            "grounding_supported",
+            "grounding_support_ratio",
+            "grounding_supported_sources_total",
+            "grounding_source_candidates_total",
+            "grounding_method",
+        ):
+            legacy_metrics.pop(key, None)
+
+        record.metrics = legacy_metrics
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.metrics.grounding_evaluated is False
+        assert restored.metrics.grounding_supported is None
+        assert restored.metrics.grounding_support_ratio is None
+        assert restored.metrics.grounding_supported_sources_total == 0
+        assert restored.metrics.grounding_source_candidates_total == 0
+        assert restored.metrics.grounding_method is None
     finally:
         repository.close()
         engine.dispose()

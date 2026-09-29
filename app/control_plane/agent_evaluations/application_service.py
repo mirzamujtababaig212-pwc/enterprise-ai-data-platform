@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
-from ai_platform.agents.evaluation.evidence import extract_evidence
+from ai_platform.agents.evaluation.evidence import (
+    extract_evidence,
+    extract_rag_source_texts,
+)
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.evaluation.run import (
     AgentEvaluationLineage,
@@ -84,11 +87,16 @@ class AgentEvaluationApplicationService:
             evidence,
             expected_answer=expected_answer,
         )
+        grounding_evaluation = self._evaluator.evaluate_grounding(
+            evidence,
+            source_texts=extract_rag_source_texts(steps),
+        )
         context_quality = self._evaluator.evaluate_context(evidence)
         metrics, quality_gate = self._evaluator.evaluate_run(
             evidence,
             policy,
             answer_evaluation=answer_evaluation,
+            grounding_evaluation=grounding_evaluation,
         )
 
         evaluation_run = AgentEvaluationRun(

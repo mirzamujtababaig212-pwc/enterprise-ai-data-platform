@@ -132,6 +132,42 @@ def _extract_context_diagnostics(
     )
 
 
+def extract_rag_source_texts(
+    steps: list[AgentRunStep],
+) -> list[str]:
+    """Extract raw RAG source text transiently for grounding evaluation.
+
+    Source content is intentionally not persisted in AgentRunEvidence or
+    evaluation metrics. It is consumed only by the grounding evaluator.
+    """
+    source_texts: list[str] = []
+
+    for step in steps:
+        provenance = step.metadata.get("rag_provenance")
+        is_rag_step = step.tool_name == "rag.search" or isinstance(provenance, dict)
+
+        if not is_rag_step:
+            continue
+
+        output = step.output
+        if not isinstance(output, dict):
+            continue
+
+        results = output.get("results")
+        if not isinstance(results, (list, tuple)):
+            continue
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+
+            content = result.get("content")
+            if isinstance(content, str) and content.strip():
+                source_texts.append(content.strip())
+
+    return source_texts
+
+
 def extract_evidence(
     run: AgentRun,
     steps: list[AgentRunStep],

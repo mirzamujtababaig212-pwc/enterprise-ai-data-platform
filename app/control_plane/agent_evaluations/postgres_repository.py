@@ -217,6 +217,23 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 reranker_score_min=metrics_data.get("reranker_score_min"),
                 reranker_score_max=metrics_data.get("reranker_score_max"),
                 reranker_score_avg=metrics_data.get("reranker_score_avg"),
+                grounding_evaluated=metrics_data.get(
+                    "grounding_evaluated",
+                    False,
+                ),
+                grounding_supported=metrics_data.get("grounding_supported"),
+                grounding_support_ratio=metrics_data.get(
+                    "grounding_support_ratio",
+                ),
+                grounding_supported_sources_total=metrics_data.get(
+                    "grounding_supported_sources_total",
+                    0,
+                ),
+                grounding_source_candidates_total=metrics_data.get(
+                    "grounding_source_candidates_total",
+                    0,
+                ),
+                grounding_method=metrics_data.get("grounding_method"),
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(
