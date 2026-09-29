@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from dataclasses import dataclass, replace
 
 from ai_platform.agents.budget import ExecutionBudgetState
+from ai_platform.agents.context.assembly import AgentContextAssembly
 from ai_platform.agents.observer import AgentExecutionObserver
 from app.control_plane.agent_run_steps.models import AgentRunStep, AgentRunStepStatus
 from ai_platform.agents.checkpoint import (
@@ -1560,6 +1561,29 @@ class LLMAgent:
                 )
 
                 context.raise_if_execution_ownership_lost()
+
+                context_assembly = AgentContextAssembly.describe(
+                    context,
+                    tuple(messages),
+                )
+
+                await self._emit(
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+                        agent_name=self.definition.name,
+                        run_id=context.run_id,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                        tool_round=tool_rounds,
+                        step_id=(
+                            context.orchestration_state.current_step.step_id
+                            if context.orchestration_state
+                            and context.orchestration_state.current_step
+                            else None
+                        ),
+                        metadata=dict(context_assembly.diagnostics),
+                    )
+                )
 
                 await self._emit(
                     AgentExecutionEvent(

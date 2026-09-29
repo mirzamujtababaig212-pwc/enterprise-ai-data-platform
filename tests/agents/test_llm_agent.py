@@ -2699,13 +2699,14 @@ async def test_llm_agent_emits_normal_execution_lifecycle_events() -> None:
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_STARTED,
+        AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.LLM_COMPLETED,
         AgentExecutionEventType.RUNTIME_DECISION,
         AgentExecutionEventType.AGENT_COMPLETED,
     ]
 
-    runtime_decision = observer.events[3]
+    runtime_decision = observer.events[4]
     assert runtime_decision.metadata == {
         "decision": "stop",
         "reason": "iteration_budget_exhausted",
@@ -2758,12 +2759,20 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     await agent.run(context)
 
     started = observer.events[0]
-    llm_requested = observer.events[1]
-    llm_completed = observer.events[2]
-    runtime_decision = observer.events[3]
-    completed = observer.events[4]
+    context_assembly = observer.events[1]
+    llm_requested = observer.events[2]
+    llm_completed = observer.events[3]
+    runtime_decision = observer.events[4]
+    completed = observer.events[5]
 
     assert started.agent_name == "production-llm-agent"
+    assert context_assembly.event_type == AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED
+    assert context_assembly.run_id == "run-123"
+    assert context_assembly.metadata["total_messages"] == 2
+    assert context_assembly.metadata["source_counts"] == {
+        "system_prompt": 1,
+        "user_input": 1,
+    }
     assert started.session_id == "session-456"
     assert started.user_id == "user-123"
 
@@ -2797,6 +2806,7 @@ async def test_llm_agent_lifecycle_events_include_execution_metadata() -> None:
     assert completed.model == "gpt-test"
 
     assert [event.run_id for event in observer.events] == [
+        "run-123",
         "run-123",
         "run-123",
         "run-123",
@@ -4525,20 +4535,22 @@ async def test_llm_agent_emits_complete_lifecycle_after_tool_execution() -> None
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_STARTED,
+        AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.LLM_COMPLETED,
         AgentExecutionEventType.TOOL_CALL_REQUESTED,
         AgentExecutionEventType.TOOL_CALL_COMPLETED,
+        AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.LLM_COMPLETED,
         AgentExecutionEventType.RUNTIME_DECISION,
         AgentExecutionEventType.AGENT_COMPLETED,
     ]
 
-    first_llm_completed = observer.events[2]
-    final_llm_completed = observer.events[6]
-    runtime_decision = observer.events[7]
-    agent_completed = observer.events[8]
+    first_llm_completed = observer.events[3]
+    final_llm_completed = observer.events[8]
+    runtime_decision = observer.events[9]
+    agent_completed = observer.events[10]
 
     assert first_llm_completed.tool_round == 0
     assert first_llm_completed.provider == "fake"
@@ -4732,6 +4744,7 @@ async def test_llm_agent_emits_agent_failed_on_llm_failure() -> None:
 
     assert [event.event_type for event in observer.events] == [
         AgentExecutionEventType.AGENT_STARTED,
+        AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
         AgentExecutionEventType.LLM_REQUESTED,
         AgentExecutionEventType.AGENT_FAILED,
     ]

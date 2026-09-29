@@ -17,6 +17,8 @@ class AgentExecutionEventType(StrEnum):
 
     RUNTIME_DECISION = "runtime.decision"
 
+    CONTEXT_ASSEMBLY_COMPLETED = "context.assembly.completed"
+
     LLM_REQUESTED = "llm.requested"
     LLM_COMPLETED = "llm.completed"
 
