@@ -5,6 +5,7 @@ from ai_platform.agents.evaluation.answer_evaluation import (
     AgentAnswerEvaluator,
 )
 from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
     AgentEvaluationMetrics,
     AgentRunEvidence,
 )
@@ -55,6 +56,25 @@ class AgentEvaluator:
         )
 
         return metrics, quality_gate
+
+    @staticmethod
+    def evaluate_context(
+        evidence: AgentRunEvidence,
+    ) -> AgentContextQualityAssessment:
+        """Assess deterministic context-quality signals without changing run evaluation."""
+
+        return AgentContextQualityAssessment(
+            budget_compliant=(
+                None
+                if evidence.context_assembly_events_total == 0
+                else not evidence.context_budget_exceeded
+            ),
+            assemblies_total=evidence.context_assembly_events_total,
+            messages_total=evidence.context_messages_total,
+            estimated_tokens_total=evidence.context_estimated_tokens_total,
+            estimated_tokens_max=evidence.context_estimated_tokens_max,
+            source_counts=dict(evidence.context_source_counts or {}),
+        )
 
     @staticmethod
     def evaluate_answer(

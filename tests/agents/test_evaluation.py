@@ -157,6 +157,115 @@ def test_quality_gate_rejects_multiple_violations():
     assert len(gate.violations) == 4
 
 
+def test_evaluator_produces_context_quality_assessment():
+    policy = AgentEvaluationPolicy()
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            context_assembly_events_total=2,
+            context_messages_total=10,
+            context_estimated_tokens_total=36,
+            context_estimated_tokens_max=24,
+            context_budget_exceeded=False,
+            context_source_counts={
+                "system_prompt": 2,
+                "semantic_memory": 2,
+                "user_input": 1,
+                "chat_history": 3,
+                "tool_result": 2,
+            },
+        ),
+        policy,
+    )
+
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=2,
+            context_messages_total=10,
+            context_estimated_tokens_total=36,
+            context_estimated_tokens_max=24,
+            context_budget_exceeded=False,
+            context_source_counts={
+                "system_prompt": 2,
+                "semantic_memory": 2,
+                "user_input": 1,
+                "chat_history": 3,
+                "tool_result": 2,
+            },
+        )
+    )
+
+    assert metrics.task_completed is True
+    assert gate.passed is True
+    assert context_quality.budget_compliant is True
+    assert context_quality.assemblies_total == 2
+    assert context_quality.messages_total == 10
+    assert context_quality.estimated_tokens_total == 36
+    assert context_quality.estimated_tokens_max == 24
+    assert context_quality.source_counts == {
+        "system_prompt": 2,
+        "semantic_memory": 2,
+        "user_input": 1,
+        "chat_history": 3,
+        "tool_result": 2,
+    }
+
+
+def test_evaluator_context_quality_reports_budget_violation():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=2,
+            context_messages_total=10,
+            context_estimated_tokens_total=36,
+            context_estimated_tokens_max=24,
+            context_budget_exceeded=True,
+        )
+    )
+
+    assert context_quality.budget_compliant is False
+
+
+def test_evaluator_context_quality_is_unavailable_without_context_events():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=0,
+            context_messages_total=0,
+            context_estimated_tokens_total=0,
+            context_estimated_tokens_max=0,
+            context_budget_exceeded=False,
+        )
+    )
+
+    assert context_quality.budget_compliant is None
+    assert context_quality.assemblies_total == 0
+    assert context_quality.messages_total == 0
+    assert context_quality.estimated_tokens_total == 0
+    assert context_quality.estimated_tokens_max == 0
+    assert context_quality.source_counts == {}
+
+
+def test_evaluator_context_quality_copies_source_counts():
+    source_counts = {
+        "semantic_memory": 2,
+        "tool_result": 1,
+    }
+
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts=source_counts,
+        )
+    )
+
+    source_counts["semantic_memory"] = 99
+    source_counts["new_source"] = 7
+
+    assert context_quality.source_counts == {
+        "semantic_memory": 2,
+        "tool_result": 1,
+    }
+
+
 def test_quality_gate_passes_rag_score_thresholds():
     policy = AgentEvaluationPolicy(
         min_retrieval_score=0.70,

@@ -81,6 +81,28 @@ class AgentRunEvidence:
 
 
 @dataclass(frozen=True)
+class AgentContextQualityAssessment:
+    """Deterministic context-quality assessment derived from run evidence."""
+
+    budget_compliant: bool | None
+    assemblies_total: int
+    messages_total: int
+    estimated_tokens_total: int
+    estimated_tokens_max: int
+    source_counts: dict[str, int]
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "assemblies_total",
+            "messages_total",
+            "estimated_tokens_total",
+            "estimated_tokens_max",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValueError(f"{field_name} must be non-negative.")
+
+
+@dataclass(frozen=True)
 class AgentEvaluationMetrics:
     """Deterministic aggregate metrics derived from agent run evidence."""
 
