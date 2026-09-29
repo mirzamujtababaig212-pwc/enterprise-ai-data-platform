@@ -582,13 +582,27 @@ class ToolExecutionService:
                             "Tool execution lost durable run ownership during tool execution."
                         )
 
+                    timeout_failure_category = ToolExecutionFailureCategory.TIMEOUT
+                    timeout_execution_status = "timeout"
+
+                    if tool.definition.metadata.get("side_effect") is True:
+                        timeout_failure_category = ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS
+                        timeout_execution_status = "ambiguous"
+                        ownership_outcome_ambiguous = True
+
+                        if idempotency_key is not None:
+                            await self.idempotency_store.mark_ambiguous(
+                                idempotency_key,
+                                claim_token=claim_token,
+                            )
+
                     result = ToolExecutionResult(
                         tool_name=tool_name,
                         success=False,
                         error=(
                             f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"
                         ),
-                        failure_category=ToolExecutionFailureCategory.TIMEOUT,
+                        failure_category=timeout_failure_category,
                         metadata=self._build_execution_metadata(
                             tool_definition=tool.definition,
                             execution_context=execution_context,
@@ -608,7 +622,7 @@ class ToolExecutionService:
                                 else None
                             ),
                             idempotency_key=idempotency_key,
-                            execution_status="timeout",
+                            execution_status=timeout_execution_status,
                         ),
                     )
 
@@ -648,7 +662,7 @@ class ToolExecutionService:
                 )
 
                 if not should_retry:
-                    if idempotency_key is not None:
+                    if idempotency_key is not None and not ownership_outcome_ambiguous:
                         await self.idempotency_store.release(
                             idempotency_key,
                             claim_token=claim_token,

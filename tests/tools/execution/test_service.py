@@ -156,6 +156,29 @@ class SlowTool:
         return {"status": "completed"}
 
 
+class SideEffectTimeoutTool:
+    def __init__(self):
+        self._definition = ToolDefinition(
+            name="side_effect_timeout_tool",
+            description="A side-effecting tool that times out.",
+            metadata={"side_effect": True},
+            execution_policy=ToolExecutionPolicy(
+                max_retries=2,
+                retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
+            ),
+        )
+        self.execution_count = 0
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments):
+        self.execution_count += 1
+        await asyncio.sleep(0.2)
+        return {"status": "completed"}
+
+
 class OwnershipLosingTool:
     def __init__(self, ownership_lost: asyncio.Event):
         self._definition = ToolDefinition(
@@ -531,6 +554,45 @@ async def test_execute_custom_timeout_is_used():
     assert result.success is False
     assert "timed out" in result.error
     assert result.failure_category == ToolExecutionFailureCategory.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_execute_side_effect_timeout_is_ambiguous_and_not_retried():
+    registry = InMemoryToolRegistry()
+    tool = SideEffectTimeoutTool()
+
+    await registry.register(tool)
+
+    store = InMemoryToolExecutionIdempotencyStore()
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    result = await service.execute(
+        "side_effect_timeout_tool",
+        {},
+        timeout_seconds=0.05,
+        execution_context=ToolExecutionContext(
+            run_id="run-side-effect-timeout",
+            call_id="call-side-effect-timeout",
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS
+    assert "timed out" in result.error
+    assert tool.execution_count == 1
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-side-effect-timeout",
+        call_id="call-side-effect-timeout",
+        tool_name="side_effect_timeout_tool",
+    )
+
+    claim = await store.claim(key)
+
+    assert claim.status == ToolIdempotencyClaimStatus.AMBIGUOUS
 
 
 def test_invalid_default_timeout_is_rejected():
