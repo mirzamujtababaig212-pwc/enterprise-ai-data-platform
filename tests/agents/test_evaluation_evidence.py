@@ -877,3 +877,69 @@ def test_extract_evidence_ignores_unrelated_event_diagnostics() -> None:
     assert evidence.context_estimated_tokens_max == 0
     assert evidence.context_budget_exceeded is False
     assert evidence.context_source_counts == {}
+
+
+def test_extract_evidence_marks_rag_provenance_and_sources_available() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 2,
+                    "sources": [
+                        {"chunk_id": "chunk-1"},
+                        {"chunk_id": "chunk-2"},
+                    ],
+                }
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is True
+    assert evidence.has_rag_sources_available is True
+
+
+def test_extract_evidence_distinguishes_raw_rag_results_from_provenance() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "results": [
+                    {"chunk_id": "chunk-1"},
+                    {"chunk_id": "chunk-2"},
+                ]
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is False
+    assert evidence.has_rag_sources_available is True
+
+
+def test_extract_evidence_defaults_rag_provenance_signals_for_non_rag_runs() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="search",
+            call_id="call-1",
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is False
+    assert evidence.has_rag_sources_available is False

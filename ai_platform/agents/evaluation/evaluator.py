@@ -38,6 +38,8 @@ class AgentEvaluator:
             rag_sources_retrieved_total=evidence.rag_sources_retrieved_total,
             has_final_answer=evidence.has_final_answer,
             final_answer_length=evidence.final_answer_length,
+            has_rag_provenance=evidence.has_rag_provenance,
+            has_rag_sources_available=evidence.has_rag_sources_available,
             rag_sources_available_count=evidence.rag_sources_available_count,
             rag_unique_chunks_count=evidence.rag_unique_chunks_count,
             retrieval_score_min=evidence.retrieval_score_min,

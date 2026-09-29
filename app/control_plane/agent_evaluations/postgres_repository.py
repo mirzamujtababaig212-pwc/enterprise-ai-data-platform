@@ -198,6 +198,11 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 ),
                 has_final_answer=metrics_data.get("has_final_answer", False),
                 final_answer_length=metrics_data.get("final_answer_length", 0),
+                has_rag_provenance=metrics_data.get("has_rag_provenance", False),
+                has_rag_sources_available=metrics_data.get(
+                    "has_rag_sources_available",
+                    False,
+                ),
                 rag_sources_available_count=metrics_data.get(
                     "rag_sources_available_count",
                     0,
@@ -230,6 +235,10 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 ),
                 require_answer_match=policy_data.get(
                     "require_answer_match",
+                    False,
+                ),
+                require_rag_provenance=policy_data.get(
+                    "require_rag_provenance",
                     False,
                 ),
                 name=policy_data.get("name"),

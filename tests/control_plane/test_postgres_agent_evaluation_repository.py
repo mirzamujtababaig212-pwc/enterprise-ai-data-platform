@@ -64,6 +64,8 @@ def _run(
             rag_sources_retrieved_total=5,
             has_final_answer=True,
             final_answer_length=42,
+            has_rag_provenance=True,
+            has_rag_sources_available=True,
             rag_sources_available_count=5,
             rag_unique_chunks_count=4,
             retrieval_score_min=0.61,
@@ -108,6 +110,7 @@ def _run(
             max_invalid_tool_calls=0,
             allow_governance_denials=False,
             require_task_completed=True,
+            require_rag_provenance=True,
             name="default-agent-quality",
         ),
         quality_gate=AgentQualityGateResult(
@@ -139,6 +142,12 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
         restored = repository.get(run.evaluation_run_id)
 
         assert restored is not None
+        assert restored.metrics.has_rag_provenance is True
+        assert restored.metrics.has_rag_sources_available is True
+        assert (
+            restored.metrics.rag_sources_available_count == run.metrics.rag_sources_available_count
+        )
+        assert restored.policy.require_rag_provenance is True
         assert restored.metrics.retrieval_score_min == run.metrics.retrieval_score_min
         assert restored.metrics.retrieval_score_max == run.metrics.retrieval_score_max
         assert restored.metrics.retrieval_score_avg == run.metrics.retrieval_score_avg
@@ -175,10 +184,17 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
             "reranker_score_min",
             "reranker_score_max",
             "reranker_score_avg",
+            "has_rag_provenance",
+            "has_rag_sources_available",
         ):
             legacy_metrics.pop(key, None)
 
         record.metrics = legacy_metrics
+
+        legacy_policy = dict(record.policy)
+        legacy_policy.pop("require_rag_provenance", None)
+        record.policy = legacy_policy
+
         record.created_at = run.created_at
         repository._session.flush()
 
@@ -191,6 +207,9 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
         assert restored.metrics.reranker_score_min is None
         assert restored.metrics.reranker_score_max is None
         assert restored.metrics.reranker_score_avg is None
+        assert restored.metrics.has_rag_provenance is False
+        assert restored.metrics.has_rag_sources_available is False
+        assert restored.policy.require_rag_provenance is False
     finally:
         repository.close()
         engine.dispose()

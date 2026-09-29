@@ -19,6 +19,7 @@ class AgentEvaluationPolicy:
     allow_governance_denials: bool = False
     require_task_completed: bool = True
     require_answer_match: bool = False
+    require_rag_provenance: bool = False
     name: str | None = None
     policy_id: str | None = None
     policy_version: str | None = None
@@ -58,6 +59,7 @@ class AgentEvaluationPolicy:
             "allow_governance_denials": self.allow_governance_denials,
             "require_task_completed": self.require_task_completed,
             "require_answer_match": self.require_answer_match,
+            "require_rag_provenance": self.require_rag_provenance,
             "name": self.name,
             "policy_id": self.policy_id,
             "policy_version": self.policy_version,
@@ -144,6 +146,9 @@ class AgentQualityGateEvaluator:
                     f"Average reranker score ({metrics.reranker_score_avg:.2f}) was below "
                     f"minimum threshold ({policy.min_reranker_score:.2f})."
                 )
+
+        if policy.require_rag_provenance and not metrics.has_rag_provenance:
+            violations.append("RAG provenance was required but was not captured.")
 
         if policy.require_answer_match:
             if answer_evaluation is None or not answer_evaluation.evaluated:

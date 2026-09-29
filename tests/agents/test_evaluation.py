@@ -801,3 +801,45 @@ def test_context_quality_assessment_serialization_copies_source_counts() -> None
 
     assert serialized["source_counts"] == source_counts
     assert serialized["source_counts"] is not source_counts
+
+
+def test_quality_gate_requires_rag_provenance_when_policy_requires_it():
+    policy = AgentEvaluationPolicy(require_rag_provenance=True)
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(has_rag_provenance=False),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == ("RAG provenance was required but was not captured.",)
+
+
+def test_quality_gate_passes_when_required_rag_provenance_is_present():
+    policy = AgentEvaluationPolicy(require_rag_provenance=True)
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(has_rag_provenance=True),
+        policy,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_quality_gate_ignores_missing_rag_provenance_when_not_required():
+    policy = AgentEvaluationPolicy(require_rag_provenance=False)
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(has_rag_provenance=False),
+        policy,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_evaluation_policy_serializes_rag_provenance_requirement():
+    policy = AgentEvaluationPolicy(require_rag_provenance=True)
+
+    assert policy.as_dict()["require_rag_provenance"] is True

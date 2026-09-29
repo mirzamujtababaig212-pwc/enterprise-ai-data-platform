@@ -190,6 +190,7 @@ def extract_evidence(
     rag_queries_total = 0
     rag_sources_retrieved_total = 0
     rag_sources_available_count = 0
+    has_rag_provenance = False
     rag_chunk_ids: set[str] = set()
 
     retrieval_scores: list[float] = []
@@ -204,7 +205,8 @@ def extract_evidence(
 
         rag_queries_total += 1
 
-        if isinstance(provenance, dict):
+        if isinstance(provenance, dict) and provenance:
+            has_rag_provenance = True
             retrieved_count = provenance.get("retrieved_count")
             sources = provenance.get("sources")
 
@@ -333,6 +335,8 @@ def extract_evidence(
         has_final_answer=has_final_answer,
         final_answer_length=final_answer_length,
         final_answer_text=answer_text,
+        has_rag_provenance=has_rag_provenance,
+        has_rag_sources_available=rag_sources_available_count > 0,
         rag_sources_available_count=rag_sources_available_count,
         rag_unique_chunks_count=rag_unique_chunks_count,
         retrieval_score_min=retrieval_score_min,

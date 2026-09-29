@@ -28,6 +28,8 @@ class AgentRunEvidence:
     has_final_answer: bool = False
     final_answer_length: int = 0
     final_answer_text: str | None = None
+    has_rag_provenance: bool = False
+    has_rag_sources_available: bool = False
     rag_sources_available_count: int = 0
     rag_unique_chunks_count: int = 0
     retrieval_score_min: float | None = None
@@ -149,6 +151,8 @@ class AgentEvaluationMetrics:
     rag_sources_retrieved_total: int = 0
     has_final_answer: bool = False
     final_answer_length: int = 0
+    has_rag_provenance: bool = False
+    has_rag_sources_available: bool = False
     rag_sources_available_count: int = 0
     rag_unique_chunks_count: int = 0
     retrieval_score_min: float | None = None
@@ -191,6 +195,8 @@ class AgentEvaluationMetrics:
             "rag_sources_retrieved_total": self.rag_sources_retrieved_total,
             "has_final_answer": self.has_final_answer,
             "final_answer_length": self.final_answer_length,
+            "has_rag_provenance": self.has_rag_provenance,
+            "has_rag_sources_available": self.has_rag_sources_available,
             "rag_sources_available_count": self.rag_sources_available_count,
             "rag_unique_chunks_count": self.rag_unique_chunks_count,
             "retrieval_score_min": self.retrieval_score_min,
