@@ -1,3 +1,4 @@
+from common.aws.pipeline_catalog import build_aws_glue_synchronizer
 from common.config.settings import Settings
 from common.pipelines.base_pipeline import (
     BasePipeline,
@@ -51,10 +52,15 @@ class BatchToBronzePipeline(BasePipeline):
             ]
         )
 
+        glue_synchronizer = build_aws_glue_synchronizer()
+
         writer = DeltaWriter(
             table=Settings.storage.BRONZE_TABLE,
             path=Settings.storage.BRONZE_PATH,
             mode="append",
+            glue_synchronizer=glue_synchronizer,
+            glue_database_name="enterprise_ai_platform",
+            glue_table_name="vehicle_events",
         )
 
         config = PipelineRuntimeConfig(

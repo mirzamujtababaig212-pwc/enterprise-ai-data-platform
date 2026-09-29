@@ -33,3 +33,22 @@ def test_create_gold_pipeline(spark):
     )
     assert pipeline.validator.__class__.__name__ == "NoOpValidator"
     assert pipeline.dlq.__class__.__name__ == "NoOpDLQ"
+
+
+def test_pipeline_glue_configuration_propagates_to_writer(spark):
+    bronze = PipelineFactory.get_pipeline("bronze", spark)
+    silver = PipelineFactory.get_pipeline("silver", spark)
+    gold = PipelineFactory.get_pipeline("gold", spark)
+
+    assert bronze.writer._glue_database_name == "enterprise_ai_platform"
+    assert bronze.writer._glue_table_name == "vehicle_events"
+
+    assert silver.writer._glue_database_name == "enterprise_ai_platform"
+    assert silver.writer._glue_table_name == "vehicle_events_silver"
+
+    assert gold.writer._glue_database_name == "enterprise_ai_platform"
+    assert gold.writer._glue_table_name == "vehicle_metrics"
+
+    assert bronze.writer._glue_synchronizer is None
+    assert silver.writer._glue_synchronizer is None
+    assert gold.writer._glue_synchronizer is None

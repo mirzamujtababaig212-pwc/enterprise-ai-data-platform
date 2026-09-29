@@ -10,7 +10,12 @@ from common.registry.pipeline_registry import PIPELINE_REGISTRY
 
 class PipelineFactory:
     @staticmethod
-    def get_pipeline(name, spark):
+    def get_pipeline(
+        name,
+        spark,
+        *,
+        glue_synchronizer=None,
+    ):
         config = PipelineLoader.load(name)
         pipeline_name = config["pipeline"]["class"]
         if pipeline_name not in PIPELINE_REGISTRY:
@@ -19,7 +24,10 @@ class PipelineFactory:
         return pipeline_cls(
             spark=spark,
             reader=ReaderFactory.create(config),
-            writer=WriterFactory.create(config),
+            writer=WriterFactory.create(
+                config,
+                glue_synchronizer=glue_synchronizer,
+            ),
             transformer=TransformerFactory.create(config),
             validator=ValidatorFactory.create(config),
             metrics=MetricsFactory.create(config),

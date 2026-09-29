@@ -6,6 +6,8 @@ from pathlib import Path
 
 from delta.tables import DeltaTable
 
+from common.aws.catalog_synchronizer import AwsGlueCatalogSynchronizer
+from common.aws.glue_table_input import build_delta_table_input
 from common.logging.logger import get_logger
 from common.writers.base_writer import BaseWriter
 
@@ -38,6 +40,9 @@ class DeltaWriter(BaseWriter):
         checkpoint: str | None = None,
         output_mode: str | None = None,
         merge_keys: list[str] | None = None,
+        glue_synchronizer: AwsGlueCatalogSynchronizer | None = None,
+        glue_database_name: str | None = None,
+        glue_table_name: str | None = None,
     ) -> None:
 
         if not table or not table.strip():
@@ -71,6 +76,19 @@ class DeltaWriter(BaseWriter):
         self.checkpoint = self._normalize_path(checkpoint) if checkpoint else None
 
         self.output_mode = output_mode
+
+        self._glue_synchronizer = glue_synchronizer
+        self._glue_database_name = (
+            glue_database_name.strip()
+            if glue_database_name and glue_database_name.strip()
+            else None
+        )
+        self._glue_table_name = (
+            glue_table_name.strip() if glue_table_name and glue_table_name.strip() else None
+        )
+
+        if self._glue_synchronizer is not None and not self._glue_database_name:
+            raise ValueError("Glue database name is required when Glue synchronization is enabled.")
 
     # ==============================================================
     # PATH NORMALIZATION
@@ -177,6 +195,8 @@ class DeltaWriter(BaseWriter):
 
             self._register_table(df.sparkSession)
 
+        self._sync_glue_catalog(df)
+
         logger.info(
             "Delta batch write completed in %.2f sec",
             time.time() - start,
@@ -195,6 +215,7 @@ class DeltaWriter(BaseWriter):
             (df.write.format("delta").mode("append").option("overwriteSchema", "true").save(path))
 
             self._register_table(spark)
+            self._sync_glue_catalog(df)
             return
 
         merge_condition = " AND ".join(
@@ -224,6 +245,46 @@ class DeltaWriter(BaseWriter):
         )
 
         self._register_table(spark)
+        self._sync_glue_catalog(df)
+
+    # ==============================================================
+    # AWS GLUE CATALOG
+    # ==============================================================
+
+    def _sync_glue_catalog(self, df) -> None:
+        """
+        Synchronize the successful Delta write with AWS Glue.
+
+        Glue synchronization is deliberately optional so local
+        environments and existing callers remain AWS-independent.
+        """
+
+        if self._glue_synchronizer is None:
+            return
+
+        if not self._glue_database_name:
+            raise RuntimeError("Glue database name is required for Glue synchronization.")
+
+        glue_table_name = self._glue_table_name or self.table.split(".", 1)[-1]
+
+        table_input = build_delta_table_input(
+            table_name=glue_table_name,
+            schema=df.schema,
+            location=str(self.path),
+            description=f"Delta table for {self.table}.",
+        )
+
+        result = self._glue_synchronizer.sync(
+            database_name=self._glue_database_name,
+            table_input=table_input,
+        )
+
+        logger.info(
+            "AWS Glue catalog synchronized: database=%s table=%s result=%s",
+            self._glue_database_name,
+            glue_table_name,
+            result,
+        )
 
     # ==============================================================
     # STREAMING

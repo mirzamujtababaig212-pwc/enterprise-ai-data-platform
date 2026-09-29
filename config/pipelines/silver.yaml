@@ -14,6 +14,8 @@ writer:
   merge_keys:
     - vehicle_id
     - event_time
+  glue_database_name: enterprise_ai_platform
+  glue_table_name: vehicle_events_silver
 
 runtime:
   checkpoint: SILVER_CHECKPOINT

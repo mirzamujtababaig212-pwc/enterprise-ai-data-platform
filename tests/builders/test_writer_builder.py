@@ -288,3 +288,55 @@ def test_build_delta_merge_with_keys():
         "vehicle_id",
         "event_time",
     ]
+
+
+def test_build_delta_accepts_optional_glue_configuration():
+    config = {
+        "writer": {
+            "type": "delta",
+            "table": "bronze.vehicle_events",
+            "path": "/tmp/delta/bronze",
+            "glue_database_name": "enterprise_ai_platform",
+            "glue_table_name": "vehicle_events",
+        }
+    }
+
+    writer = WriterBuilder.build(config)
+
+    assert isinstance(writer, DeltaWriter)
+    assert writer._glue_database_name == "enterprise_ai_platform"
+    assert writer._glue_table_name == "vehicle_events"
+    assert writer._glue_synchronizer is None
+
+
+def test_delta_rejects_glue_without_database_name():
+    with pytest.raises(
+        ValueError,
+        match="Glue database name is required",
+    ):
+        DeltaWriter(
+            table="bronze.vehicle_events",
+            path="/tmp/delta/bronze",
+            glue_synchronizer=object(),
+        )
+
+
+def test_build_delta_accepts_injected_glue_synchronizer():
+    synchronizer = object()
+
+    config = {
+        "writer": {
+            "type": "delta",
+            "table": "bronze.vehicle_events",
+            "path": "s3a://enterprise-data-ai-platform/bronze/vehicle_events",
+            "glue_database_name": "enterprise_ai_platform",
+            "glue_table_name": "vehicle_events",
+        }
+    }
+
+    writer = WriterBuilder.build(
+        config,
+        glue_synchronizer=synchronizer,
+    )
+
+    assert writer._glue_synchronizer is synchronizer

@@ -42,7 +42,11 @@ class WriterBuilder:
         return value
 
     @staticmethod
-    def build(config):
+    def build(
+        config,
+        *,
+        glue_synchronizer=None,
+    ):
         """
         Construct a writer using the canonical writer configuration.
 
@@ -114,6 +118,9 @@ class WriterBuilder:
                 checkpoint=checkpoint,
                 output_mode=output_mode,
                 merge_keys=merge_keys,
+                glue_synchronizer=glue_synchronizer,
+                glue_database_name=cfg.get("glue_database_name"),
+                glue_table_name=cfg.get("glue_table_name"),
             )
 
         # ==========================================================

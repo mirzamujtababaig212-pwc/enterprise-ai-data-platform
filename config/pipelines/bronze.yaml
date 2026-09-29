@@ -10,6 +10,8 @@ writer:
   table: BRONZE_TABLE
   path: BRONZE_PATH
   mode: append
+  glue_database_name: enterprise_ai_platform
+  glue_table_name: vehicle_events
 
 runtime:
   checkpoint: BRONZE_CHECKPOINT

@@ -11,6 +11,8 @@ writer:
   table: GOLD_TABLE
   path: GOLD_PATH
   mode: overwrite
+  glue_database_name: enterprise_ai_platform
+  glue_table_name: vehicle_metrics
 
 runtime:
   output_mode: append
