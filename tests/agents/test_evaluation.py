@@ -275,6 +275,69 @@ def test_evaluator_context_quality_accepts_episodic_retrieval_evidence():
     assert context_quality.retrieval_evidence_present is True
 
 
+def test_evaluator_context_quality_reports_semantic_memory_presence():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "semantic_memory": 3,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_semantic_memory_sources is True
+    assert context_quality.has_episodic_memory_sources is False
+
+
+def test_evaluator_context_quality_reports_episodic_memory_presence():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "episodic_memory": 2,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_semantic_memory_sources is False
+    assert context_quality.has_episodic_memory_sources is True
+
+
+def test_evaluator_context_quality_reports_both_memory_sources():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "semantic_memory": 2,
+                "episodic_memory": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_semantic_memory_sources is True
+    assert context_quality.has_episodic_memory_sources is True
+
+
+def test_evaluator_context_quality_reports_no_retrieval_memory_sources():
+    context_quality = AgentEvaluator.evaluate_context(
+        _evidence(
+            context_assembly_events_total=1,
+            context_source_counts={
+                "system_prompt": 1,
+                "chat_history": 2,
+                "user_input": 1,
+            },
+        )
+    )
+
+    assert context_quality.has_semantic_memory_sources is False
+    assert context_quality.has_episodic_memory_sources is False
+
+
 def test_evaluator_context_quality_reports_missing_retrieval_evidence():
     context_quality = AgentEvaluator.evaluate_context(
         _evidence(
@@ -299,6 +362,8 @@ def test_evaluator_context_quality_retrieval_evidence_is_unavailable_without_con
     )
 
     assert context_quality.retrieval_evidence_present is None
+    assert context_quality.has_semantic_memory_sources is None
+    assert context_quality.has_episodic_memory_sources is None
 
 
 def test_evaluator_context_quality_copies_source_counts():

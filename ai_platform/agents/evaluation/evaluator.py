@@ -65,13 +65,16 @@ class AgentEvaluator:
 
         source_counts = dict(evidence.context_source_counts or {})
         has_context_evidence = evidence.context_assembly_events_total > 0
+        has_semantic_memory_sources = (
+            None if not has_context_evidence else source_counts.get("semantic_memory", 0) > 0
+        )
+        has_episodic_memory_sources = (
+            None if not has_context_evidence else source_counts.get("episodic_memory", 0) > 0
+        )
         retrieval_evidence_present = (
             None
             if not has_context_evidence
-            else (
-                source_counts.get("semantic_memory", 0) > 0
-                or source_counts.get("episodic_memory", 0) > 0
-            )
+            else has_semantic_memory_sources or has_episodic_memory_sources
         )
 
         return AgentContextQualityAssessment(
@@ -79,6 +82,8 @@ class AgentEvaluator:
                 None if not has_context_evidence else not evidence.context_budget_exceeded
             ),
             retrieval_evidence_present=retrieval_evidence_present,
+            has_semantic_memory_sources=has_semantic_memory_sources,
+            has_episodic_memory_sources=has_episodic_memory_sources,
             assemblies_total=evidence.context_assembly_events_total,
             messages_total=evidence.context_messages_total,
             estimated_tokens_total=evidence.context_estimated_tokens_total,
