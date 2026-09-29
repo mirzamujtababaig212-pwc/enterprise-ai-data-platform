@@ -232,6 +232,122 @@ def test_evaluate_run_preserves_failed_tool_metrics():
     assert result.metrics.tool_calls_failed == 1
 
 
+def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
+    service, _, _, _, repository = make_service(
+        steps=[
+            AgentRunStep(
+                run_id="run-1",
+                step_id="step-rag",
+                step_index=0,
+                step_type="tool",
+                status=AgentRunStepStatus.COMPLETED,
+                tool_name="rag.search",
+                call_id="call-rag-1",
+                metadata={
+                    "rag_provenance": {
+                        "retrieved_count": 3,
+                        "sources": [
+                            {
+                                "chunk_id": "chunk-1",
+                                "retrieval_score": 0.72,
+                                "reranker_score": 0.91,
+                            },
+                            {
+                                "chunk_id": "chunk-2",
+                                "retrieval_score": 0.61,
+                                "reranker_score": 0.88,
+                            },
+                            {
+                                "chunk_id": "chunk-3",
+                                "retrieval_score": 0.83,
+                                "reranker_score": 0.95,
+                            },
+                        ],
+                    }
+                },
+            ),
+        ]
+    )
+
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+        name="rag-quality-v1",
+    )
+
+    result = service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=policy,
+    )
+
+    assert result.metrics.retrieval_score_avg == pytest.approx((0.72 + 0.61 + 0.83) / 3)
+    assert result.metrics.reranker_score_avg == pytest.approx((0.91 + 0.88 + 0.95) / 3)
+    assert result.passed is True
+    assert result.quality_gate.violations == ()
+    assert repository.get(result.evaluation_run_id) == result
+
+
+def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
+    service, _, _, _, repository = make_service(
+        steps=[
+            AgentRunStep(
+                run_id="run-1",
+                step_id="step-rag",
+                step_index=0,
+                step_type="tool",
+                status=AgentRunStepStatus.COMPLETED,
+                tool_name="rag.search",
+                call_id="call-rag-1",
+                metadata={
+                    "rag_provenance": {
+                        "retrieved_count": 3,
+                        "sources": [
+                            {
+                                "chunk_id": "chunk-1",
+                                "retrieval_score": 0.52,
+                                "reranker_score": 0.91,
+                            },
+                            {
+                                "chunk_id": "chunk-2",
+                                "retrieval_score": 0.61,
+                                "reranker_score": 0.88,
+                            },
+                            {
+                                "chunk_id": "chunk-3",
+                                "retrieval_score": 0.63,
+                                "reranker_score": 0.95,
+                            },
+                        ],
+                    }
+                },
+            ),
+        ]
+    )
+
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+        name="rag-quality-v1",
+    )
+
+    result = service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=policy,
+    )
+
+    assert result.metrics.retrieval_score_avg == pytest.approx((0.52 + 0.61 + 0.63) / 3)
+    assert result.metrics.reranker_score_avg == pytest.approx((0.91 + 0.88 + 0.95) / 3)
+    assert result.passed is False
+    assert any(
+        "Average retrieval score" in violation for violation in result.quality_gate.violations
+    )
+    assert repository.get(result.evaluation_run_id) == result
+
+
 def test_evaluate_run_rejects_missing_run():
     service, _, _, _, _ = make_service(run=None)
 
