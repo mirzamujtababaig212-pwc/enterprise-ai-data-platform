@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AgentEvaluationPolicyRequest(BaseModel):
+    policy_id: str | None = None
+    policy_version: str | None = None
     max_execution_time_ms: float | None = Field(default=None, ge=0.0)
     max_steps_per_run: int | None = Field(default=None, ge=0)
     max_invalid_tool_calls: int | None = Field(default=None, ge=0)
@@ -13,10 +15,18 @@ class AgentEvaluationPolicyRequest(BaseModel):
     require_task_completed: bool = True
     require_answer_match: bool = False
     name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_policy_identity_pair(self) -> "AgentEvaluationPolicyRequest":
+        if (self.policy_id is None) != (self.policy_version is None):
+            raise ValueError("policy_id and policy_version must be provided together.")
+        return self
 
 
 class AgentEvaluationRequest(BaseModel):
     expected_answer: str | None = None
+    policy_id: str | None = None
+    policy_version: str | None = None
     max_execution_time_ms: float | None = Field(default=None, ge=0.0)
     max_steps_per_run: int | None = Field(default=None, ge=0)
     max_invalid_tool_calls: int | None = Field(default=None, ge=0)
@@ -24,6 +34,12 @@ class AgentEvaluationRequest(BaseModel):
     require_task_completed: bool = True
     require_answer_match: bool = False
     name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_policy_identity_pair(self) -> "AgentEvaluationRequest":
+        if (self.policy_id is None) != (self.policy_version is None):
+            raise ValueError("policy_id and policy_version must be provided together.")
+        return self
 
 
 class AgentEvaluationLineageResponse(BaseModel):

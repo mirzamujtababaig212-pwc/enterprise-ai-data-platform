@@ -491,6 +491,8 @@ async def evaluate_agent_run(
         )
 
     policy = AgentEvaluationPolicy(
+        policy_id=payload.policy_id,
+        policy_version=payload.policy_version,
         max_execution_time_ms=payload.max_execution_time_ms,
         max_steps_per_run=payload.max_steps_per_run,
         max_invalid_tool_calls=payload.max_invalid_tool_calls,
@@ -560,6 +562,8 @@ async def evaluate_agent_run(
             task_completed=evaluation.metrics.task_completed,
         ),
         policy=AgentEvaluationPolicyRequest(
+            policy_id=evaluation.policy.policy_id,
+            policy_version=evaluation.policy.policy_version,
             max_execution_time_ms=evaluation.policy.max_execution_time_ms,
             max_steps_per_run=evaluation.policy.max_steps_per_run,
             max_invalid_tool_calls=evaluation.policy.max_invalid_tool_calls,

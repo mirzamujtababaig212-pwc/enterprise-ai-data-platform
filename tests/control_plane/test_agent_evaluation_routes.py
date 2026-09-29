@@ -102,6 +102,8 @@ def make_evaluation(
     evaluation_run_id: str = "evaluation-1",
     tenant_id: str = "tenant-1",
     passed: bool = True,
+    policy_id: str | None = None,
+    policy_version: str | None = None,
 ) -> AgentEvaluationRun:
     return AgentEvaluationRun(
         evaluation_run_id=evaluation_run_id,
@@ -125,6 +127,8 @@ def make_evaluation(
             rag_sources_retrieved_total=5,
         ),
         policy=AgentEvaluationPolicy(
+            policy_id=policy_id,
+            policy_version=policy_version,
             max_execution_time_ms=1000,
             max_steps_per_run=10,
             max_invalid_tool_calls=0,
@@ -206,6 +210,75 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert policy.max_steps_per_run == 10
     assert policy.max_invalid_tool_calls == 0
     assert policy.name == "route-quality-policy"
+
+
+def test_create_agent_run_evaluation_preserves_policy_identity_and_version() -> None:
+    service = FakeAgentEvaluationApplicationService(
+        evaluation=make_evaluation(
+            policy_id="rag-quality",
+            policy_version="1.0",
+        )
+    )
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/runs/run-1/evaluations",
+        json={
+            "policy_id": "rag-quality",
+            "policy_version": "1.0",
+            "name": "route-quality-policy",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["policy"]["policy_id"] == "rag-quality"
+    assert body["policy"]["policy_version"] == "1.0"
+
+    assert len(service.evaluate_calls) == 1
+    _, _, _, policy = service.evaluate_calls[0]
+
+    assert policy.policy_id == "rag-quality"
+    assert policy.policy_version == "1.0"
+
+
+def test_create_agent_run_evaluation_rejects_policy_id_without_version() -> None:
+    service = FakeAgentEvaluationApplicationService()
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/runs/run-1/evaluations",
+        json={
+            "policy_id": "rag-quality",
+            "name": "route-quality-policy",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == (
+        "Value error, policy_id and policy_version must be provided together."
+    )
+    assert service.evaluate_calls == []
+
+
+def test_create_agent_run_evaluation_rejects_policy_version_without_id() -> None:
+    service = FakeAgentEvaluationApplicationService()
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/runs/run-1/evaluations",
+        json={
+            "policy_version": "1.0",
+            "name": "route-quality-policy",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == (
+        "Value error, policy_id and policy_version must be provided together."
+    )
+    assert service.evaluate_calls == []
 
 
 def test_create_agent_run_evaluation_requires_identity_context() -> None:
