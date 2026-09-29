@@ -85,6 +85,7 @@ class AgentContextQualityAssessment:
     """Deterministic context-quality assessment derived from run evidence."""
 
     budget_compliant: bool | None
+    retrieval_evidence_present: bool | None
     assemblies_total: int
     messages_total: int
     estimated_tokens_total: int

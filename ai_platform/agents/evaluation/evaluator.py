@@ -63,17 +63,27 @@ class AgentEvaluator:
     ) -> AgentContextQualityAssessment:
         """Assess deterministic context-quality signals without changing run evaluation."""
 
+        source_counts = dict(evidence.context_source_counts or {})
+        has_context_evidence = evidence.context_assembly_events_total > 0
+        retrieval_evidence_present = (
+            None
+            if not has_context_evidence
+            else (
+                source_counts.get("semantic_memory", 0) > 0
+                or source_counts.get("episodic_memory", 0) > 0
+            )
+        )
+
         return AgentContextQualityAssessment(
             budget_compliant=(
-                None
-                if evidence.context_assembly_events_total == 0
-                else not evidence.context_budget_exceeded
+                None if not has_context_evidence else not evidence.context_budget_exceeded
             ),
+            retrieval_evidence_present=retrieval_evidence_present,
             assemblies_total=evidence.context_assembly_events_total,
             messages_total=evidence.context_messages_total,
             estimated_tokens_total=evidence.context_estimated_tokens_total,
             estimated_tokens_max=evidence.context_estimated_tokens_max,
-            source_counts=dict(evidence.context_source_counts or {}),
+            source_counts=source_counts,
         )
 
     @staticmethod
