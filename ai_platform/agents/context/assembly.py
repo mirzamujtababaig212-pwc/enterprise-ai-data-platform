@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.lifecycle import AgentExecutionLifecycleState
 from ai_platform.agents.llm_context import AgentLLMContext
-from ai_platform.agents.llm_messages import AgentMessage
+from ai_platform.agents.llm_messages import AgentMessage, AgentMessageRole
 from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.plan_provider import AgentPlanProvider
 from ai_platform.agents.decision_provider import AgentRuntimeDecisionProvider
@@ -180,9 +180,55 @@ class AgentContextAssembly:
         for source in sources:
             source_counts[source.source_type] = source_counts.get(source.source_type, 0) + 1
 
+        estimated_tokens_by_role: dict[str, int] = {role.value: 0 for role in AgentMessageRole}
+
+        estimated_tokens = 0
+        for message in messages:
+            message_tokens = AgentContextAssembly._estimate_tokens(message.content)
+            estimated_tokens += message_tokens
+
+            role = (
+                message.role.value if isinstance(message.role, AgentMessageRole) else message.role
+            )
+            estimated_tokens_by_role.setdefault(role, 0)
+            estimated_tokens_by_role[role] += message_tokens
+
+        execution_budget = context.execution_budget
+        budget_state = context.execution_budget_state
+        max_tokens_per_run = execution_budget.max_tokens_per_run
+
+        if max_tokens_per_run is None:
+            budget_status = {
+                "max_tokens_per_run": None,
+                "consumed_tokens": budget_state.total_tokens,
+                "remaining_run_tokens": None,
+                "estimated_remaining_after_context": None,
+                "within_budget": True,
+            }
+        else:
+            remaining_run_tokens = max(
+                0,
+                max_tokens_per_run - budget_state.total_tokens,
+            )
+            estimated_remaining_after_context = remaining_run_tokens - estimated_tokens
+
+            budget_status = {
+                "max_tokens_per_run": max_tokens_per_run,
+                "consumed_tokens": budget_state.total_tokens,
+                "remaining_run_tokens": remaining_run_tokens,
+                "estimated_remaining_after_context": estimated_remaining_after_context,
+                "within_budget": estimated_tokens <= remaining_run_tokens,
+            }
+
         diagnostics = {
             "total_messages": len(messages),
             "source_counts": source_counts,
+            "estimated_tokens": estimated_tokens,
+            "estimated_tokens_by_role": estimated_tokens_by_role,
+            "token_estimation": {
+                "method": "chars_per_4",
+            },
+            "budget_status": budget_status,
         }
 
         return ContextAssemblyResult(
@@ -190,6 +236,15 @@ class AgentContextAssembly:
             sources=tuple(sources),
             diagnostics=diagnostics,
         )
+
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Estimate token usage without coupling to an LLM provider tokenizer."""
+
+        if not text:
+            return 0
+
+        return max(1, (len(text) + 3) // 4)
 
     @staticmethod
     def _memory_sources(

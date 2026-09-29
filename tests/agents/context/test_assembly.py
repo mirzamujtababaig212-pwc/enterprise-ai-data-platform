@@ -143,12 +143,20 @@ def test_describe_context_preserves_messages_without_content_provenance():
         "user_input",
     ]
 
-    assert result.diagnostics == {
-        "total_messages": len(messages),
-        "source_counts": {
-            "system_prompt": 1,
-            "user_input": 1,
-        },
+    assert result.diagnostics["total_messages"] == len(messages)
+    assert result.diagnostics["source_counts"] == {
+        "system_prompt": 1,
+        "user_input": 1,
+    }
+    assert result.diagnostics["estimated_tokens"] == sum(
+        max(1, (len(message.content) + 3) // 4) for message in messages
+    )
+    assert result.diagnostics["budget_status"] == {
+        "max_tokens_per_run": None,
+        "consumed_tokens": 0,
+        "remaining_run_tokens": None,
+        "estimated_remaining_after_context": None,
+        "within_budget": True,
     }
 
     assert all("content" not in source.provenance_metadata for source in result.sources)
@@ -395,3 +403,180 @@ def test_describe_context_preserves_working_memory_identity_without_scores():
             item_id="working-1",
         )
     ]
+
+
+def test_describe_context_estimates_tokens_by_role_without_mutating_messages():
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="hello",
+        session_id="session-1",
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    messages = (
+        AgentMessage(
+            role="system",
+            content="12345678",
+        ),
+        AgentMessage(
+            role="user",
+            content="1234",
+        ),
+        AgentMessage(
+            role="assistant",
+            content="123456789",
+        ),
+        AgentMessage(
+            role="tool",
+            content="1234567890",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    assert result.messages is messages
+    assert result.messages == messages
+    assert result.diagnostics["estimated_tokens"] == 9
+    assert result.diagnostics["estimated_tokens_by_role"] == {
+        "system": 2,
+        "user": 1,
+        "assistant": 3,
+        "tool": 3,
+    }
+    assert result.diagnostics["token_estimation"] == {
+        "method": "chars_per_4",
+    }
+
+
+def test_describe_context_reports_run_token_budget_without_truncating():
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="hello",
+        session_id="session-1",
+        execution_budget=__import__(
+            "ai_platform.agents.budget",
+            fromlist=["ExecutionBudget"],
+        ).ExecutionBudget(
+            max_tokens_per_run=10,
+        ),
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    messages = (
+        AgentMessage(
+            role="system",
+            content="12345678",
+        ),
+        AgentMessage(
+            role="user",
+            content="12345678",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    assert result.messages == messages
+    assert result.diagnostics["estimated_tokens"] == 4
+
+    assert result.diagnostics["budget_status"] == {
+        "max_tokens_per_run": 10,
+        "consumed_tokens": 0,
+        "remaining_run_tokens": 10,
+        "estimated_remaining_after_context": 6,
+        "within_budget": True,
+    }
+
+
+def test_describe_context_reports_unbounded_token_budget():
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="hello",
+        session_id="session-1",
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    messages = (
+        AgentMessage(
+            role="user",
+            content="123456789",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    assert result.diagnostics["estimated_tokens"] == 3
+    assert result.diagnostics["budget_status"] == {
+        "max_tokens_per_run": None,
+        "consumed_tokens": 0,
+        "remaining_run_tokens": None,
+        "estimated_remaining_after_context": None,
+        "within_budget": True,
+    }
+
+
+def test_describe_context_diagnostics_never_include_message_content():
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="secret user content",
+        session_id="session-1",
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    messages = (
+        AgentMessage(
+            role="system",
+            content="secret system content",
+        ),
+        AgentMessage(
+            role="user",
+            content="secret user content",
+        ),
+        AgentMessage(
+            role="tool",
+            content="secret tool output",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    serialized = repr(result.diagnostics)
+
+    assert "secret system content" not in serialized
+    assert "secret user content" not in serialized
+    assert "secret tool output" not in serialized
