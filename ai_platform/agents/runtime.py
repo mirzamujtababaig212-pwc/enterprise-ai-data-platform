@@ -16,7 +16,7 @@ from ai_platform.agents.contracts import (
     AgentExecutionContract,
     AgentRegistry,
 )
-from ai_platform.agents.execution import AgentExecutionContext
+from ai_platform.agents.context.assembly import AgentContextAssembly
 from ai_platform.agents.exceptions import AgentExecutionControlSignal
 from ai_platform.agents.llm_context import (
     AgentLLMContext,
@@ -214,7 +214,7 @@ class AgentRuntime:
 
             output_evaluator = evaluate_output
 
-        context = AgentExecutionContext(
+        context = AgentContextAssembly.assemble(
             request,
             output_evaluator=output_evaluator,
             tools=tool_context,
@@ -330,7 +330,7 @@ class AgentRuntime:
 
         lifecycle_state = AgentExecutionLifecycleState()
 
-        context = AgentExecutionContext(
+        context = AgentContextAssembly.assemble(
             request,
             output_evaluator=output_evaluator,
             tools=tool_context,
