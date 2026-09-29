@@ -3573,17 +3573,20 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
                 name="policy_failing_tool",
                 description="A policy-aware failing test tool.",
                 execution_policy=ToolExecutionPolicy(
+                    max_retries=2,
                     retryable_failure_categories=frozenset(
                         {ToolExecutionFailureCategory.EXECUTION_ERROR}
                     ),
                 ),
             )
+            self.execution_count = 0
 
         @property
         def definition(self) -> ToolDefinition:
             return self._definition
 
         async def execute(self, arguments):
+            self.execution_count += 1
             raise RuntimeError("simulated policy failure")
 
     definition = AgentDefinition(
@@ -3596,7 +3599,8 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
 
     gateway = FakeToolCallingLLMGateway(tool_name="policy_failing_tool")
     tool_registry = InMemoryToolRegistry()
-    await tool_registry.register(RetryPolicyFailingTool())
+    tool = RetryPolicyFailingTool()
+    await tool_registry.register(tool)
 
     plan = OrchestrationPlan(
         steps=(
@@ -3654,9 +3658,12 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
+    assert step.attempt == 1
     assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
     assert step.error == "RuntimeError: simulated policy failure"
     assert step.completed_at is not None
+    assert tool.execution_count == 3
+    assert tool.definition.execution_policy.max_retries == 2
 
 
 @pytest.mark.asyncio
