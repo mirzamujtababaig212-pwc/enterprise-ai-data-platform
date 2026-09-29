@@ -92,6 +92,7 @@ class AgentContextQualityAssessment:
     has_working_memory_sources: bool | None
     has_chat_history_sources: bool | None
     has_tool_result_sources: bool | None
+    context_source_profile_changes: int
     assemblies_total: int
     messages_total: int
     estimated_tokens_total: int
@@ -100,6 +101,7 @@ class AgentContextQualityAssessment:
 
     def __post_init__(self) -> None:
         for field_name in (
+            "context_source_profile_changes",
             "assemblies_total",
             "messages_total",
             "estimated_tokens_total",
