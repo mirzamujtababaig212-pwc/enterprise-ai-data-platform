@@ -320,3 +320,47 @@ def test_evaluation_run_is_immutable_and_serializable():
 def test_evidence_rejects_negative_metrics(field):
     with pytest.raises(ValueError):
         _evidence(**{field: -1})
+
+
+def test_evaluation_policy_serializes_identity_and_version():
+    policy = AgentEvaluationPolicy(
+        policy_id="rag-quality",
+        policy_version="1.0",
+        name="RAG Quality Policy",
+        min_retrieval_score=0.70,
+        min_reranker_score=0.90,
+    )
+
+    assert policy.as_dict()["policy_id"] == "rag-quality"
+    assert policy.as_dict()["policy_version"] == "1.0"
+    assert policy.as_dict()["name"] == "RAG Quality Policy"
+
+
+def test_evaluation_policy_rejects_blank_identity():
+    with pytest.raises(ValueError, match="policy_id"):
+        AgentEvaluationPolicy(policy_id="   ")
+
+    with pytest.raises(ValueError, match="policy_id"):
+        AgentEvaluationPolicy(policy_id="")
+
+
+def test_evaluation_policy_rejects_blank_version():
+    with pytest.raises(ValueError, match="policy_version"):
+        AgentEvaluationPolicy(policy_version="   ")
+
+    with pytest.raises(ValueError, match="policy_version"):
+        AgentEvaluationPolicy(policy_version="")
+
+
+def test_evaluation_policy_allows_legacy_missing_identity():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        name="legacy-policy",
+    )
+
+    assert policy.policy_id is None
+    assert policy.policy_version is None
+
+    serialized = policy.as_dict()
+    assert serialized["policy_id"] is None
+    assert serialized["policy_version"] is None

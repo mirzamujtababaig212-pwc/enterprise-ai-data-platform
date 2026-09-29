@@ -20,6 +20,8 @@ class AgentEvaluationPolicy:
     require_task_completed: bool = True
     require_answer_match: bool = False
     name: str | None = None
+    policy_id: str | None = None
+    policy_version: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_execution_time_ms is not None and self.max_execution_time_ms < 0:
@@ -37,6 +39,12 @@ class AgentEvaluationPolicy:
         if self.min_reranker_score is not None and self.min_reranker_score < 0:
             raise ValueError("min_reranker_score must be non-negative.")
 
+        if self.policy_id is not None and not self.policy_id.strip():
+            raise ValueError("policy_id must not be blank.")
+
+        if self.policy_version is not None and not self.policy_version.strip():
+            raise ValueError("policy_version must not be blank.")
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "max_execution_time_ms": self.max_execution_time_ms,
@@ -48,6 +56,8 @@ class AgentEvaluationPolicy:
             "require_task_completed": self.require_task_completed,
             "require_answer_match": self.require_answer_match,
             "name": self.name,
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
         }
 
 

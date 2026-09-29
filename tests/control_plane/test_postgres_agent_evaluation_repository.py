@@ -69,6 +69,8 @@ def _run(
             reranker_score_avg=0.91,
         ),
         policy=AgentEvaluationPolicy(
+            policy_id="rag-quality",
+            policy_version="1.0",
             max_execution_time_ms=1000,
             max_steps_per_run=10,
             max_invalid_tool_calls=0,
@@ -111,6 +113,8 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
         assert restored.metrics.reranker_score_min == run.metrics.reranker_score_min
         assert restored.metrics.reranker_score_max == run.metrics.reranker_score_max
         assert restored.metrics.reranker_score_avg == run.metrics.reranker_score_avg
+        assert restored.policy.policy_id == run.policy.policy_id
+        assert restored.policy.policy_version == run.policy.policy_version
     finally:
         repository.close()
         engine.dispose()

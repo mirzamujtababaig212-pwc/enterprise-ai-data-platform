@@ -206,6 +206,8 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(
+                policy_id=policy_data.get("policy_id"),
+                policy_version=policy_data.get("policy_version"),
                 max_execution_time_ms=policy_data.get("max_execution_time_ms"),
                 max_steps_per_run=policy_data.get("max_steps_per_run"),
                 max_invalid_tool_calls=policy_data.get("max_invalid_tool_calls"),
