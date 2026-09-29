@@ -580,3 +580,95 @@ def test_describe_context_diagnostics_never_include_message_content():
     assert "secret system content" not in serialized
     assert "secret user content" not in serialized
     assert "secret tool output" not in serialized
+
+
+def test_describe_context_accounts_for_consumed_run_tokens() -> None:
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="hello",
+        session_id="session-1",
+        execution_budget=__import__(
+            "ai_platform.agents.budget",
+            fromlist=["ExecutionBudget"],
+        ).ExecutionBudget(
+            max_tokens_per_run=10,
+        ),
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    context.execution_budget_state.total_tokens = 6
+
+    messages = (
+        AgentMessage(
+            role="user",
+            content="12345678",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    assert result.diagnostics["estimated_tokens"] == 2
+    assert result.diagnostics["budget_status"] == {
+        "max_tokens_per_run": 10,
+        "consumed_tokens": 6,
+        "remaining_run_tokens": 4,
+        "estimated_remaining_after_context": 2,
+        "within_budget": True,
+    }
+
+
+def test_describe_context_reports_context_over_remaining_budget() -> None:
+    _, tools, llm = _components()
+
+    request = AgentRequest(
+        input="hello",
+        session_id="session-1",
+        execution_budget=__import__(
+            "ai_platform.agents.budget",
+            fromlist=["ExecutionBudget"],
+        ).ExecutionBudget(
+            max_tokens_per_run=10,
+        ),
+    )
+
+    context = AgentContextAssembly.assemble(
+        request,
+        tools=tools,
+        llm=llm,
+    )
+
+    context.execution_budget_state.total_tokens = 9
+
+    messages = (
+        AgentMessage(
+            role="user",
+            content="12345678",
+        ),
+    )
+
+    result = AgentContextAssembly.describe(
+        context,
+        messages,
+    )
+
+    assert result.diagnostics["estimated_tokens"] == 2
+    assert result.diagnostics["budget_status"] == {
+        "max_tokens_per_run": 10,
+        "consumed_tokens": 9,
+        "remaining_run_tokens": 1,
+        "estimated_remaining_after_context": -1,
+        "within_budget": False,
+    }
+
+    # Context Plane is diagnostic-only; it does not truncate or mutate messages.
+    assert result.messages == messages
+    assert context.execution_budget_state.total_tokens == 9
