@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
@@ -142,6 +143,16 @@ def make_evaluation(
             require_task_completed=True,
             name="default-agent-quality",
         ),
+        answer_evaluation=AgentAnswerEvaluation(
+            evaluated=True,
+            exact_match=False,
+            semantic_evaluated=True,
+            semantic_score=0.94,
+            semantic_passed=True,
+            semantic_method="llm_judge_v1",
+            evaluator_model="gpt-4.1-mini",
+            evaluator_provider="openai",
+        ),
         quality_gate=AgentQualityGateResult(
             passed=passed,
             violations=() if passed else ("quality failure",),
@@ -211,6 +222,17 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["metrics"]["task_completed"] is True
     assert body["policy"]["name"] == "default-agent-quality"
     assert body["quality_gate"]["passed"] is True
+    assert body["answer_evaluation"] == {
+        "evaluated": True,
+        "exact_match": False,
+        "normalization": "whitespace_casefold",
+        "semantic_evaluated": True,
+        "semantic_score": 0.94,
+        "semantic_passed": True,
+        "semantic_method": "llm_judge_v1",
+        "evaluator_model": "gpt-4.1-mini",
+        "evaluator_provider": "openai",
+    }
 
     assert len(service.evaluate_calls) == 1
     run_id, tenant_id, principal, policy = service.evaluate_calls[0]
