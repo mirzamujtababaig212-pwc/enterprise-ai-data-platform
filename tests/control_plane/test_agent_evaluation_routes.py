@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
+from ai_platform.agents.evaluation.diagnostics import AgentEvaluationDiagnostics
+from ai_platform.agents.evaluation.grounding import GroundingClaimAttribution
 from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
@@ -49,8 +51,20 @@ class FakeAgentEvaluationApplicationService:
         self.evaluation = evaluation or make_evaluation()
         self.evaluations = evaluations if evaluations is not None else [self.evaluation]
         self.error = error
+        self.diagnostics = AgentEvaluationDiagnostics(
+            grounding_attributions=(
+                GroundingClaimAttribution(
+                    claim_index=0,
+                    claim_text="Vehicle V001 traveled at 62 miles per hour.",
+                    supported=True,
+                    supporting_source_indexes=(0,),
+                    supporting_source_ids=("chunk-v001-001",),
+                ),
+            )
+        )
         self.evaluate_calls: list[tuple] = []
         self.list_calls: list[tuple] = []
+        self.diagnostics_calls: list[tuple] = []
 
     async def evaluate_run(
         self,
@@ -74,6 +88,26 @@ class FakeAgentEvaluationApplicationService:
             raise self.error
 
         return self.evaluation
+
+    def get_run_diagnostics(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        principal: str,
+    ) -> AgentEvaluationDiagnostics:
+        self.diagnostics_calls.append(
+            (
+                run_id,
+                tenant_id,
+                principal,
+            )
+        )
+
+        if self.error is not None:
+            raise self.error
+
+        return self.diagnostics
 
     def list_evaluations(
         self,
@@ -402,6 +436,101 @@ def test_create_agent_run_evaluation_rejects_invalid_policy() -> None:
 
     assert response.status_code == 422
     assert service.evaluate_calls == []
+
+
+def test_get_agent_run_evaluation_diagnostics_returns_transient_attributions() -> None:
+    service = FakeAgentEvaluationApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-1/evaluations/diagnostics",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "grounding_attributions": [
+            {
+                "claim_index": 0,
+                "claim_text": "Vehicle V001 traveled at 62 miles per hour.",
+                "supported": True,
+                "supporting_source_indexes": [0],
+                "supporting_source_ids": ["chunk-v001-001"],
+            }
+        ]
+    }
+
+    assert service.diagnostics_calls == [
+        ("run-1", "tenant-1", "user-1"),
+    ]
+    assert service.evaluate_calls == []
+
+
+def test_get_agent_run_evaluation_diagnostics_requires_identity_context() -> None:
+    service = FakeAgentEvaluationApplicationService()
+    client = build_client(
+        service,
+        tenant_id=None,
+        principal=None,
+    )
+
+    response = client.get(
+        "/api/v1/agents/runs/run-1/evaluations/diagnostics",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Both tenant_id and principal are required for evaluation."
+    )
+    assert service.diagnostics_calls == []
+
+
+def test_get_agent_run_evaluation_diagnostics_maps_permission_error_to_403() -> None:
+    service = FakeAgentEvaluationApplicationService(
+        error=PermissionError("principal is not authorized")
+    )
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-1/evaluations/diagnostics",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "principal is not authorized"
+    assert service.diagnostics_calls == [
+        ("run-1", "tenant-1", "user-1"),
+    ]
+
+
+def test_get_agent_run_evaluation_diagnostics_maps_missing_run_to_404() -> None:
+    service = FakeAgentEvaluationApplicationService(
+        error=LookupError("agent run not found: run-missing")
+    )
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-missing/evaluations/diagnostics",
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "agent run not found: run-missing"
+    assert service.diagnostics_calls == [
+        ("run-missing", "tenant-1", "user-1"),
+    ]
+
+
+def test_get_agent_run_evaluation_diagnostics_maps_value_error_to_422() -> None:
+    service = FakeAgentEvaluationApplicationService(error=ValueError("run_id must not be empty."))
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-1/evaluations/diagnostics",
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "run_id must not be empty."
+    assert service.diagnostics_calls == [
+        ("run-1", "tenant-1", "user-1"),
+    ]
 
 
 def test_list_agent_run_evaluations_returns_evaluations() -> None:

@@ -105,6 +105,18 @@ class AgentAnswerEvaluationResponse(BaseModel):
     evaluator_provider: str | None = None
 
 
+class AgentGroundingClaimAttributionResponse(BaseModel):
+    claim_index: int
+    claim_text: str
+    supported: bool
+    supporting_source_indexes: list[int]
+    supporting_source_ids: list[str]
+
+
+class AgentEvaluationDiagnosticsResponse(BaseModel):
+    grounding_attributions: list[AgentGroundingClaimAttributionResponse]
+
+
 class AgentEvaluationRunResponse(BaseModel):
     evaluation_run_id: str
     created_at: datetime

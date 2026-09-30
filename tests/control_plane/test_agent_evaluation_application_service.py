@@ -725,3 +725,95 @@ async def test_evaluate_run_with_diagnostics_preserves_transient_grounding_attri
     persisted_payload = persisted.as_dict()
     assert "grounding_attributions" not in persisted_payload
     assert "attributions" not in persisted_payload["metrics"]
+
+
+@pytest.mark.asyncio
+async def test_get_run_diagnostics_recomputes_transient_grounding_attribution():
+    service, _, steps_repository, events_repository, repository = make_service(
+        run=make_run(
+            output={
+                "answer": "Vehicle V001 traveled at 62 miles per hour.",
+            }
+        ),
+        steps=[
+            AgentRunStep(
+                run_id="run-1",
+                step_id="step-rag",
+                step_index=0,
+                step_type="tool",
+                status=AgentRunStepStatus.COMPLETED,
+                tool_name="rag.search",
+                call_id="call-rag-1",
+                output={
+                    "results": [
+                        {
+                            "content": (
+                                "Vehicle V001 traveled at 62 miles per hour "
+                                "during the recorded interval."
+                            ),
+                            "chunk_id": "chunk-v001-001",
+                            "document_id": "doc-v001",
+                            "retrieval_score": 0.91,
+                            "reranker_score": 0.95,
+                        },
+                    ],
+                },
+            ),
+        ],
+    )
+
+    diagnostics = service.get_run_diagnostics(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+    )
+
+    assert len(diagnostics.grounding_attributions) == 1
+
+    attribution = diagnostics.grounding_attributions[0]
+    assert attribution.claim_index == 0
+    assert attribution.claim_text == ("Vehicle V001 traveled at 62 miles per hour.")
+    assert attribution.supported is True
+    assert attribution.supporting_source_indexes == (0,)
+    assert attribution.supporting_source_ids == ("chunk-v001-001",)
+
+    assert steps_repository.requested_limit == 10_000
+    assert events_repository.requested_limit == 10_000
+    assert (
+        repository.list(
+            evaluated_run_id="run-1",
+            tenant_id="tenant-1",
+            limit=100,
+        )
+        == []
+    )
+
+
+def test_get_run_diagnostics_rejects_missing_run():
+    service, _, _, _, _ = make_service(run=None)
+
+    with pytest.raises(
+        LookupError,
+        match="agent run not found: missing",
+    ):
+        service.get_run_diagnostics(
+            "missing",
+            tenant_id="tenant-1",
+            principal="user-1",
+        )
+
+
+def test_get_run_diagnostics_enforces_principal_authorization():
+    service, _, _, _, _ = make_service(
+        run=make_run(principal="different-user"),
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match="principal is not authorized",
+    ):
+        service.get_run_diagnostics(
+            "run-1",
+            tenant_id="tenant-1",
+            principal="user-1",
+        )

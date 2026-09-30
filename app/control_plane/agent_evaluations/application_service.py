@@ -206,6 +206,66 @@ class AgentEvaluationApplicationService:
             ),
         )
 
+    def get_run_diagnostics(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        principal: str,
+    ) -> AgentEvaluationDiagnostics:
+        """Return transient diagnostics for a durable agent run.
+
+        Diagnostics are recomputed from the durable run evidence and are not
+        persisted as part of the evaluation artifact.
+        """
+        if not run_id.strip():
+            raise ValueError("run_id must not be empty.")
+
+        if not tenant_id.strip():
+            raise ValueError("tenant_id must not be empty.")
+
+        if not principal.strip():
+            raise ValueError("principal must not be empty.")
+
+        run = self._agent_run_repository.get_for_tenant(
+            run_id,
+            tenant_id,
+        )
+
+        if run is None:
+            raise LookupError(f"agent run not found: {run_id}")
+
+        self._authorize_run(
+            run,
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        steps = self._agent_run_steps_repository.list(
+            run_id,
+            limit=10_000,
+        )
+        events = self._agent_run_events_repository.list(
+            run_id,
+            limit=10_000,
+        )
+
+        evidence = extract_evidence(
+            run,
+            steps,
+            events,
+        )
+        rag_sources = extract_rag_evidence_sources(steps)
+
+        grounding_evaluation = self._evaluator.evaluate_grounding(
+            evidence,
+            sources=rag_sources,
+        )
+
+        return AgentEvaluationDiagnostics(
+            grounding_attributions=grounding_evaluation.attributions,
+        )
+
     def list_evaluations(
         self,
         run_id: str,

@@ -29,6 +29,8 @@ from app.control_plane.schemas.agent_evaluation import (
     AgentAnswerEvaluationResponse,
     AgentEvaluationLineageResponse,
     AgentEvaluationMetricsResponse,
+    AgentEvaluationDiagnosticsResponse,
+    AgentGroundingClaimAttributionResponse,
     AgentEvaluationPolicyRequest,
     AgentEvaluationRequest,
     AgentEvaluationQualityGateResponse,
@@ -617,6 +619,62 @@ async def evaluate_agent_run(
             if evaluation.answer_evaluation is not None
             else None
         ),
+    )
+
+
+@router.get(
+    "/runs/{run_id}/evaluations/diagnostics",
+    response_model=AgentEvaluationDiagnosticsResponse,
+)
+async def get_agent_run_evaluation_diagnostics(
+    request: Request,
+    run_id: str,
+    service: AgentEvaluationApplicationService = Depends(
+        get_agent_evaluation_application_service,
+    ),
+) -> AgentEvaluationDiagnosticsResponse:
+    tenant_id = getattr(request.state, "tenant_id", None)
+    principal = getattr(request.state, "principal", None)
+
+    if tenant_id is None or principal is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Both tenant_id and principal are required for evaluation.",
+        )
+
+    try:
+        diagnostics = service.get_run_diagnostics(
+            run_id,
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    return AgentEvaluationDiagnosticsResponse(
+        grounding_attributions=[
+            AgentGroundingClaimAttributionResponse(
+                claim_index=attribution.claim_index,
+                claim_text=attribution.claim_text,
+                supported=attribution.supported,
+                supporting_source_indexes=list(attribution.supporting_source_indexes),
+                supporting_source_ids=list(attribution.supporting_source_ids),
+            )
+            for attribution in diagnostics.grounding_attributions
+        ],
     )
 
 
