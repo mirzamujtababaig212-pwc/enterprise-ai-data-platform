@@ -124,6 +124,7 @@ def _run(
             allow_governance_denials=False,
             require_task_completed=True,
             require_rag_provenance=True,
+            min_grounding_support_ratio=0.88,
             name="default-agent-quality",
         ),
         quality_gate=AgentQualityGateResult(
@@ -161,6 +162,7 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
             restored.metrics.rag_sources_available_count == run.metrics.rag_sources_available_count
         )
         assert restored.policy.require_rag_provenance is True
+        assert restored.policy.min_grounding_support_ratio == 0.88
         assert restored.metrics.retrieval_score_min == run.metrics.retrieval_score_min
         assert restored.metrics.retrieval_score_max == run.metrics.retrieval_score_max
         assert restored.metrics.retrieval_score_avg == run.metrics.retrieval_score_avg

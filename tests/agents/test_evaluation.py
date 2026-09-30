@@ -687,6 +687,114 @@ def test_quality_gate_rejects_rag_score_thresholds():
     )
 
 
+def test_quality_gate_passes_grounding_threshold():
+    policy = AgentEvaluationPolicy(
+        min_grounding_support_ratio=0.80,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        grounding_evaluation=AgentEvaluator.evaluate_grounding(
+            _evidence(
+                final_answer_text="The vehicle battery temperature reached 42 degrees Celsius.",
+            ),
+            source_texts=[
+                "Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius."
+            ],
+        ),
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_quality_gate_rejects_grounding_below_threshold():
+    policy = AgentEvaluationPolicy(
+        min_grounding_support_ratio=0.80,
+    )
+
+    evidence = _evidence(
+        final_answer_text=(
+            "The vehicle battery temperature reached 99 degrees Celsius. "
+            "The vehicle had a battery fault."
+        ),
+    )
+    grounding = AgentEvaluator.evaluate_grounding(
+        evidence,
+        source_texts=[
+            "Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius."
+        ],
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        evidence,
+        policy,
+        grounding_evaluation=grounding,
+    )
+
+    assert metrics.grounding_support_ratio == 0.5
+    assert gate.passed is False
+    assert gate.violations == (
+        "Grounding support ratio (0.50) was below minimum threshold (0.80).",
+    )
+
+
+def test_quality_gate_rejects_missing_grounding_when_threshold_required():
+    policy = AgentEvaluationPolicy(
+        min_grounding_support_ratio=0.80,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Grounding support ratio was unavailable but minimum threshold (0.80) is required.",
+    )
+
+
+def test_quality_gate_ignores_grounding_without_threshold():
+    policy = AgentEvaluationPolicy()
+
+    evidence = _evidence(
+        final_answer_text="The vehicle battery temperature reached 99 degrees Celsius.",
+    )
+    grounding = AgentEvaluator.evaluate_grounding(
+        evidence,
+        source_texts=[
+            "Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius."
+        ],
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        evidence,
+        policy,
+        grounding_evaluation=grounding,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_evaluation_policy_serializes_grounding_threshold():
+    policy = AgentEvaluationPolicy(
+        min_grounding_support_ratio=0.80,
+    )
+
+    assert policy.as_dict()["min_grounding_support_ratio"] == 0.80
+
+
+def test_evaluation_policy_rejects_invalid_grounding_threshold():
+    with pytest.raises(ValueError, match="min_grounding_support_ratio"):
+        AgentEvaluationPolicy(min_grounding_support_ratio=-0.01)
+
+    with pytest.raises(ValueError, match="min_grounding_support_ratio"):
+        AgentEvaluationPolicy(min_grounding_support_ratio=1.01)
+
+
 def test_quality_gate_rejects_missing_rag_scores_when_threshold_required():
     policy = AgentEvaluationPolicy(
         min_retrieval_score=0.70,

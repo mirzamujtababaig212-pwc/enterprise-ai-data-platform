@@ -16,6 +16,7 @@ class AgentEvaluationPolicy:
     max_invalid_tool_calls: int | None = None
     min_retrieval_score: float | None = None
     min_reranker_score: float | None = None
+    min_grounding_support_ratio: float | None = None
     allow_governance_denials: bool = False
     require_task_completed: bool = True
     require_answer_match: bool = False
@@ -40,6 +41,12 @@ class AgentEvaluationPolicy:
         if self.min_reranker_score is not None and self.min_reranker_score < 0:
             raise ValueError("min_reranker_score must be non-negative.")
 
+        if (
+            self.min_grounding_support_ratio is not None
+            and not 0 <= self.min_grounding_support_ratio <= 1
+        ):
+            raise ValueError("min_grounding_support_ratio must be between 0 and 1.")
+
         if self.policy_id is not None and not self.policy_id.strip():
             raise ValueError("policy_id must not be blank.")
 
@@ -56,6 +63,7 @@ class AgentEvaluationPolicy:
             "max_invalid_tool_calls": self.max_invalid_tool_calls,
             "min_retrieval_score": self.min_retrieval_score,
             "min_reranker_score": self.min_reranker_score,
+            "min_grounding_support_ratio": self.min_grounding_support_ratio,
             "allow_governance_denials": self.allow_governance_denials,
             "require_task_completed": self.require_task_completed,
             "require_answer_match": self.require_answer_match,
@@ -145,6 +153,18 @@ class AgentQualityGateEvaluator:
                 violations.append(
                     f"Average reranker score ({metrics.reranker_score_avg:.2f}) was below "
                     f"minimum threshold ({policy.min_reranker_score:.2f})."
+                )
+
+        if policy.min_grounding_support_ratio is not None:
+            if metrics.grounding_support_ratio is None:
+                violations.append(
+                    "Grounding support ratio was unavailable but minimum threshold "
+                    f"({policy.min_grounding_support_ratio:.2f}) is required."
+                )
+            elif metrics.grounding_support_ratio < policy.min_grounding_support_ratio:
+                violations.append(
+                    f"Grounding support ratio ({metrics.grounding_support_ratio:.2f}) was below "
+                    f"minimum threshold ({policy.min_grounding_support_ratio:.2f})."
                 )
 
         if policy.require_rag_provenance and not metrics.has_rag_provenance:

@@ -181,6 +181,7 @@ def make_evaluation(
             max_invalid_tool_calls=0,
             min_retrieval_score=0.72,
             min_reranker_score=0.81,
+            min_grounding_support_ratio=0.88,
             allow_governance_denials=False,
             require_task_completed=True,
             require_rag_provenance=True,
@@ -233,6 +234,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
             "max_invalid_tool_calls": 0,
             "min_retrieval_score": 0.72,
             "min_reranker_score": 0.81,
+            "min_grounding_support_ratio": 0.88,
             "allow_governance_denials": False,
             "require_task_completed": True,
             "require_rag_provenance": True,
@@ -275,6 +277,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["policy"]["name"] == "default-agent-quality"
     assert body["policy"]["min_retrieval_score"] == 0.72
     assert body["policy"]["min_reranker_score"] == 0.81
+    assert body["policy"]["min_grounding_support_ratio"] == 0.88
     assert body["policy"]["require_rag_provenance"] is True
     assert body["quality_gate"]["passed"] is True
     assert body["answer_evaluation"] == {
@@ -300,6 +303,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert policy.max_invalid_tool_calls == 0
     assert policy.min_retrieval_score == 0.72
     assert policy.min_reranker_score == 0.81
+    assert policy.min_grounding_support_ratio == 0.88
     assert policy.require_rag_provenance is True
     assert policy.name == "route-quality-policy"
 
@@ -568,6 +572,7 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
         assert evaluation["policy"]["policy_version"] == "1.0"
         assert evaluation["policy"]["min_retrieval_score"] == 0.72
         assert evaluation["policy"]["min_reranker_score"] == 0.81
+        assert evaluation["policy"]["min_grounding_support_ratio"] == 0.88
         assert evaluation["policy"]["require_rag_provenance"] is True
         assert evaluation["metrics"]["semantic_grounding_evaluated"] is True
         assert evaluation["metrics"]["semantic_grounding_score"] == 0.93

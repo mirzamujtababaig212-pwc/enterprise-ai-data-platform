@@ -261,6 +261,9 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 max_execution_time_ms=policy_data.get("max_execution_time_ms"),
                 max_steps_per_run=policy_data.get("max_steps_per_run"),
                 max_invalid_tool_calls=policy_data.get("max_invalid_tool_calls"),
+                min_retrieval_score=policy_data.get("min_retrieval_score"),
+                min_reranker_score=policy_data.get("min_reranker_score"),
+                min_grounding_support_ratio=policy_data.get("min_grounding_support_ratio"),
                 allow_governance_denials=policy_data.get(
                     "allow_governance_denials",
                     False,
