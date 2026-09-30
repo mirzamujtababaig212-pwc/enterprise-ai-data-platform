@@ -395,8 +395,16 @@ def test_create_agent_run_evaluation_rejects_invalid_policy() -> None:
 def test_list_agent_run_evaluations_returns_evaluations() -> None:
     service = FakeAgentEvaluationApplicationService(
         evaluations=[
-            make_evaluation(evaluation_run_id="evaluation-2"),
-            make_evaluation(evaluation_run_id="evaluation-1"),
+            make_evaluation(
+                evaluation_run_id="evaluation-2",
+                policy_id="rag-quality",
+                policy_version="1.0",
+            ),
+            make_evaluation(
+                evaluation_run_id="evaluation-1",
+                policy_id="rag-quality",
+                policy_version="1.0",
+            ),
         ]
     )
     client = build_client(service)
@@ -415,6 +423,8 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
     ]
 
     for evaluation in body["evaluations"]:
+        assert evaluation["policy"]["policy_id"] == "rag-quality"
+        assert evaluation["policy"]["policy_version"] == "1.0"
         assert evaluation["metrics"]["semantic_grounding_evaluated"] is True
         assert evaluation["metrics"]["semantic_grounding_score"] == 0.93
         assert evaluation["metrics"]["semantic_grounding_passed"] is True
