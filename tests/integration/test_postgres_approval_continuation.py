@@ -15,7 +15,7 @@ from ai_platform.agents.checkpoint import (
 )
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.llm_messages import assistant_tool_call_message, user_message
-from ai_platform.agents.models import AgentRequest
+from ai_platform.agents.models import AgentDefinition, AgentRequest
 from ai_platform.agents.registry import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.agents.tool_calls import AgentToolCall
@@ -25,6 +25,7 @@ from app.control_plane.agent_checkpoints.postgres_handler import (
 from app.control_plane.agent_checkpoints.postgres_repository import (
     PostgreSQLAgentCheckpointsRepository,
 )
+from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.orchestration import (
     OrchestrationPlan,
@@ -41,6 +42,9 @@ from app.control_plane.agent_run_steps.models import (
 )
 from app.control_plane.agent_run_steps.postgres_repository import (
     PostgreSQLAgentRunStepsRepository,
+)
+from app.control_plane.agent_runs.application_service import (
+    AgentRunApplicationService,
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.postgres_repository import (
@@ -169,6 +173,52 @@ class ContinuationLLMGateway:
         }
 
 
+class ApplicationApprovalLLMGateway:
+    """Deterministic gateway that requests approval on the first call."""
+
+    def __init__(self, *, tool_name: str, call_id: str, arguments: dict[str, object]) -> None:
+        self.tool_name = tool_name
+        self.call_id = call_id
+        self.arguments = dict(arguments)
+        self.calls = 0
+        self.requests = []
+
+    async def route_chat(self, request):
+        self.calls += 1
+        self.requests.append(request)
+
+        if self.calls == 1:
+            return {
+                "provider": "integration-test",
+                "model": "mock-gpt",
+                "reply": "",
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id=self.call_id,
+                        name=self.tool_name,
+                        arguments=self.arguments,
+                    )
+                ],
+            }
+
+        return {
+            "provider": "integration-test",
+            "model": "mock-gpt",
+            "reply": "Transfer completed successfully.",
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+            "tool_calls": [],
+        }
+
+
 class CrashAfterApprovalRuntime:
     """Runtime that fails after approval has been durably committed."""
 
@@ -222,6 +272,277 @@ def _build_runtime(
         agent_run_steps_repository_factory=agent_run_steps_repository_factory,
         plan_provider=ApprovalContinuationPlanProvider(),
     )
+
+
+def test_postgres_agent_run_application_service_approval_e2e_lifecycle() -> None:
+    """Prove the full PostgreSQL approval lifecycle from application service to completion."""
+
+    import asyncio
+
+    session = SessionLocal()
+
+    principal = "api_key:application-service-approval-principal"
+    tenant_id = "tenant-application-service-approval"
+    tool_name = "transfer_funds"
+    step_id = "retrieve_evidence"
+    call_id = str(uuid4())
+
+    session_id = f"session-{uuid4()}"
+
+    request = AgentRequest(
+        input="Transfer 500 to acc-123.",
+        session_id=session_id,
+        user_id="application-service-approval-user",
+        principal=principal,
+        tenant_id=tenant_id,
+        metadata={
+            "source": "application-service-approval-e2e",
+        },
+    )
+
+    arguments = {
+        "amount": 500,
+        "recipient": "acc-123",
+    }
+
+    tool = SideEffectTool(name=tool_name)
+    tool_registry = InMemoryToolRegistry()
+    authorizer = InMemoryToolAuthorizer()
+    authorization_service = ToolAuthorizationService(authorizer)
+    idempotency_store = PostgreSQLToolExecutionIdempotencyStore(SessionLocal)
+    approval_coordinator = _build_approval_coordinator()
+
+    execution_service = ToolExecutionService(
+        tool_registry,
+        authorization_service=authorization_service,
+        idempotency_store=idempotency_store,
+        approval_coordinator=approval_coordinator,
+    )
+
+    initial_gateway = ApplicationApprovalLLMGateway(
+        tool_name=tool_name,
+        call_id=call_id,
+        arguments=arguments,
+    )
+
+    agent_definition = AgentDefinition(
+        name="enterprise-rag-analyst",
+        description="Enterprise application-service approval integration agent.",
+        system_prompt="Execute governed enterprise tool calls.",
+        model="mock-gpt",
+        tool_names=(tool_name,),
+    )
+
+    run_id = None
+
+    try:
+        asyncio.run(tool_registry.register(tool))
+        asyncio.run(authorizer.allow(principal, tool_name))
+
+        run_repository = PostgreSQLAgentRunRepository(session)
+        step_repository = PostgreSQLAgentRunStepsRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+        approval_repository = PostgreSQLApprovalRequestRepository(session)
+
+        step_repositories = []
+
+        def agent_run_steps_repository_factory():
+            repository = PostgreSQLAgentRunStepsRepository(SessionLocal())
+            step_repositories.append(repository)
+            return repository
+
+        runtime = _build_runtime(
+            execution_service=execution_service,
+            agent_definition=agent_definition,
+            llm_gateway=initial_gateway,
+            agent_run_steps_repository_factory=agent_run_steps_repository_factory,
+        )
+
+        observer = PostgreSQLAgentRunEventObserver(SessionLocal)
+
+        service = AgentRunApplicationService(
+            runtime=runtime,
+            repository=run_repository,
+            agent_run_steps_repository=step_repository,
+            observer=observer,
+            lease_seconds=60,
+        )
+
+        with pytest.raises(AgentExecutionWaitingForApprovalError):
+            asyncio.run(
+                service.execute(
+                    agent_name="enterprise-rag-analyst",
+                    request=request,
+                )
+            )
+
+        assert initial_gateway.calls == 1
+        assert tool.execution_count == 0
+
+        persisted_runs = [
+            run for run in run_repository.list(tenant_id=tenant_id) if run.session_id == session_id
+        ]
+
+        assert len(persisted_runs) == 1
+        persisted_run = persisted_runs[0]
+        run_id = persisted_run.run_id
+
+        assert persisted_run.status is AgentRunStatus.WAITING_FOR_APPROVAL
+        assert persisted_run.request_snapshot is not None
+        assert persisted_run.request_snapshot.input == request.input
+        assert persisted_run.request_snapshot.principal == principal
+        assert persisted_run.request_snapshot.tenant_id == tenant_id
+
+        approval_rows = session.scalars(
+            select(ApprovalRequestRecord).where(
+                ApprovalRequestRecord.run_id == run_id,
+            )
+        ).all()
+
+        assert len(approval_rows) == 1
+        assert approval_rows[0].status == ApprovalStatus.PENDING.value
+        approval_id = approval_rows[0].approval_id
+
+        persisted_steps = step_repository.list(run_id)
+
+        assert persisted_steps
+        approval_step = next(step for step in persisted_steps if step.call_id == call_id)
+        assert approval_step.tool_name == tool_name
+        assert approval_step.status is AgentRunStepStatus.RUNNING
+
+        persisted_checkpoint = checkpoint_repository.get_latest(run_id)
+
+        assert persisted_checkpoint is not None
+        assert persisted_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
+        assert persisted_checkpoint.run_id == run_id
+
+        idempotency_record = session.scalar(
+            select(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+                ToolExecutionIdempotencyRecord.call_id == call_id,
+                ToolExecutionIdempotencyRecord.tool_name == tool_name,
+            )
+        )
+
+        assert idempotency_record is None
+
+        session.rollback()
+
+        continuation_gateway = ContinuationLLMGateway()
+
+        continuation_runtime = _build_runtime(
+            execution_service=execution_service,
+            agent_definition=agent_definition,
+            llm_gateway=continuation_gateway,
+            agent_run_steps_repository_factory=agent_run_steps_repository_factory,
+        )
+
+        continuation_service = AgentRunApprovalContinuationService(
+            runtime=continuation_runtime,
+            approval_repository=approval_repository,
+            agent_run_repository=run_repository,
+            agent_run_steps_repository=step_repository,
+            checkpoints_repository=checkpoint_repository,
+            lease_seconds=60,
+            observer=observer,
+        )
+
+        response = asyncio.run(
+            continuation_service.continue_approval(
+                approval_id,
+                status=ApprovalStatus.APPROVED,
+                resolved_by="approver-application-service-e2e",
+                resolution_reason="Approved for the integration test.",
+            )
+        )
+
+        assert response is not None
+        assert tool.execution_count == 1
+        assert tool.executed_arguments == [arguments]
+        assert continuation_gateway.calls == 1
+
+        session.rollback()
+
+        restored_run = run_repository.get(run_id)
+
+        assert restored_run is not None
+        assert restored_run.status is AgentRunStatus.COMPLETED
+        assert restored_run.output == "Transfer completed successfully."
+        assert restored_run.request_snapshot is not None
+
+        restored_approval = approval_repository.get(approval_id)
+
+        assert restored_approval is not None
+        assert restored_approval.status is ApprovalStatus.APPROVED
+        assert restored_approval.resolved_by == "approver-application-service-e2e"
+
+        restored_step = step_repository.get(run_id, step_id)
+
+        assert restored_step is not None
+        assert restored_step.status is AgentRunStepStatus.COMPLETED
+        assert restored_step.output == {
+            "status": "transferred",
+            "amount": 500,
+            "recipient": "acc-123",
+        }
+
+        completed_idempotency_record = session.scalar(
+            select(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+                ToolExecutionIdempotencyRecord.call_id == call_id,
+                ToolExecutionIdempotencyRecord.tool_name == tool_name,
+            )
+        )
+
+        assert completed_idempotency_record is not None
+        assert completed_idempotency_record.status == "completed"
+        assert completed_idempotency_record.success is True
+
+        event_rows = session.scalars(
+            select(AgentRunEventRecord).where(
+                AgentRunEventRecord.run_id == run_id,
+            )
+        ).all()
+
+        assert event_rows
+
+    finally:
+        session.rollback()
+
+        if run_id is not None:
+            session.execute(
+                delete(ToolExecutionIdempotencyRecord).where(
+                    ToolExecutionIdempotencyRecord.run_id == run_id,
+                )
+            )
+            session.execute(
+                delete(AgentRunCheckpointRecord).where(
+                    AgentRunCheckpointRecord.run_id == run_id,
+                )
+            )
+            session.execute(
+                delete(AgentRunEventRecord).where(
+                    AgentRunEventRecord.run_id == run_id,
+                )
+            )
+            session.execute(
+                delete(AgentRunStepRecord).where(
+                    AgentRunStepRecord.run_id == run_id,
+                )
+            )
+            session.execute(
+                delete(ApprovalRequestRecord).where(
+                    ApprovalRequestRecord.run_id == run_id,
+                )
+            )
+            session.execute(
+                delete(AgentRunRecord).where(
+                    AgentRunRecord.run_id == run_id,
+                )
+            )
+            session.commit()
+
+        session.close()
 
 
 def test_postgres_approval_continuation_end_to_end_runtime_guarantees() -> None:
