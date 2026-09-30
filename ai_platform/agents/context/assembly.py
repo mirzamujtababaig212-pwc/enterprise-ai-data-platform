@@ -223,6 +223,7 @@ class AgentContextAssembly:
         diagnostics = {
             "total_messages": len(messages),
             "source_counts": source_counts,
+            "source_lineage": AgentContextAssembly._source_lineage(sources),
             "estimated_tokens": estimated_tokens,
             "estimated_tokens_by_role": estimated_tokens_by_role,
             "token_estimation": {
@@ -236,6 +237,29 @@ class AgentContextAssembly:
             sources=tuple(sources),
             diagnostics=diagnostics,
         )
+
+    @staticmethod
+    def _source_lineage(
+        sources: list[ContextSource],
+    ) -> list[dict[str, object]]:
+        """Project bounded, content-free source lineage for durable events."""
+
+        lineage: list[dict[str, object]] = []
+
+        for source in sources:
+            entry: dict[str, object] = {
+                "source_type": source.source_type,
+                "item_id": source.item_id,
+                "score": source.score,
+                "reranker_score": source.reranker_score,
+            }
+
+            if source.provenance_metadata:
+                entry["provenance"] = dict(source.provenance_metadata)
+
+            lineage.append(entry)
+
+        return lineage
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -273,6 +297,7 @@ class AgentContextAssembly:
                 score=result.retrieval_score,
                 reranker_score=result.reranker_score,
                 provenance_metadata={
+                    **dict(result.provenance),
                     "retrieval_method": result.retrieval_method,
                     "rank": result.rank,
                 },
