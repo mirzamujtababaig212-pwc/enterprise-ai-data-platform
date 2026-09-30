@@ -409,6 +409,122 @@ def test_extract_evidence_falls_back_to_rag_output_results() -> None:
     assert evidence.rag_sources_retrieved_total == 2
 
 
+def test_extract_evidence_falls_back_to_raw_results_when_provenance_sources_are_missing() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 2,
+                }
+            },
+            output={
+                "results": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "retrieval_score": 0.82,
+                        "reranker_score": 0.91,
+                    },
+                    {
+                        "chunk_id": "chunk-2",
+                        "retrieval_score": 0.74,
+                        "reranker_score": 0.88,
+                    },
+                ]
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is True
+    assert evidence.rag_sources_retrieved_total == 2
+    assert evidence.rag_sources_available_count == 2
+    assert evidence.rag_unique_chunks_count == 2
+    assert evidence.retrieval_score_min == 0.74
+    assert evidence.retrieval_score_max == 0.82
+    assert evidence.retrieval_score_avg == (0.82 + 0.74) / 2
+    assert evidence.reranker_score_min == 0.88
+    assert evidence.reranker_score_max == 0.91
+    assert evidence.reranker_score_avg == (0.91 + 0.88) / 2
+
+
+def test_extract_evidence_falls_back_to_raw_results_when_provenance_sources_are_malformed() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 1,
+                    "sources": "malformed",
+                }
+            },
+            output={
+                "results": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "score": 0.79,
+                    }
+                ]
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is True
+    assert evidence.rag_sources_retrieved_total == 1
+    assert evidence.rag_sources_available_count == 1
+    assert evidence.rag_unique_chunks_count == 1
+    assert evidence.retrieval_score_min == 0.79
+    assert evidence.retrieval_score_max == 0.79
+    assert evidence.retrieval_score_avg == 0.79
+
+
+def test_extract_evidence_falls_back_to_raw_results_when_provenance_sources_are_empty() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 0,
+                    "sources": [],
+                }
+            },
+            output={
+                "results": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "retrieval_score": 0.86,
+                    }
+                ]
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is True
+    assert evidence.rag_sources_retrieved_total == 1
+    assert evidence.rag_sources_available_count == 1
+    assert evidence.rag_unique_chunks_count == 1
+    assert evidence.retrieval_score_min == 0.86
+    assert evidence.retrieval_score_max == 0.86
+    assert evidence.retrieval_score_avg == 0.86
+
+
 def test_extract_evidence_defaults_rag_metrics_for_non_rag_runs() -> None:
     steps = [
         _step(

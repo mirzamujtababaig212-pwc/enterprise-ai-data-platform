@@ -246,40 +246,40 @@ def extract_evidence(
             retrieved_count = provenance.get("retrieved_count")
             sources = provenance.get("sources")
 
-            if isinstance(retrieved_count, int) and retrieved_count >= 0:
-                rag_sources_retrieved_total += retrieved_count
-            elif isinstance(sources, (list, tuple)):
-                rag_sources_retrieved_total += len(sources)
-
             if isinstance(sources, (list, tuple)):
-                rag_sources_available_count += len(sources)
+                valid_sources = [source for source in sources if isinstance(source, dict)]
 
-                for source in sources:
-                    if not isinstance(source, dict):
-                        continue
-
-                    chunk_id = source.get("chunk_id")
-                    if isinstance(chunk_id, str) and chunk_id:
-                        rag_chunk_ids.add(chunk_id)
-
-                    retrieval_score = source.get("retrieval_score")
-                    if isinstance(retrieval_score, (int, float)) and not isinstance(
-                        retrieval_score, bool
-                    ):
-                        retrieval_scores.append(float(retrieval_score))
+                if valid_sources:
+                    if isinstance(retrieved_count, int) and retrieved_count >= 0:
+                        rag_sources_retrieved_total += retrieved_count
                     else:
-                        # Compatibility with older provenance records.
-                        score = source.get("score")
-                        if isinstance(score, (int, float)) and not isinstance(score, bool):
-                            retrieval_scores.append(float(score))
+                        rag_sources_retrieved_total += len(valid_sources)
 
-                    reranker_score = source.get("reranker_score")
-                    if isinstance(reranker_score, (int, float)) and not isinstance(
-                        reranker_score, bool
-                    ):
-                        reranker_scores.append(float(reranker_score))
+                    rag_sources_available_count += len(valid_sources)
 
-                continue
+                    for source in valid_sources:
+                        chunk_id = source.get("chunk_id")
+                        if isinstance(chunk_id, str) and chunk_id:
+                            rag_chunk_ids.add(chunk_id)
+
+                        retrieval_score = source.get("retrieval_score")
+                        if isinstance(retrieval_score, (int, float)) and not isinstance(
+                            retrieval_score, bool
+                        ):
+                            retrieval_scores.append(float(retrieval_score))
+                        else:
+                            # Compatibility with older provenance records.
+                            score = source.get("score")
+                            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                                retrieval_scores.append(float(score))
+
+                        reranker_score = source.get("reranker_score")
+                        if isinstance(reranker_score, (int, float)) and not isinstance(
+                            reranker_score, bool
+                        ):
+                            reranker_scores.append(float(reranker_score))
+
+                    continue
 
         output = step.output
         if isinstance(output, dict):
