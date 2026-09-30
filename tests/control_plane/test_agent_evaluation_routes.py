@@ -145,8 +145,11 @@ def make_evaluation(
             max_execution_time_ms=1000,
             max_steps_per_run=10,
             max_invalid_tool_calls=0,
+            min_retrieval_score=0.72,
+            min_reranker_score=0.81,
             allow_governance_denials=False,
             require_task_completed=True,
+            require_rag_provenance=True,
             name="default-agent-quality",
         ),
         answer_evaluation=AgentAnswerEvaluation(
@@ -194,8 +197,11 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
             "max_execution_time_ms": 5000,
             "max_steps_per_run": 10,
             "max_invalid_tool_calls": 0,
+            "min_retrieval_score": 0.72,
+            "min_reranker_score": 0.81,
             "allow_governance_denials": False,
             "require_task_completed": True,
+            "require_rag_provenance": True,
             "name": "route-quality-policy",
         },
     )
@@ -233,6 +239,9 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["metrics"]["semantic_grounding_evaluator_provider"] == "openai"
     assert body["metrics"]["task_completed"] is True
     assert body["policy"]["name"] == "default-agent-quality"
+    assert body["policy"]["min_retrieval_score"] == 0.72
+    assert body["policy"]["min_reranker_score"] == 0.81
+    assert body["policy"]["require_rag_provenance"] is True
     assert body["quality_gate"]["passed"] is True
     assert body["answer_evaluation"] == {
         "evaluated": True,
@@ -255,6 +264,9 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert policy.max_execution_time_ms == 5000
     assert policy.max_steps_per_run == 10
     assert policy.max_invalid_tool_calls == 0
+    assert policy.min_retrieval_score == 0.72
+    assert policy.min_reranker_score == 0.81
+    assert policy.require_rag_provenance is True
     assert policy.name == "route-quality-policy"
 
 
@@ -425,6 +437,9 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
     for evaluation in body["evaluations"]:
         assert evaluation["policy"]["policy_id"] == "rag-quality"
         assert evaluation["policy"]["policy_version"] == "1.0"
+        assert evaluation["policy"]["min_retrieval_score"] == 0.72
+        assert evaluation["policy"]["min_reranker_score"] == 0.81
+        assert evaluation["policy"]["require_rag_provenance"] is True
         assert evaluation["metrics"]["semantic_grounding_evaluated"] is True
         assert evaluation["metrics"]["semantic_grounding_score"] == 0.93
         assert evaluation["metrics"]["semantic_grounding_passed"] is True
