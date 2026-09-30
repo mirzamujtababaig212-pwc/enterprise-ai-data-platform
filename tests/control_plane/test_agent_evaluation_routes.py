@@ -7,7 +7,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.diagnostics import AgentEvaluationDiagnostics
 from ai_platform.agents.evaluation.grounding import GroundingClaimAttribution
-from ai_platform.agents.evaluation.models import AgentEvaluationMetrics
+from ai_platform.agents.evaluation.models import (
+    AgentContextQualityAssessment,
+    AgentEvaluationMetrics,
+)
 from ai_platform.agents.evaluation.policy import (
     AgentEvaluationPolicy,
     AgentQualityGateResult,
@@ -160,6 +163,10 @@ def make_evaluation(
             task_completed=True,
             rag_queries_total=2,
             rag_sources_retrieved_total=5,
+            has_rag_provenance=True,
+            has_rag_sources_available=True,
+            rag_sources_available_count=5,
+            rag_unique_chunks_count=4,
             grounding_evaluated=True,
             grounding_supported=True,
             grounding_support_ratio=1.0,
@@ -200,6 +207,28 @@ def make_evaluation(
         quality_gate=AgentQualityGateResult(
             passed=passed,
             violations=() if passed else ("quality failure",),
+        ),
+        context_quality=AgentContextQualityAssessment(
+            budget_compliant=True,
+            retrieval_evidence_present=True,
+            has_semantic_memory_sources=True,
+            has_episodic_memory_sources=False,
+            has_working_memory_sources=True,
+            has_chat_history_sources=True,
+            has_tool_result_sources=True,
+            context_source_profile_changes=2,
+            assemblies_total=3,
+            messages_total=12,
+            estimated_tokens_total=900,
+            estimated_tokens_max=400,
+            minimum_estimated_remaining_after_context=128,
+            source_counts={
+                "retrieval": 5,
+                "semantic_memory": 2,
+                "working_memory": 1,
+                "chat_history": 3,
+                "tool_result": 1,
+            },
         ),
     )
 
@@ -261,6 +290,10 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["metrics"]["tool_calls_total"] == 2
     assert body["metrics"]["rag_queries_total"] == 2
     assert body["metrics"]["rag_sources_retrieved_total"] == 5
+    assert body["metrics"]["has_rag_provenance"] is True
+    assert body["metrics"]["has_rag_sources_available"] is True
+    assert body["metrics"]["rag_sources_available_count"] == 5
+    assert body["metrics"]["rag_unique_chunks_count"] == 4
     assert body["metrics"]["grounding_evaluated"] is True
     assert body["metrics"]["grounding_supported"] is True
     assert body["metrics"]["grounding_support_ratio"] == 1.0
@@ -290,6 +323,28 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
         "semantic_method": "llm_judge_v1",
         "evaluator_model": "gpt-4.1-mini",
         "evaluator_provider": "openai",
+    }
+    assert body["context_quality"] == {
+        "budget_compliant": True,
+        "retrieval_evidence_present": True,
+        "has_semantic_memory_sources": True,
+        "has_episodic_memory_sources": False,
+        "has_working_memory_sources": True,
+        "has_chat_history_sources": True,
+        "has_tool_result_sources": True,
+        "context_source_profile_changes": 2,
+        "assemblies_total": 3,
+        "messages_total": 12,
+        "estimated_tokens_total": 900,
+        "estimated_tokens_max": 400,
+        "minimum_estimated_remaining_after_context": 128,
+        "source_counts": {
+            "retrieval": 5,
+            "semantic_memory": 2,
+            "working_memory": 1,
+            "chat_history": 3,
+            "tool_result": 1,
+        },
     }
 
     assert len(service.evaluate_calls) == 1
@@ -574,8 +629,34 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
         assert evaluation["policy"]["min_reranker_score"] == 0.81
         assert evaluation["policy"]["min_grounding_support_ratio"] == 0.88
         assert evaluation["policy"]["require_rag_provenance"] is True
+        assert evaluation["metrics"]["has_rag_provenance"] is True
+        assert evaluation["metrics"]["has_rag_sources_available"] is True
+        assert evaluation["metrics"]["rag_sources_available_count"] == 5
+        assert evaluation["metrics"]["rag_unique_chunks_count"] == 4
         assert evaluation["metrics"]["semantic_grounding_evaluated"] is True
         assert evaluation["metrics"]["semantic_grounding_score"] == 0.93
+        assert evaluation["context_quality"] == {
+            "budget_compliant": True,
+            "retrieval_evidence_present": True,
+            "has_semantic_memory_sources": True,
+            "has_episodic_memory_sources": False,
+            "has_working_memory_sources": True,
+            "has_chat_history_sources": True,
+            "has_tool_result_sources": True,
+            "context_source_profile_changes": 2,
+            "assemblies_total": 3,
+            "messages_total": 12,
+            "estimated_tokens_total": 900,
+            "estimated_tokens_max": 400,
+            "minimum_estimated_remaining_after_context": 128,
+            "source_counts": {
+                "retrieval": 5,
+                "semantic_memory": 2,
+                "working_memory": 1,
+                "chat_history": 3,
+                "tool_result": 1,
+            },
+        }
         assert evaluation["metrics"]["semantic_grounding_passed"] is True
         assert evaluation["metrics"]["semantic_grounding_method"] == ("llm_grounding_judge_v1")
         assert evaluation["metrics"]["semantic_grounding_evaluator_model"] == ("gpt-4.1-mini")

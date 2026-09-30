@@ -30,6 +30,7 @@ from app.control_plane.schemas.agent_evaluation import (
     AgentEvaluationLineageResponse,
     AgentEvaluationMetricsResponse,
     AgentEvaluationDiagnosticsResponse,
+    AgentEvaluationContextQualityResponse,
     AgentGroundingClaimAttributionResponse,
     AgentEvaluationPolicyRequest,
     AgentEvaluationRequest,
@@ -563,6 +564,8 @@ async def evaluate_agent_run(
             rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
             has_final_answer=evaluation.metrics.has_final_answer,
             final_answer_length=evaluation.metrics.final_answer_length,
+            has_rag_provenance=evaluation.metrics.has_rag_provenance,
+            has_rag_sources_available=evaluation.metrics.has_rag_sources_available,
             rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
             rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
             grounding_evaluated=evaluation.metrics.grounding_evaluated,
@@ -619,6 +622,34 @@ async def evaluate_agent_run(
                 evaluator_provider=evaluation.answer_evaluation.evaluator_provider,
             )
             if evaluation.answer_evaluation is not None
+            else None
+        ),
+        context_quality=(
+            AgentEvaluationContextQualityResponse(
+                budget_compliant=evaluation.context_quality.budget_compliant,
+                retrieval_evidence_present=(evaluation.context_quality.retrieval_evidence_present),
+                has_semantic_memory_sources=(
+                    evaluation.context_quality.has_semantic_memory_sources
+                ),
+                has_episodic_memory_sources=(
+                    evaluation.context_quality.has_episodic_memory_sources
+                ),
+                has_working_memory_sources=(evaluation.context_quality.has_working_memory_sources),
+                has_chat_history_sources=(evaluation.context_quality.has_chat_history_sources),
+                has_tool_result_sources=(evaluation.context_quality.has_tool_result_sources),
+                context_source_profile_changes=(
+                    evaluation.context_quality.context_source_profile_changes
+                ),
+                assemblies_total=evaluation.context_quality.assemblies_total,
+                messages_total=evaluation.context_quality.messages_total,
+                estimated_tokens_total=(evaluation.context_quality.estimated_tokens_total),
+                estimated_tokens_max=evaluation.context_quality.estimated_tokens_max,
+                minimum_estimated_remaining_after_context=(
+                    evaluation.context_quality.minimum_estimated_remaining_after_context
+                ),
+                source_counts=dict(evaluation.context_quality.source_counts),
+            )
+            if evaluation.context_quality is not None
             else None
         ),
     )
@@ -751,6 +782,8 @@ async def list_agent_run_evaluations(
                     rag_queries_total=evaluation.metrics.rag_queries_total,
                     rag_sources_retrieved_total=evaluation.metrics.rag_sources_retrieved_total,
                     has_final_answer=evaluation.metrics.has_final_answer,
+                    has_rag_provenance=evaluation.metrics.has_rag_provenance,
+                    has_rag_sources_available=evaluation.metrics.has_rag_sources_available,
                     final_answer_length=evaluation.metrics.final_answer_length,
                     rag_sources_available_count=evaluation.metrics.rag_sources_available_count,
                     rag_unique_chunks_count=evaluation.metrics.rag_unique_chunks_count,
@@ -808,6 +841,42 @@ async def list_agent_run_evaluations(
                         evaluator_provider=evaluation.answer_evaluation.evaluator_provider,
                     )
                     if evaluation.answer_evaluation is not None
+                    else None
+                ),
+                context_quality=(
+                    AgentEvaluationContextQualityResponse(
+                        budget_compliant=evaluation.context_quality.budget_compliant,
+                        retrieval_evidence_present=(
+                            evaluation.context_quality.retrieval_evidence_present
+                        ),
+                        has_semantic_memory_sources=(
+                            evaluation.context_quality.has_semantic_memory_sources
+                        ),
+                        has_episodic_memory_sources=(
+                            evaluation.context_quality.has_episodic_memory_sources
+                        ),
+                        has_working_memory_sources=(
+                            evaluation.context_quality.has_working_memory_sources
+                        ),
+                        has_chat_history_sources=(
+                            evaluation.context_quality.has_chat_history_sources
+                        ),
+                        has_tool_result_sources=(
+                            evaluation.context_quality.has_tool_result_sources
+                        ),
+                        context_source_profile_changes=(
+                            evaluation.context_quality.context_source_profile_changes
+                        ),
+                        assemblies_total=evaluation.context_quality.assemblies_total,
+                        messages_total=evaluation.context_quality.messages_total,
+                        estimated_tokens_total=(evaluation.context_quality.estimated_tokens_total),
+                        estimated_tokens_max=evaluation.context_quality.estimated_tokens_max,
+                        minimum_estimated_remaining_after_context=(
+                            evaluation.context_quality.minimum_estimated_remaining_after_context
+                        ),
+                        source_counts=dict(evaluation.context_quality.source_counts),
+                    )
+                    if evaluation.context_quality is not None
                     else None
                 ),
             )

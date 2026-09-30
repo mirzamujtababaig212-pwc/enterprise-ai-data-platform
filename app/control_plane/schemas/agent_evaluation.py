@@ -73,6 +73,8 @@ class AgentEvaluationMetricsResponse(BaseModel):
     rag_sources_retrieved_total: int
     has_final_answer: bool
     final_answer_length: int
+    has_rag_provenance: bool
+    has_rag_sources_available: bool
     rag_sources_available_count: int
     rag_unique_chunks_count: int
     grounding_evaluated: bool
@@ -119,6 +121,23 @@ class AgentEvaluationDiagnosticsResponse(BaseModel):
     grounding_attributions: list[AgentGroundingClaimAttributionResponse]
 
 
+class AgentEvaluationContextQualityResponse(BaseModel):
+    budget_compliant: bool | None
+    retrieval_evidence_present: bool | None
+    has_semantic_memory_sources: bool | None
+    has_episodic_memory_sources: bool | None
+    has_working_memory_sources: bool | None
+    has_chat_history_sources: bool | None
+    has_tool_result_sources: bool | None
+    context_source_profile_changes: int
+    assemblies_total: int
+    messages_total: int
+    estimated_tokens_total: int
+    estimated_tokens_max: int
+    minimum_estimated_remaining_after_context: int | None = None
+    source_counts: dict[str, int]
+
+
 class AgentEvaluationRunResponse(BaseModel):
     evaluation_run_id: str
     created_at: datetime
@@ -128,6 +147,7 @@ class AgentEvaluationRunResponse(BaseModel):
     policy: AgentEvaluationPolicyRequest
     quality_gate: AgentEvaluationQualityGateResponse
     answer_evaluation: AgentAnswerEvaluationResponse | None = None
+    context_quality: AgentEvaluationContextQualityResponse | None = None
 
 
 class AgentEvaluationRunListResponse(BaseModel):
