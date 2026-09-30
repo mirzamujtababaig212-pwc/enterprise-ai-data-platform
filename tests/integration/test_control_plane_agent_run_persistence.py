@@ -152,6 +152,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "evaluated": True,
             "exact_match": True,
             "normalization": "whitespace_casefold",
+            "semantic_evaluated": False,
+            "semantic_score": None,
+            "semantic_passed": None,
+            "semantic_method": None,
+            "evaluator_model": None,
+            "evaluator_provider": None,
         }
 
         evaluation_run_id = evaluation_payload["evaluation_run_id"]
@@ -208,6 +214,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "evaluated": True,
                 "exact_match": True,
                 "normalization": "whitespace_casefold",
+                "semantic_evaluated": False,
+                "semantic_score": None,
+                "semantic_passed": None,
+                "semantic_method": None,
+                "evaluator_model": None,
+                "evaluator_provider": None,
             }
 
         list_response = client.get(

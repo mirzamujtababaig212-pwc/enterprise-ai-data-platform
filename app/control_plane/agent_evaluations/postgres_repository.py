@@ -272,6 +272,15 @@ class PostgreSQLAgentEvaluationRunsRepository:
                         "normalization",
                         "whitespace_casefold",
                     ),
+                    semantic_evaluated=answer_evaluation_data.get(
+                        "semantic_evaluated",
+                        False,
+                    ),
+                    semantic_score=answer_evaluation_data.get("semantic_score"),
+                    semantic_passed=answer_evaluation_data.get("semantic_passed"),
+                    semantic_method=answer_evaluation_data.get("semantic_method"),
+                    evaluator_model=answer_evaluation_data.get("evaluator_model"),
+                    evaluator_provider=answer_evaluation_data.get("evaluator_provider"),
                 )
                 if answer_evaluation_data is not None
                 else None

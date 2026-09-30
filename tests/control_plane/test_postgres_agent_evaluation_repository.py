@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import (
     AgentContextQualityAssessment,
     AgentEvaluationMetrics,
@@ -272,6 +273,125 @@ def test_get_legacy_run_without_grounding_diagnostics_preserves_compatibility():
         assert restored.metrics.grounding_supported_sources_total == 0
         assert restored.metrics.grounding_source_candidates_total == 0
         assert restored.metrics.grounding_method is None
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_save_and_get_round_trip_preserves_semantic_answer_evaluation():
+    repository, engine = _repository()
+
+    try:
+        run = AgentEvaluationRun(
+            evaluation_run_id="evaluation-semantic-answer",
+            created_at=datetime(2026, 9, 28, 12, 0, tzinfo=UTC),
+            lineage=AgentEvaluationLineage(
+                evaluated_run_id="run-semantic-answer",
+                agent_name="vehicle-agent",
+                agent_version="1.2.3",
+                tenant_id="tenant-acme",
+            ),
+            metrics=_run().metrics,
+            policy=_run().policy,
+            quality_gate=_run().quality_gate,
+            answer_evaluation=AgentAnswerEvaluation(
+                evaluated=True,
+                exact_match=True,
+                normalization="whitespace_casefold",
+                semantic_evaluated=True,
+                semantic_score=0.92,
+                semantic_passed=True,
+                semantic_method="llm_judge_v1",
+                evaluator_model="gpt-4.1-mini",
+                evaluator_provider="openai",
+            ),
+        )
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+        assert record is not None
+        assert record.answer_evaluation == run.answer_evaluation.as_dict()
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.answer_evaluation == run.answer_evaluation
+        assert restored.answer_evaluation is not None
+        assert restored.answer_evaluation.semantic_evaluated is True
+        assert restored.answer_evaluation.semantic_score == 0.92
+        assert restored.answer_evaluation.semantic_passed is True
+        assert restored.answer_evaluation.semantic_method == "llm_judge_v1"
+        assert restored.answer_evaluation.evaluator_model == "gpt-4.1-mini"
+        assert restored.answer_evaluation.evaluator_provider == "openai"
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_get_legacy_answer_evaluation_preserves_compatibility():
+    repository, engine = _repository()
+
+    try:
+        run = _run("legacy-answer-evaluation")
+
+        run = AgentEvaluationRun(
+            evaluation_run_id=run.evaluation_run_id,
+            created_at=run.created_at,
+            lineage=run.lineage,
+            metrics=run.metrics,
+            policy=run.policy,
+            quality_gate=run.quality_gate,
+            answer_evaluation=AgentAnswerEvaluation(
+                evaluated=True,
+                exact_match=True,
+            ),
+            context_quality=run.context_quality,
+        )
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+
+        assert record is not None
+
+        legacy_answer_evaluation = dict(record.answer_evaluation)
+        for key in (
+            "semantic_evaluated",
+            "semantic_score",
+            "semantic_passed",
+            "semantic_method",
+            "evaluator_model",
+            "evaluator_provider",
+        ):
+            legacy_answer_evaluation.pop(key, None)
+
+        record.answer_evaluation = legacy_answer_evaluation
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.answer_evaluation is not None
+        assert restored.answer_evaluation.evaluated is True
+        assert restored.answer_evaluation.exact_match is True
+        assert restored.answer_evaluation.normalization == "whitespace_casefold"
+        assert restored.answer_evaluation.semantic_evaluated is False
+        assert restored.answer_evaluation.semantic_score is None
+        assert restored.answer_evaluation.semantic_passed is None
+        assert restored.answer_evaluation.semantic_method is None
+        assert restored.answer_evaluation.evaluator_model is None
+        assert restored.answer_evaluation.evaluator_provider is None
     finally:
         repository.close()
         engine.dispose()

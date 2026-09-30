@@ -85,6 +85,12 @@ class AgentAnswerEvaluationResponse(BaseModel):
     evaluated: bool
     exact_match: bool | None
     normalization: str
+    semantic_evaluated: bool = False
+    semantic_score: float | None = None
+    semantic_passed: bool | None = None
+    semantic_method: str | None = None
+    evaluator_model: str | None = None
+    evaluator_provider: str | None = None
 
 
 class AgentEvaluationRunResponse(BaseModel):

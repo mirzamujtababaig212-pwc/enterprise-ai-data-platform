@@ -591,6 +591,12 @@ async def evaluate_agent_run(
                 evaluated=evaluation.answer_evaluation.evaluated,
                 exact_match=evaluation.answer_evaluation.exact_match,
                 normalization=evaluation.answer_evaluation.normalization,
+                semantic_evaluated=evaluation.answer_evaluation.semantic_evaluated,
+                semantic_score=evaluation.answer_evaluation.semantic_score,
+                semantic_passed=evaluation.answer_evaluation.semantic_passed,
+                semantic_method=evaluation.answer_evaluation.semantic_method,
+                evaluator_model=evaluation.answer_evaluation.evaluator_model,
+                evaluator_provider=evaluation.answer_evaluation.evaluator_provider,
             )
             if evaluation.answer_evaluation is not None
             else None
@@ -702,6 +708,12 @@ async def list_agent_run_evaluations(
                         evaluated=evaluation.answer_evaluation.evaluated,
                         exact_match=evaluation.answer_evaluation.exact_match,
                         normalization=evaluation.answer_evaluation.normalization,
+                        semantic_evaluated=evaluation.answer_evaluation.semantic_evaluated,
+                        semantic_score=evaluation.answer_evaluation.semantic_score,
+                        semantic_passed=evaluation.answer_evaluation.semantic_passed,
+                        semantic_method=evaluation.answer_evaluation.semantic_method,
+                        evaluator_model=evaluation.answer_evaluation.evaluator_model,
+                        evaluator_provider=evaluation.answer_evaluation.evaluator_provider,
                     )
                     if evaluation.answer_evaluation is not None
                     else None
