@@ -222,3 +222,65 @@ def test_agent_run_rejects_empty_agent_name() -> None:
 
 def test_agent_run_repository_protocol_is_importable() -> None:
     assert AgentRunRepository is not None
+
+
+def test_agent_run_accepts_root_run_hierarchy() -> None:
+    run = make_run(
+        run_id="root-1",
+        root_run_id="root-1",
+    )
+
+    assert run.root_run_id == "root-1"
+    assert run.parent_run_id is None
+    assert run.parent_step_id is None
+    assert run.causation_id is None
+
+
+def test_agent_run_accepts_child_hierarchy() -> None:
+    run = make_run(
+        run_id="child-1",
+        root_run_id="root-1",
+        parent_run_id="parent-1",
+        parent_step_id="delegate-1",
+        causation_id="cause-1",
+    )
+
+    assert run.root_run_id == "root-1"
+    assert run.parent_run_id == "parent-1"
+    assert run.parent_step_id == "delegate-1"
+    assert run.causation_id == "cause-1"
+
+
+def test_agent_run_rejects_root_run_with_different_root_id() -> None:
+    with pytest.raises(
+        ValueError,
+        match="root agent runs must use their own run_id",
+    ):
+        make_run(
+            run_id="run-1",
+            root_run_id="different-root",
+        )
+
+
+def test_agent_run_rejects_root_run_with_parent_step() -> None:
+    with pytest.raises(
+        ValueError,
+        match="root agent runs cannot specify parent_step_id",
+    ):
+        make_run(
+            run_id="run-1",
+            root_run_id="run-1",
+            parent_step_id="delegate-1",
+        )
+
+
+def test_agent_run_rejects_child_without_parent_step() -> None:
+    with pytest.raises(
+        ValueError,
+        match="child agent runs must specify parent_step_id",
+    ):
+        make_run(
+            run_id="child-1",
+            root_run_id="root-1",
+            parent_run_id="parent-1",
+        )

@@ -29,6 +29,10 @@ class PostgreSQLAgentRunRepository:
         record = AgentRunRecord(
             run_id=run.run_id,
             agent_name=run.agent_name,
+            root_run_id=run.root_run_id,
+            parent_run_id=run.parent_run_id,
+            parent_step_id=run.parent_step_id,
+            causation_id=run.causation_id,
             session_id=run.session_id,
             user_id=run.user_id,
             principal=run.principal,
@@ -139,6 +143,10 @@ class PostgreSQLAgentRunRepository:
             raise AgentRunNotFoundError(f"agent run not found: {run.run_id}")
 
         record.agent_name = run.agent_name
+        record.root_run_id = run.root_run_id
+        record.parent_run_id = run.parent_run_id
+        record.parent_step_id = run.parent_step_id
+        record.causation_id = run.causation_id
         record.session_id = run.session_id
         record.user_id = run.user_id
         record.principal = run.principal
@@ -675,6 +683,10 @@ class PostgreSQLAgentRunRepository:
         return AgentRun(
             run_id=record.run_id,
             agent_name=record.agent_name,
+            root_run_id=record.root_run_id,
+            parent_run_id=record.parent_run_id,
+            parent_step_id=record.parent_step_id,
+            causation_id=record.causation_id,
             session_id=record.session_id,
             user_id=record.user_id,
             principal=record.principal,

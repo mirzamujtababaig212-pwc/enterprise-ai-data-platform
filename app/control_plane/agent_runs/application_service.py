@@ -372,9 +372,12 @@ class AgentRunApplicationService:
                     request=effective_request,
                 )
 
+        run_id = str(uuid4())
+
         run = AgentRun(
-            run_id=str(uuid4()),
+            run_id=run_id,
             agent_name=agent_name,
+            root_run_id=run_id,
             session_id=effective_request.session_id,
             user_id=effective_request.user_id,
             principal=effective_request.principal,

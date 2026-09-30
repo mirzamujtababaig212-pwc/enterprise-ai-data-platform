@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
@@ -239,11 +240,52 @@ class AgentRunRecord(Base):
             "idempotency_key",
             name="uq_agent_runs_user_id_idempotency_key",
         ),
+        ForeignKeyConstraint(
+            ["root_run_id"],
+            ["agent_runs.run_id"],
+            name="fk_agent_runs_root_run_id",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["parent_run_id"],
+            ["agent_runs.run_id"],
+            name="fk_agent_runs_parent_run_id",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["parent_run_id", "parent_step_id"],
+            ["agent_run_steps.run_id", "agent_run_steps.step_id"],
+            name="fk_agent_runs_parent_step",
+            ondelete="RESTRICT",
+        ),
     )
 
     run_id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,
+    )
+
+    root_run_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True,
+    )
+
+    parent_run_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
+
+    parent_step_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    causation_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
     )
 
     agent_name: Mapped[str] = mapped_column(

@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.control_plane.agent_runs.exceptions import (
     InvalidAgentRunTransitionError,
@@ -65,6 +65,13 @@ class AgentRun(BaseModel):
     run_id: str = Field(min_length=1)
     agent_name: str = Field(min_length=1)
 
+    # Multi-agent execution hierarchy. A root run points to itself; a child
+    # run points to the root and to the parent run/step that spawned it.
+    root_run_id: str | None = None
+    parent_run_id: str | None = None
+    parent_step_id: str | None = None
+    causation_id: str | None = None
+
     session_id: str | None = None
     user_id: str | None = None
     principal: str | None = None
@@ -89,6 +96,23 @@ class AgentRun(BaseModel):
     output: Any | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     request_snapshot: AgentRunRequestSnapshot | None = None
+
+    @model_validator(mode="after")
+    def validate_hierarchy(self) -> "AgentRun":
+        # Runs created without explicit hierarchy metadata are root runs.
+        if self.root_run_id is None:
+            self.root_run_id = self.run_id
+
+        if self.parent_run_id is None:
+            if self.root_run_id != self.run_id:
+                raise ValueError("root agent runs must use their own run_id as root_run_id")
+
+            if self.parent_step_id is not None:
+                raise ValueError("root agent runs cannot specify parent_step_id")
+        elif self.parent_step_id is None:
+            raise ValueError("child agent runs must specify parent_step_id")
+
+        return self
 
     def transition_to(self, status: AgentRunStatus) -> "AgentRun":
         allowed_statuses = _ALLOWED_AGENT_RUN_TRANSITIONS[self.status]

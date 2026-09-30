@@ -49,6 +49,10 @@ def make_run(
     *,
     run_id: str = "run-1",
     agent_name: str = "vehicle-agent",
+    root_run_id: str | None = None,
+    parent_run_id: str | None = None,
+    parent_step_id: str | None = None,
+    causation_id: str | None = None,
     session_id: str | None = "session-1",
     user_id: str | None = "user-1",
     principal: str | None = None,
@@ -69,6 +73,10 @@ def make_run(
     return AgentRun(
         run_id=run_id,
         agent_name=agent_name,
+        root_run_id=root_run_id,
+        parent_run_id=parent_run_id,
+        parent_step_id=parent_step_id,
+        causation_id=causation_id,
         session_id=session_id,
         user_id=user_id,
         principal=principal,
@@ -2520,3 +2528,22 @@ def test_multiple_null_idempotency_keys_are_allowed(repository) -> None:
 
     assert repository.get(first.run_id) == first
     assert repository.get(second.run_id) == second
+
+
+def test_agent_run_hierarchy_round_trip(repository) -> None:
+    run = make_run(
+        run_id="child-run-1",
+        root_run_id="root-run-1",
+        parent_run_id="parent-run-1",
+        parent_step_id="delegate-specialist",
+        causation_id="causation-123",
+    )
+
+    repository.create(run)
+    restored = repository.get(run.run_id)
+
+    assert restored is not None
+    assert restored.root_run_id == "root-run-1"
+    assert restored.parent_run_id == "parent-run-1"
+    assert restored.parent_step_id == "delegate-specialist"
+    assert restored.causation_id == "causation-123"
