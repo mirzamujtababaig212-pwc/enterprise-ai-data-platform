@@ -81,6 +81,12 @@ def _run(
             grounding_supported_sources_total=2,
             grounding_source_candidates_total=5,
             grounding_method="lexical_sentence_support_v1",
+            semantic_grounding_evaluated=True,
+            semantic_grounding_score=0.93,
+            semantic_grounding_passed=True,
+            semantic_grounding_method="llm_grounding_judge_v1",
+            semantic_grounding_evaluator_model="gpt-4.1-mini",
+            semantic_grounding_evaluator_provider="openai",
         ),
         context_quality=(
             AgentContextQualityAssessment(
@@ -173,6 +179,12 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
             == run.metrics.grounding_source_candidates_total
         )
         assert restored.metrics.grounding_method == run.metrics.grounding_method
+        assert restored.metrics.semantic_grounding_evaluated is True
+        assert restored.metrics.semantic_grounding_score == 0.93
+        assert restored.metrics.semantic_grounding_passed is True
+        assert restored.metrics.semantic_grounding_method == "llm_grounding_judge_v1"
+        assert restored.metrics.semantic_grounding_evaluator_model == "gpt-4.1-mini"
+        assert restored.metrics.semantic_grounding_evaluator_provider == "openai"
         assert restored.policy.policy_id == run.policy.policy_id
         assert restored.policy.policy_version == run.policy.policy_version
     finally:
@@ -461,6 +473,50 @@ def test_get_legacy_run_without_context_quality_preserves_compatibility():
 
         assert restored is not None
         assert restored.context_quality is None
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_get_legacy_run_without_semantic_grounding_diagnostics_preserves_compatibility():
+    repository, engine = _repository()
+
+    try:
+        run = _run("legacy-semantic-grounding-diagnostics")
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+
+        assert record is not None
+
+        legacy_metrics = dict(record.metrics)
+        for key in (
+            "semantic_grounding_evaluated",
+            "semantic_grounding_score",
+            "semantic_grounding_passed",
+            "semantic_grounding_method",
+            "semantic_grounding_evaluator_model",
+            "semantic_grounding_evaluator_provider",
+        ):
+            legacy_metrics.pop(key, None)
+
+        record.metrics = legacy_metrics
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.metrics.semantic_grounding_evaluated is False
+        assert restored.metrics.semantic_grounding_score is None
+        assert restored.metrics.semantic_grounding_passed is None
+        assert restored.metrics.semantic_grounding_method is None
+        assert restored.metrics.semantic_grounding_evaluator_model is None
+        assert restored.metrics.semantic_grounding_evaluator_provider is None
     finally:
         repository.close()
         engine.dispose()

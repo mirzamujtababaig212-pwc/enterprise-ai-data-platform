@@ -73,6 +73,12 @@ class AgentEvaluationMetricsResponse(BaseModel):
     grounding_supported_sources_total: int
     grounding_source_candidates_total: int
     grounding_method: str | None
+    semantic_grounding_evaluated: bool
+    semantic_grounding_score: float | None
+    semantic_grounding_passed: bool | None
+    semantic_grounding_method: str | None
+    semantic_grounding_evaluator_model: str | None
+    semantic_grounding_evaluator_provider: str | None
     task_completed: bool
 
 

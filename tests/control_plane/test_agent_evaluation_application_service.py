@@ -3,6 +3,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
+from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
+    SemanticGroundingEvaluation,
+)
 from app.control_plane.agent_evaluations.application_service import (
     AgentEvaluationApplicationService,
 )
@@ -77,6 +80,7 @@ def make_run(
     status: AgentRunStatus = AgentRunStatus.COMPLETED,
     tenant_id: str = "tenant-1",
     principal: str = "user-1",
+    output=None,
 ) -> AgentRun:
     started_at = datetime(2026, 9, 24, 10, 0, tzinfo=UTC)
     completed_at = started_at + timedelta(seconds=2)
@@ -90,6 +94,7 @@ def make_run(
         started_at=started_at,
         completed_at=completed_at,
         metadata={"agent_version": "1.2.3"},
+        output=output,
     )
 
 
@@ -100,6 +105,8 @@ def make_step(
     tool_name: str | None = "lookup_vehicle",
     call_id: str | None = "call-1",
     failure_category: str | None = None,
+    output=None,
+    metadata=None,
 ) -> AgentRunStep:
     return AgentRunStep(
         run_id="run-1",
@@ -110,6 +117,8 @@ def make_step(
         tool_name=tool_name,
         call_id=call_id,
         failure_category=failure_category,
+        output=output,
+        metadata=metadata or {},
     )
 
 
@@ -126,11 +135,44 @@ def make_governance_denial() -> AgentExecutionEvent:
     )
 
 
+class FakeSemanticGroundingEvaluator:
+    def __init__(
+        self,
+        *,
+        score: float = 0.93,
+        passed: bool = True,
+    ) -> None:
+        self.score = score
+        self.passed = passed
+        self.calls = []
+
+    async def evaluate(
+        self,
+        *,
+        answer_text: str,
+        source_texts: list[str] | tuple[str, ...],
+    ) -> SemanticGroundingEvaluation:
+        self.calls.append(
+            {
+                "answer_text": answer_text,
+                "source_texts": list(source_texts),
+            }
+        )
+        return SemanticGroundingEvaluation(
+            score=self.score,
+            passed=self.passed,
+            method="llm_grounding_judge_v1",
+            evaluator_model="gpt-4.1-mini",
+            evaluator_provider="openai",
+        )
+
+
 def make_service(
     *,
     run: AgentRun | None = None,
     steps: list[AgentRunStep] | None = None,
     events: list[AgentExecutionEvent] | None = None,
+    semantic_grounding_evaluator=None,
 ):
     run_repository = FakeAgentRunRepository(run or make_run())
     steps_repository = FakeAgentRunStepsRepository(steps or [])
@@ -142,6 +184,7 @@ def make_service(
         agent_run_steps_repository=steps_repository,
         agent_run_events_repository=events_repository,
         evaluation_repository=evaluation_repository,
+        semantic_grounding_evaluator=semantic_grounding_evaluator,
     )
 
     return (
@@ -404,6 +447,143 @@ async def test_evaluate_run_uses_bounded_repository_reads():
 
     assert steps_repository.requested_limit == 10_000
     assert events_repository.requested_limit == 10_000
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_attaches_semantic_grounding_aggregates():
+    semantic_evaluator = FakeSemanticGroundingEvaluator()
+
+    run = make_run(output={"reply": "The vehicle battery temperature reached 42 degrees Celsius."})
+    rag_step = make_step(
+        "step-1",
+        tool_name="rag.search",
+        call_id="rag-call-1",
+        output={
+            "results": [
+                {
+                    "chunk_id": "chunk-1",
+                    "content": (
+                        "Vehicle V001 telemetry shows the battery temperature "
+                        "reached 42 degrees Celsius."
+                    ),
+                },
+                {
+                    "chunk_id": "chunk-2",
+                    "content": "Vehicle V001 telemetry was collected in September.",
+                },
+            ]
+        },
+    )
+
+    service, _, _, _, repository = make_service(
+        run=run,
+        steps=[rag_step],
+        semantic_grounding_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert semantic_evaluator.calls == [
+        {
+            "answer_text": ("The vehicle battery temperature reached 42 degrees Celsius."),
+            "source_texts": [
+                (
+                    "Vehicle V001 telemetry shows the battery temperature "
+                    "reached 42 degrees Celsius."
+                ),
+                "Vehicle V001 telemetry was collected in September.",
+            ],
+        }
+    ]
+
+    assert result.metrics.semantic_grounding_evaluated is True
+    assert result.metrics.semantic_grounding_score == 0.93
+    assert result.metrics.semantic_grounding_passed is True
+    assert result.metrics.semantic_grounding_method == "llm_grounding_judge_v1"
+    assert result.metrics.semantic_grounding_evaluator_model == "gpt-4.1-mini"
+    assert result.metrics.semantic_grounding_evaluator_provider == "openai"
+
+    restored = repository.get(result.evaluation_run_id)
+    assert restored == result
+
+
+@pytest.mark.asyncio
+async def test_semantic_grounding_does_not_change_deterministic_quality_gate():
+    semantic_evaluator = FakeSemanticGroundingEvaluator(
+        score=0.20,
+        passed=False,
+    )
+
+    run = make_run(output={"reply": "The vehicle battery temperature reached 99 degrees Celsius."})
+    rag_step = make_step(
+        "step-1",
+        tool_name="rag.search",
+        call_id="rag-call-1",
+        output={
+            "results": [
+                {
+                    "chunk_id": "chunk-1",
+                    "content": (
+                        "Vehicle V001 telemetry shows the battery temperature "
+                        "reached 42 degrees Celsius."
+                    ),
+                }
+            ]
+        },
+    )
+
+    service, _, _, _, _ = make_service(
+        run=run,
+        steps=[rag_step],
+        semantic_grounding_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert result.metrics.semantic_grounding_evaluated is True
+    assert result.metrics.semantic_grounding_score == 0.20
+    assert result.metrics.semantic_grounding_passed is False
+
+    # Semantic grounding is observational only; the existing deterministic
+    # quality gate remains authoritative.
+    assert result.quality_gate.passed is True
+    assert result.quality_gate.violations == ()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_leaves_semantic_grounding_unset_without_answer_or_sources():
+    semantic_evaluator = FakeSemanticGroundingEvaluator()
+
+    service, _, _, _, _ = make_service(
+        run=make_run(output={"reply": "An answer exists, but no RAG source exists."}),
+        steps=[],
+        semantic_grounding_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert semantic_evaluator.calls == []
+    assert result.metrics.semantic_grounding_evaluated is False
+    assert result.metrics.semantic_grounding_score is None
+    assert result.metrics.semantic_grounding_passed is None
+    assert result.metrics.semantic_grounding_method is None
+    assert result.metrics.semantic_grounding_evaluator_model is None
+    assert result.metrics.semantic_grounding_evaluator_provider is None
 
 
 @pytest.mark.asyncio

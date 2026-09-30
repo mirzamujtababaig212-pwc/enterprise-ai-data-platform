@@ -234,6 +234,25 @@ class PostgreSQLAgentEvaluationRunsRepository:
                     0,
                 ),
                 grounding_method=metrics_data.get("grounding_method"),
+                semantic_grounding_evaluated=metrics_data.get(
+                    "semantic_grounding_evaluated",
+                    False,
+                ),
+                semantic_grounding_score=metrics_data.get(
+                    "semantic_grounding_score",
+                ),
+                semantic_grounding_passed=metrics_data.get(
+                    "semantic_grounding_passed",
+                ),
+                semantic_grounding_method=metrics_data.get(
+                    "semantic_grounding_method",
+                ),
+                semantic_grounding_evaluator_model=metrics_data.get(
+                    "semantic_grounding_evaluator_model",
+                ),
+                semantic_grounding_evaluator_provider=metrics_data.get(
+                    "semantic_grounding_evaluator_provider",
+                ),
                 task_completed=metrics_data["task_completed"],
             ),
             policy=AgentEvaluationPolicy(

@@ -6,6 +6,7 @@ from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluator
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
 from ai_platform.agents.evaluation.models import (
     AgentContextQualityAssessment,
+    AgentEvaluationMetrics,
     AgentRunEvidence,
 )
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
@@ -40,6 +41,161 @@ def _evidence(**overrides) -> AgentRunEvidence:
     }
     values.update(overrides)
     return AgentRunEvidence(**values)
+
+
+def _metrics(**overrides) -> AgentEvaluationMetrics:
+    values = {
+        "execution_time_ms": 100.0,
+        "steps_total": 3,
+        "tool_calls_total": 2,
+        "tool_calls_successful": 2,
+        "tool_calls_failed": 0,
+        "invalid_tool_calls": 0,
+        "governance_denials": 0,
+        "task_completed": True,
+    }
+    values.update(overrides)
+    return AgentEvaluationMetrics(**values)
+
+
+def test_semantic_grounding_metrics_default_to_unset():
+    metrics = _metrics()
+
+    assert metrics.semantic_grounding_evaluated is False
+    assert metrics.semantic_grounding_score is None
+    assert metrics.semantic_grounding_passed is None
+    assert metrics.semantic_grounding_method is None
+    assert metrics.semantic_grounding_evaluator_model is None
+    assert metrics.semantic_grounding_evaluator_provider is None
+
+
+def test_semantic_grounding_metrics_serialize_all_fields():
+    metrics = _metrics(
+        semantic_grounding_evaluated=True,
+        semantic_grounding_score=0.93,
+        semantic_grounding_passed=True,
+        semantic_grounding_method="llm_grounding_judge_v1",
+        semantic_grounding_evaluator_model="gpt-4.1-mini",
+        semantic_grounding_evaluator_provider="openai",
+    )
+
+    serialized = metrics.as_dict()
+
+    assert serialized["semantic_grounding_evaluated"] is True
+    assert serialized["semantic_grounding_score"] == 0.93
+    assert serialized["semantic_grounding_passed"] is True
+    assert serialized["semantic_grounding_method"] == "llm_grounding_judge_v1"
+    assert serialized["semantic_grounding_evaluator_model"] == "gpt-4.1-mini"
+    assert serialized["semantic_grounding_evaluator_provider"] == "openai"
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("semantic_grounding_score", 0.93),
+        ("semantic_grounding_passed", True),
+        ("semantic_grounding_method", "llm_grounding_judge_v1"),
+        ("semantic_grounding_evaluator_model", "gpt-4.1-mini"),
+        ("semantic_grounding_evaluator_provider", "openai"),
+    ],
+)
+def test_semantic_grounding_detail_fields_require_evaluation(
+    field_name,
+    value,
+):
+    with pytest.raises(
+        ValueError,
+        match="semantic grounding fields must be unset",
+    ):
+        _metrics(**{field_name: value})
+
+
+def test_semantic_grounding_evaluated_requires_score():
+    with pytest.raises(
+        ValueError,
+        match="semantic_grounding_score is required",
+    ):
+        _metrics(
+            semantic_grounding_evaluated=True,
+            semantic_grounding_passed=True,
+            semantic_grounding_method="llm_grounding_judge_v1",
+            semantic_grounding_evaluator_model="gpt-4.1-mini",
+            semantic_grounding_evaluator_provider="openai",
+        )
+
+
+@pytest.mark.parametrize("score", [-0.01, 1.01])
+def test_semantic_grounding_score_must_be_between_zero_and_one(score):
+    with pytest.raises(
+        ValueError,
+        match="semantic_grounding_score must be between 0.0 and 1.0",
+    ):
+        _metrics(
+            semantic_grounding_evaluated=True,
+            semantic_grounding_score=score,
+            semantic_grounding_passed=True,
+            semantic_grounding_method="llm_grounding_judge_v1",
+            semantic_grounding_evaluator_model="gpt-4.1-mini",
+            semantic_grounding_evaluator_provider="openai",
+        )
+
+
+def test_semantic_grounding_evaluated_requires_passed():
+    with pytest.raises(
+        ValueError,
+        match="semantic_grounding_passed is required",
+    ):
+        _metrics(
+            semantic_grounding_evaluated=True,
+            semantic_grounding_score=0.93,
+            semantic_grounding_method="llm_grounding_judge_v1",
+            semantic_grounding_evaluator_model="gpt-4.1-mini",
+            semantic_grounding_evaluator_provider="openai",
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "semantic_grounding_method",
+        "semantic_grounding_evaluator_model",
+        "semantic_grounding_evaluator_provider",
+    ],
+)
+def test_semantic_grounding_evaluated_requires_non_empty_metadata(field_name):
+    with pytest.raises(
+        ValueError,
+        match=field_name,
+    ):
+        _metrics(
+            semantic_grounding_evaluated=True,
+            semantic_grounding_score=0.93,
+            semantic_grounding_passed=True,
+            semantic_grounding_method=(
+                "" if field_name == "semantic_grounding_method" else "llm_grounding_judge_v1"
+            ),
+            semantic_grounding_evaluator_model=(
+                "" if field_name == "semantic_grounding_evaluator_model" else "gpt-4.1-mini"
+            ),
+            semantic_grounding_evaluator_provider=(
+                "" if field_name == "semantic_grounding_evaluator_provider" else "openai"
+            ),
+        )
+
+
+def test_semantic_grounding_metrics_accept_valid_evaluated_result():
+    metrics = _metrics(
+        semantic_grounding_evaluated=True,
+        semantic_grounding_score=0.80,
+        semantic_grounding_passed=True,
+        semantic_grounding_method="llm_grounding_judge_v1",
+        semantic_grounding_evaluator_model="gpt-4.1-mini",
+        semantic_grounding_evaluator_provider="openai",
+    )
+
+    assert metrics.semantic_grounding_evaluated is True
+    assert metrics.semantic_grounding_score == 0.80
+    assert metrics.semantic_grounding_passed is True
 
 
 def test_evaluator_produces_deterministic_metrics_and_passes_gate():

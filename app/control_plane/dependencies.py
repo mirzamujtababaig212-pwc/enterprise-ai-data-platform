@@ -15,6 +15,9 @@ from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.evaluation.semantic_answer_evaluator import (
     SemanticAnswerEvaluator,
 )
+from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
+    SemanticGroundingEvaluator,
+)
 from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.llm_gateway.config.settings import settings
 from ai_platform.llm_gateway.routing.router import Router
@@ -513,6 +516,10 @@ async def get_agent_evaluation_application_service(
         agent_run_events_repository=PostgreSQLAgentRunEventsRepository(db),
         evaluation_repository=PostgreSQLAgentEvaluationRunsRepository(db),
         semantic_evaluator=SemanticAnswerEvaluator(
+            router=get_llm_router(),
+            model=settings.DEFAULT_CHAT_MODEL,
+        ),
+        semantic_grounding_evaluator=SemanticGroundingEvaluator(
             router=get_llm_router(),
             model=settings.DEFAULT_CHAT_MODEL,
         ),

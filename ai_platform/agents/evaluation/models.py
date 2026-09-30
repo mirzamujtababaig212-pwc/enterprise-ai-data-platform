@@ -167,6 +167,12 @@ class AgentEvaluationMetrics:
     grounding_supported_sources_total: int = 0
     grounding_source_candidates_total: int = 0
     grounding_method: str | None = None
+    semantic_grounding_evaluated: bool = False
+    semantic_grounding_score: float | None = None
+    semantic_grounding_passed: bool | None = None
+    semantic_grounding_method: str | None = None
+    semantic_grounding_evaluator_model: str | None = None
+    semantic_grounding_evaluator_provider: str | None = None
 
     def __post_init__(self) -> None:
         if self.execution_time_ms < 0:
@@ -187,6 +193,48 @@ class AgentEvaluationMetrics:
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
+
+        semantic_grounding_fields = (
+            self.semantic_grounding_score,
+            self.semantic_grounding_passed,
+            self.semantic_grounding_method,
+            self.semantic_grounding_evaluator_model,
+            self.semantic_grounding_evaluator_provider,
+        )
+
+        if not self.semantic_grounding_evaluated:
+            if any(value is not None for value in semantic_grounding_fields):
+                raise ValueError(
+                    "semantic grounding fields must be unset when "
+                    "semantic_grounding_evaluated is False."
+                )
+        else:
+            if self.semantic_grounding_score is None:
+                raise ValueError(
+                    "semantic_grounding_score is required when "
+                    "semantic_grounding_evaluated is True."
+                )
+
+            if not 0.0 <= self.semantic_grounding_score <= 1.0:
+                raise ValueError("semantic_grounding_score must be between 0.0 and 1.0.")
+
+            if self.semantic_grounding_passed is None:
+                raise ValueError(
+                    "semantic_grounding_passed is required when "
+                    "semantic_grounding_evaluated is True."
+                )
+
+            for field_name in (
+                "semantic_grounding_method",
+                "semantic_grounding_evaluator_model",
+                "semantic_grounding_evaluator_provider",
+            ):
+                value = getattr(self, field_name)
+                if value is None or not value.strip():
+                    raise ValueError(
+                        f"{field_name} must be non-empty when "
+                        "semantic_grounding_evaluated is True."
+                    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -217,5 +265,11 @@ class AgentEvaluationMetrics:
             "grounding_supported_sources_total": self.grounding_supported_sources_total,
             "grounding_source_candidates_total": self.grounding_source_candidates_total,
             "grounding_method": self.grounding_method,
+            "semantic_grounding_evaluated": self.semantic_grounding_evaluated,
+            "semantic_grounding_score": self.semantic_grounding_score,
+            "semantic_grounding_passed": self.semantic_grounding_passed,
+            "semantic_grounding_method": self.semantic_grounding_method,
+            "semantic_grounding_evaluator_model": self.semantic_grounding_evaluator_model,
+            "semantic_grounding_evaluator_provider": self.semantic_grounding_evaluator_provider,
             "task_completed": self.task_completed,
         }

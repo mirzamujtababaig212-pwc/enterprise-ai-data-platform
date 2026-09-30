@@ -132,6 +132,12 @@ def make_evaluation(
             grounding_supported_sources_total=2,
             grounding_source_candidates_total=5,
             grounding_method="lexical_sentence_support_v1",
+            semantic_grounding_evaluated=True,
+            semantic_grounding_score=0.93,
+            semantic_grounding_passed=True,
+            semantic_grounding_method="llm_grounding_judge_v1",
+            semantic_grounding_evaluator_model="gpt-4.1-mini",
+            semantic_grounding_evaluator_provider="openai",
         ),
         policy=AgentEvaluationPolicy(
             policy_id=policy_id,
@@ -219,6 +225,12 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["metrics"]["grounding_supported_sources_total"] == 2
     assert body["metrics"]["grounding_source_candidates_total"] == 5
     assert body["metrics"]["grounding_method"] == "lexical_sentence_support_v1"
+    assert body["metrics"]["semantic_grounding_evaluated"] is True
+    assert body["metrics"]["semantic_grounding_score"] == 0.93
+    assert body["metrics"]["semantic_grounding_passed"] is True
+    assert body["metrics"]["semantic_grounding_method"] == "llm_grounding_judge_v1"
+    assert body["metrics"]["semantic_grounding_evaluator_model"] == "gpt-4.1-mini"
+    assert body["metrics"]["semantic_grounding_evaluator_provider"] == "openai"
     assert body["metrics"]["task_completed"] is True
     assert body["policy"]["name"] == "default-agent-quality"
     assert body["quality_gate"]["passed"] is True
@@ -401,6 +413,14 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
         "evaluation-2",
         "evaluation-1",
     ]
+
+    for evaluation in body["evaluations"]:
+        assert evaluation["metrics"]["semantic_grounding_evaluated"] is True
+        assert evaluation["metrics"]["semantic_grounding_score"] == 0.93
+        assert evaluation["metrics"]["semantic_grounding_passed"] is True
+        assert evaluation["metrics"]["semantic_grounding_method"] == ("llm_grounding_judge_v1")
+        assert evaluation["metrics"]["semantic_grounding_evaluator_model"] == ("gpt-4.1-mini")
+        assert evaluation["metrics"]["semantic_grounding_evaluator_provider"] == ("openai")
 
     assert service.list_calls == [
         ("run-1", "tenant-1", "user-1", 2),

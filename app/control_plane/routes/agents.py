@@ -569,6 +569,16 @@ async def evaluate_agent_run(
                 evaluation.metrics.grounding_source_candidates_total
             ),
             grounding_method=evaluation.metrics.grounding_method,
+            semantic_grounding_evaluated=evaluation.metrics.semantic_grounding_evaluated,
+            semantic_grounding_score=evaluation.metrics.semantic_grounding_score,
+            semantic_grounding_passed=evaluation.metrics.semantic_grounding_passed,
+            semantic_grounding_method=evaluation.metrics.semantic_grounding_method,
+            semantic_grounding_evaluator_model=(
+                evaluation.metrics.semantic_grounding_evaluator_model
+            ),
+            semantic_grounding_evaluator_provider=(
+                evaluation.metrics.semantic_grounding_evaluator_provider
+            ),
             task_completed=evaluation.metrics.task_completed,
         ),
         policy=AgentEvaluationPolicyRequest(
@@ -688,6 +698,16 @@ async def list_agent_run_evaluations(
                         evaluation.metrics.grounding_source_candidates_total
                     ),
                     grounding_method=evaluation.metrics.grounding_method,
+                    semantic_grounding_evaluated=evaluation.metrics.semantic_grounding_evaluated,
+                    semantic_grounding_score=evaluation.metrics.semantic_grounding_score,
+                    semantic_grounding_passed=evaluation.metrics.semantic_grounding_passed,
+                    semantic_grounding_method=evaluation.metrics.semantic_grounding_method,
+                    semantic_grounding_evaluator_model=(
+                        evaluation.metrics.semantic_grounding_evaluator_model
+                    ),
+                    semantic_grounding_evaluator_provider=(
+                        evaluation.metrics.semantic_grounding_evaluator_provider
+                    ),
                     task_completed=evaluation.metrics.task_completed,
                 ),
                 policy=AgentEvaluationPolicyRequest(

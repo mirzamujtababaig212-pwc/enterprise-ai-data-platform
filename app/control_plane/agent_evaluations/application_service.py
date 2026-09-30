@@ -8,6 +8,9 @@ from ai_platform.agents.evaluation.evaluator import AgentEvaluator
 from ai_platform.agents.evaluation.semantic_answer_evaluator import (
     SemanticAnswerEvaluator,
 )
+from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
+    SemanticGroundingEvaluator,
+)
 from ai_platform.agents.evaluation.evidence import (
     extract_evidence,
     extract_rag_source_texts,
@@ -38,6 +41,7 @@ class AgentEvaluationApplicationService:
         evaluation_repository: AgentEvaluationRunsRepository,
         evaluator: AgentEvaluator | None = None,
         semantic_evaluator: SemanticAnswerEvaluator | None = None,
+        semantic_grounding_evaluator: SemanticGroundingEvaluator | None = None,
     ) -> None:
         self._agent_run_repository = agent_run_repository
         self._agent_run_steps_repository = agent_run_steps_repository
@@ -45,6 +49,7 @@ class AgentEvaluationApplicationService:
         self._evaluation_repository = evaluation_repository
         self._evaluator = evaluator or AgentEvaluator()
         self._semantic_evaluator = semantic_evaluator
+        self._semantic_grounding_evaluator = semantic_grounding_evaluator
 
     async def evaluate_run(
         self,
@@ -113,17 +118,42 @@ class AgentEvaluationApplicationService:
                 evaluator_provider=semantic_evaluation.evaluator_provider,
             )
 
+        source_texts = extract_rag_source_texts(steps)
+
         grounding_evaluation = self._evaluator.evaluate_grounding(
             evidence,
-            source_texts=extract_rag_source_texts(steps),
+            source_texts=source_texts,
         )
-        context_quality = self._evaluator.evaluate_context(evidence)
+
         metrics, quality_gate = self._evaluator.evaluate_run(
             evidence,
             policy,
             answer_evaluation=answer_evaluation,
             grounding_evaluation=grounding_evaluation,
         )
+
+        if (
+            self._semantic_grounding_evaluator is not None
+            and evidence.final_answer_text is not None
+            and source_texts
+        ):
+            semantic_grounding_evaluation = await self._semantic_grounding_evaluator.evaluate(
+                answer_text=evidence.final_answer_text,
+                source_texts=source_texts,
+            )
+            metrics = replace(
+                metrics,
+                semantic_grounding_evaluated=True,
+                semantic_grounding_score=semantic_grounding_evaluation.score,
+                semantic_grounding_passed=semantic_grounding_evaluation.passed,
+                semantic_grounding_method=semantic_grounding_evaluation.method,
+                semantic_grounding_evaluator_model=(semantic_grounding_evaluation.evaluator_model),
+                semantic_grounding_evaluator_provider=(
+                    semantic_grounding_evaluation.evaluator_provider
+                ),
+            )
+
+        context_quality = self._evaluator.evaluate_context(evidence)
 
         evaluation_run = AgentEvaluationRun(
             evaluation_run_id=str(uuid4()),
