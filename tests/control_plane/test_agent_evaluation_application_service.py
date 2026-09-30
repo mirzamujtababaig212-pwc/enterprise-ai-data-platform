@@ -3,6 +3,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
+from ai_platform.agents.evaluation.semantic_answer_evaluator import (
+    SemanticAnswerEvaluation,
+)
 from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
     SemanticGroundingEvaluation,
 )
@@ -135,6 +138,38 @@ def make_governance_denial() -> AgentExecutionEvent:
     )
 
 
+class FakeSemanticAnswerEvaluator:
+    def __init__(
+        self,
+        *,
+        score: float = 0.94,
+        passed: bool = True,
+    ) -> None:
+        self.score = score
+        self.passed = passed
+        self.calls = []
+
+    async def evaluate(
+        self,
+        *,
+        actual_answer: str,
+        expected_answer: str,
+    ) -> SemanticAnswerEvaluation:
+        self.calls.append(
+            {
+                "actual_answer": actual_answer,
+                "expected_answer": expected_answer,
+            }
+        )
+        return SemanticAnswerEvaluation(
+            score=self.score,
+            passed=self.passed,
+            method="llm_judge_v1",
+            evaluator_model="gpt-4.1-mini",
+            evaluator_provider="openai",
+        )
+
+
 class FakeSemanticGroundingEvaluator:
     def __init__(
         self,
@@ -172,6 +207,7 @@ def make_service(
     run: AgentRun | None = None,
     steps: list[AgentRunStep] | None = None,
     events: list[AgentExecutionEvent] | None = None,
+    semantic_evaluator=None,
     semantic_grounding_evaluator=None,
 ):
     run_repository = FakeAgentRunRepository(run or make_run())
@@ -184,6 +220,7 @@ def make_service(
         agent_run_steps_repository=steps_repository,
         agent_run_events_repository=events_repository,
         evaluation_repository=evaluation_repository,
+        semantic_evaluator=semantic_evaluator,
         semantic_grounding_evaluator=semantic_grounding_evaluator,
     )
 
@@ -205,6 +242,126 @@ def default_policy() -> AgentEvaluationPolicy:
         require_task_completed=True,
         name="default-agent-quality",
     )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_attaches_semantic_answer_evaluation():
+    semantic_evaluator = FakeSemanticAnswerEvaluator()
+
+    run = make_run(
+        output={
+            "reply": "The vehicle is powered by energy stored in a battery.",
+        }
+    )
+
+    service, _, _, _, repository = make_service(
+        run=run,
+        semantic_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+        expected_answer="Electric vehicles are powered by energy stored in batteries.",
+    )
+
+    assert semantic_evaluator.calls == [
+        {
+            "actual_answer": "The vehicle is powered by energy stored in a battery.",
+            "expected_answer": ("Electric vehicles are powered by energy stored in batteries."),
+        }
+    ]
+
+    assert result.answer_evaluation is not None
+    assert result.answer_evaluation.evaluated is True
+    assert result.answer_evaluation.exact_match is False
+    assert result.answer_evaluation.semantic_evaluated is True
+    assert result.answer_evaluation.semantic_score == 0.94
+    assert result.answer_evaluation.semantic_passed is True
+    assert result.answer_evaluation.semantic_method == "llm_judge_v1"
+    assert result.answer_evaluation.evaluator_model == "gpt-4.1-mini"
+    assert result.answer_evaluation.evaluator_provider == "openai"
+
+    restored = repository.get(result.evaluation_run_id)
+    assert restored == result
+    assert restored is not None
+    assert restored.answer_evaluation is not None
+    assert restored.answer_evaluation.semantic_score == 0.94
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_does_not_invoke_semantic_answer_evaluator_without_expected_answer():
+    semantic_evaluator = FakeSemanticAnswerEvaluator()
+
+    service, _, _, _, _ = make_service(
+        run=make_run(
+            output={
+                "reply": "The vehicle is powered by a battery.",
+            }
+        ),
+        semantic_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert semantic_evaluator.calls == []
+    assert result.answer_evaluation is not None
+    assert result.answer_evaluation.evaluated is False
+    assert result.answer_evaluation.exact_match is None
+    assert result.answer_evaluation.semantic_evaluated is False
+    assert result.answer_evaluation.semantic_score is None
+    assert result.answer_evaluation.semantic_passed is None
+
+
+@pytest.mark.asyncio
+async def test_semantic_answer_evaluation_does_not_change_deterministic_quality_gate():
+    semantic_evaluator = FakeSemanticAnswerEvaluator(
+        score=0.95,
+        passed=True,
+    )
+
+    run = make_run(
+        output={
+            "reply": "The vehicle is powered by a battery.",
+        }
+    )
+
+    service, _, _, _, _ = make_service(
+        run=run,
+        semantic_evaluator=semantic_evaluator,
+    )
+
+    policy = AgentEvaluationPolicy(
+        require_task_completed=True,
+        require_answer_match=True,
+        name="exact-answer-quality",
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=policy,
+        expected_answer="The vehicle is powered by hydrogen.",
+    )
+
+    assert result.answer_evaluation is not None
+    assert result.answer_evaluation.exact_match is False
+    assert result.answer_evaluation.semantic_evaluated is True
+    assert result.answer_evaluation.semantic_score == 0.95
+    assert result.answer_evaluation.semantic_passed is True
+
+    # Semantic answer evaluation is observational only.
+    # The deterministic exact-match requirement remains authoritative.
+    assert result.quality_gate.passed is False
+    assert "Final answer did not match the expected answer." in (result.quality_gate.violations)
 
 
 @pytest.mark.asyncio
