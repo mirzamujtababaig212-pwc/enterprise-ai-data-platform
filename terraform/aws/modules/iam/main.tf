@@ -187,7 +187,8 @@ resource "aws_iam_role_policy" "ecs_execution_platform_access" {
         ]
         Resource = [
           var.provider_credentials_secret_arn,
-          var.gateway_api_key_secret_arn
+          var.gateway_api_key_secret_arn,
+          var.rds_master_user_secret_arn
         ]
       },
       {

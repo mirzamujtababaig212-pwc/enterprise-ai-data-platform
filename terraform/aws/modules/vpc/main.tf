@@ -53,3 +53,33 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
+
+
+resource "aws_subnet" "private_db" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index + 10)
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-db-${count.index + 1}"
+    Tier = "private-db"
+  }
+}
+
+resource "aws_route_table" "private_db" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-db-rt"
+  }
+}
+
+resource "aws_route_table_association" "private_db" {
+  count = 2
+
+  subnet_id      = aws_subnet.private_db[count.index].id
+  route_table_id = aws_route_table.private_db.id
+}

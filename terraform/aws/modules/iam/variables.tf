@@ -48,6 +48,11 @@ variable "gateway_api_key_secret_arn" {
   type        = string
 }
 
+variable "rds_master_user_secret_arn" {
+  description = "ARN of the RDS-managed Secrets Manager secret containing the PostgreSQL master password."
+  type        = string
+}
+
 variable "bedrock_model_arns" {
   description = "Bedrock foundation-model ARNs that the gateway ECS task may invoke."
   type        = list(string)

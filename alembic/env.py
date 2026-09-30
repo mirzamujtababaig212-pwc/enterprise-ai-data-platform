@@ -16,7 +16,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-database_host = os.getenv("ALEMBIC_DB_HOST", "localhost")
+database_host = os.getenv("ALEMBIC_DB_HOST", settings.POSTGRES_HOST)
 
 database_url = (
     "postgresql+psycopg2://"

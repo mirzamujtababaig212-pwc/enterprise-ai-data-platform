@@ -22,6 +22,12 @@ variable "alb_security_group_id" {
   type = string
 }
 
+variable "additional_security_group_ids" {
+  description = "Additional security groups attached to the gateway ECS service."
+  type        = list(string)
+  default     = []
+}
+
 variable "target_group_arn" {
   type = string
 }
@@ -78,6 +84,31 @@ variable "default_provider_parameter_arn" {
 
 variable "gateway_api_key_secret_arn" {
   description = "ARN of the gateway API key secret."
+  type        = string
+}
+
+variable "postgres_db" {
+  description = "PostgreSQL database name."
+  type        = string
+}
+
+variable "postgres_user" {
+  description = "PostgreSQL master username."
+  type        = string
+}
+
+variable "postgres_host" {
+  description = "PostgreSQL database endpoint."
+  type        = string
+}
+
+variable "postgres_port" {
+  description = "PostgreSQL database port."
+  type        = number
+}
+
+variable "postgres_password_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing the PostgreSQL password."
   type        = string
 }
 

@@ -113,6 +113,26 @@ resource "aws_ecs_task_definition" "gateway" {
         {
           name  = "OTEL_DEPLOYMENT_ENVIRONMENT"
           value = var.environment
+        },
+
+        {
+          name  = "POSTGRES_DB"
+          value = var.postgres_db
+        },
+
+        {
+          name  = "POSTGRES_USER"
+          value = var.postgres_user
+        },
+
+        {
+          name  = "POSTGRES_HOST"
+          value = var.postgres_host
+        },
+
+        {
+          name  = "POSTGRES_PORT"
+          value = tostring(var.postgres_port)
         }
       ]
 
@@ -140,6 +160,11 @@ resource "aws_ecs_task_definition" "gateway" {
         {
           name      = "API_KEY"
           valueFrom = var.gateway_api_key_secret_arn
+        },
+
+        {
+          name      = "POSTGRES_PASSWORD"
+          valueFrom = "${var.postgres_password_secret_arn}:password::"
         }
       ]
 
@@ -260,9 +285,10 @@ resource "aws_ecs_service" "gateway" {
   network_configuration {
     subnets = var.public_subnet_ids
 
-    security_groups = [
-      aws_security_group.ecs.id
-    ]
+    security_groups = concat(
+      [aws_security_group.ecs.id],
+      var.additional_security_group_ids
+    )
 
     assign_public_ip = true
   }

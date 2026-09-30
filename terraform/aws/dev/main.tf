@@ -46,6 +46,25 @@ module "vpc" {
   vpc_cidr     = "10.20.0.0/16"
 }
 
+resource "aws_security_group" "database_client" {
+  name        = "${var.project_name}-${var.environment}-database-client-sg"
+  description = "Security group for workloads that connect to the Enterprise AI Platform PostgreSQL database"
+  vpc_id      = module.vpc.vpc_id
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+  }
+}
+
 module "iam" {
   source = "../modules/iam"
 
@@ -62,6 +81,7 @@ module "iam" {
 
   provider_credentials_secret_arn = module.secrets.provider_credentials_secret_arn
   gateway_api_key_secret_arn      = module.secrets.gateway_api_key_secret_arn
+  rds_master_user_secret_arn      = module.rds.master_user_secret_arn
   environment_parameter_arn       = module.secrets.environment_parameter_arn
   log_level_parameter_arn         = module.secrets.log_level_parameter_arn
   default_provider_parameter_arn  = module.secrets.default_provider_parameter_arn
@@ -99,6 +119,10 @@ module "ecs" {
   alb_security_group_id = module.alb.alb_security_group_id
   target_group_arn      = module.alb.target_group_arn
 
+  additional_security_group_ids = [
+    aws_security_group.database_client.id
+  ]
+
   execution_role_arn = module.iam.ecs_execution_role_arn
   task_role_arn      = module.iam.ecs_task_role_arn
 
@@ -108,6 +132,11 @@ module "ecs" {
 
   provider_credentials_secret_arn = module.secrets.provider_credentials_secret_arn
   gateway_api_key_secret_arn      = module.secrets.gateway_api_key_secret_arn
+  postgres_db                     = module.rds.db_name
+  postgres_user                   = module.rds.master_username
+  postgres_host                   = module.rds.endpoint
+  postgres_port                   = module.rds.port
+  postgres_password_secret_arn    = module.rds.master_user_secret_arn
   environment_parameter_arn       = module.secrets.environment_parameter_arn
   log_level_parameter_arn         = module.secrets.log_level_parameter_arn
   default_provider_parameter_arn  = module.secrets.default_provider_parameter_arn
@@ -118,6 +147,17 @@ module "ecs" {
   batch_task_role_arn      = module.iam.ecs_batch_task_role_arn
   batch_container_image    = "${module.ecr.repository_url}:aws-batch-merge-20260915-095445"
   batch_data_bucket_name   = data.aws_s3_bucket.enterprise_data.bucket
+}
+
+module "rds" {
+  source = "../modules/rds"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  vpc_id                            = module.vpc.vpc_id
+  private_db_subnet_ids             = module.vpc.private_db_subnet_ids
+  database_client_security_group_id = aws_security_group.database_client.id
 }
 
 module "secrets" {
