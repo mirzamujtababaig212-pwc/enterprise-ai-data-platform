@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from app.control_plane.agent_run_steps.models import (
@@ -132,15 +133,74 @@ def _extract_context_diagnostics(
     )
 
 
-def extract_rag_source_texts(
+@dataclass(frozen=True)
+class RagEvidenceSource:
+    """Transient RAG source evidence used by evaluation.
+
+    Raw source content remains in-memory only. Identity and retrieval metadata
+    are retained so downstream evaluation can attribute answer claims to the
+    exact retrieved source without expanding the persisted evaluation schema.
+    """
+
+    source_index: int
+    content: str
+    chunk_id: str | None = None
+    document_id: str | None = None
+    retrieval_score: float | None = None
+    reranker_score: float | None = None
+
+
+def _extract_rag_source(
+    result: dict[str, Any],
+    source_index: int,
+) -> RagEvidenceSource | None:
+    content = result.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+
+    chunk_id = result.get("chunk_id")
+    if not isinstance(chunk_id, str) or not chunk_id:
+        chunk_id = None
+
+    document_id = result.get("document_id")
+    if not isinstance(document_id, str) or not document_id:
+        document_id = None
+
+    retrieval_score = result.get("retrieval_score")
+    if not isinstance(retrieval_score, (int, float)) or isinstance(retrieval_score, bool):
+        retrieval_score = result.get("score")
+    if not isinstance(retrieval_score, (int, float)) or isinstance(retrieval_score, bool):
+        retrieval_score = None
+    else:
+        retrieval_score = float(retrieval_score)
+
+    reranker_score = result.get("reranker_score")
+    if not isinstance(reranker_score, (int, float)) or isinstance(reranker_score, bool):
+        reranker_score = None
+    else:
+        reranker_score = float(reranker_score)
+
+    return RagEvidenceSource(
+        source_index=source_index,
+        content=content.strip(),
+        chunk_id=chunk_id,
+        document_id=document_id,
+        retrieval_score=retrieval_score,
+        reranker_score=reranker_score,
+    )
+
+
+def extract_rag_evidence_sources(
     steps: list[AgentRunStep],
-) -> list[str]:
-    """Extract raw RAG source text transiently for grounding evaluation.
+) -> list[RagEvidenceSource]:
+    """Extract structured RAG evidence transiently for evaluation.
 
     Source content is intentionally not persisted in AgentRunEvidence or
-    evaluation metrics. It is consumed only by the grounding evaluator.
+    evaluation metrics. The returned objects retain source identity and
+    retrieval metadata so evaluation can later attribute claims to sources.
     """
-    source_texts: list[str] = []
+
+    sources: list[RagEvidenceSource] = []
 
     for step in steps:
         provenance = step.metadata.get("rag_provenance")
@@ -161,11 +221,26 @@ def extract_rag_source_texts(
             if not isinstance(result, dict):
                 continue
 
-            content = result.get("content")
-            if isinstance(content, str) and content.strip():
-                source_texts.append(content.strip())
+            source = _extract_rag_source(
+                result,
+                source_index=len(sources),
+            )
+            if source is not None:
+                sources.append(source)
 
-    return source_texts
+    return sources
+
+
+def extract_rag_source_texts(
+    steps: list[AgentRunStep],
+) -> list[str]:
+    """Extract raw RAG source text transiently for grounding evaluation.
+
+    This compatibility wrapper preserves the existing text-only grounding
+    contract while structured evidence is available to newer consumers.
+    """
+
+    return [source.content for source in extract_rag_evidence_sources(steps)]
 
 
 def extract_evidence(

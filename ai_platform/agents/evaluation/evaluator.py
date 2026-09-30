@@ -4,6 +4,7 @@ from ai_platform.agents.evaluation.answer_evaluation import (
     AgentAnswerEvaluation,
     AgentAnswerEvaluator,
 )
+from ai_platform.agents.evaluation.evidence import RagEvidenceSource
 from ai_platform.agents.evaluation.grounding import (
     AgentGroundingEvaluation,
     AgentGroundingEvaluator,
@@ -90,12 +91,14 @@ class AgentEvaluator:
     def evaluate_grounding(
         evidence: AgentRunEvidence,
         *,
-        source_texts: list[str] | tuple[str, ...],
+        source_texts: list[str] | tuple[str, ...] = (),
+        sources: list[RagEvidenceSource] | tuple[RagEvidenceSource, ...] = (),
     ) -> AgentGroundingEvaluation:
         """Evaluate detectable textual support without an LLM judge."""
         return AgentGroundingEvaluator.evaluate(
             answer_text=evidence.final_answer_text,
             source_texts=source_texts,
+            sources=sources,
         )
 
     @staticmethod

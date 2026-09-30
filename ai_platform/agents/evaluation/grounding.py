@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 GROUNDING_METHOD = "lexical_sentence_support_v1"
 
@@ -100,6 +100,17 @@ _STOPWORDS = frozenset(
 
 
 @dataclass(frozen=True)
+class GroundingClaimAttribution:
+    """Transient attribution of one answer claim to retrieved RAG sources."""
+
+    claim_index: int
+    claim_text: str
+    supported: bool
+    supporting_source_indexes: tuple[int, ...] = ()
+    supporting_source_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AgentGroundingEvaluation:
     """Deterministic textual-support assessment for a RAG-generated answer."""
 
@@ -109,6 +120,7 @@ class AgentGroundingEvaluation:
     supported_sources_total: int
     source_candidates_total: int
     method: str = GROUNDING_METHOD
+    attributions: tuple[GroundingClaimAttribution, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.supported_sources_total < 0:
@@ -141,11 +153,23 @@ class AgentGroundingEvaluator:
     def evaluate(
         *,
         answer_text: str | None,
-        source_texts: list[str] | tuple[str, ...],
+        source_texts: list[str] | tuple[str, ...] = (),
+        sources: list[object] | tuple[object, ...] = (),
     ) -> AgentGroundingEvaluation:
         candidates = [
             source.strip() for source in source_texts if isinstance(source, str) and source.strip()
         ]
+
+        structured_sources = [
+            source
+            for source in sources
+            if hasattr(source, "content")
+            and isinstance(source.content, str)
+            and source.content.strip()
+        ]
+
+        if structured_sources:
+            candidates = [source.content.strip() for source in structured_sources]
 
         if answer_text is None or not answer_text.strip() or not candidates:
             return AgentGroundingEvaluation(
@@ -173,6 +197,9 @@ class AgentGroundingEvaluator:
 
         supported_sentences = 0
         supporting_sources: set[int] = set()
+        attributions: list[GroundingClaimAttribution] = []
+
+        claim_index = 0
 
         for sentence in answer_sentences:
             sentence_tokens = AgentGroundingEvaluator._content_tokens(sentence)
@@ -180,7 +207,7 @@ class AgentGroundingEvaluator:
             if not sentence_tokens:
                 continue
 
-            sentence_supported = False
+            claim_source_indexes: set[int] = set()
 
             for source_index, source_units in enumerate(source_sentences):
                 for source_unit in source_units:
@@ -205,15 +232,37 @@ class AgentGroundingEvaluator:
                     ):
                         continue
 
-                    sentence_supported = True
-                    supporting_sources.add(source_index)
-                    break
+                    claim_source_indexes.add(source_index)
 
-                if sentence_supported:
-                    break
-
-            if sentence_supported:
+            if claim_source_indexes:
                 supported_sentences += 1
+                supporting_sources.update(claim_source_indexes)
+
+            supporting_source_ids_list: list[str] = []
+
+            if structured_sources:
+                for index in sorted(claim_source_indexes):
+                    if index >= len(structured_sources):
+                        continue
+
+                    source = structured_sources[index]
+                    chunk_id = getattr(source, "chunk_id", None)
+
+                    if isinstance(chunk_id, str) and chunk_id:
+                        supporting_source_ids_list.append(chunk_id)
+
+            supporting_source_ids = tuple(supporting_source_ids_list)
+
+            attributions.append(
+                GroundingClaimAttribution(
+                    claim_index=claim_index,
+                    claim_text=sentence,
+                    supported=bool(claim_source_indexes),
+                    supporting_source_indexes=tuple(sorted(claim_source_indexes)),
+                    supporting_source_ids=supporting_source_ids,
+                )
+            )
+            claim_index += 1
 
         evaluated_sentence_count = sum(
             1 for sentence in answer_sentences if AgentGroundingEvaluator._content_tokens(sentence)
@@ -236,6 +285,7 @@ class AgentGroundingEvaluator:
             support_ratio=support_ratio,
             supported_sources_total=len(supporting_sources),
             source_candidates_total=len(candidates),
+            attributions=tuple(attributions),
         )
 
     @staticmethod

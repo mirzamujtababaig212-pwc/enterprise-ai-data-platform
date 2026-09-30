@@ -508,6 +508,13 @@ async def test_evaluate_run_attaches_semantic_grounding_aggregates():
     assert result.metrics.semantic_grounding_evaluator_model == "gpt-4.1-mini"
     assert result.metrics.semantic_grounding_evaluator_provider == "openai"
 
+    assert result.metrics.grounding_evaluated is True
+    assert result.metrics.grounding_supported is True
+    assert result.metrics.grounding_support_ratio == 1.0
+    assert result.metrics.grounding_supported_sources_total == 1
+    assert result.metrics.grounding_source_candidates_total == 2
+    assert result.metrics.grounding_method == "lexical_sentence_support_v1"
+
     restored = repository.get(result.evaluation_run_id)
     assert restored == result
 

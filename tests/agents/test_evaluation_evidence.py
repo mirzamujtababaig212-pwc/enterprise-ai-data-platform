@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from ai_platform.agents.evaluation.evidence import (
     extract_evidence,
+    extract_rag_evidence_sources,
     extract_rag_source_texts,
 )
 from ai_platform.agents.observability import (
@@ -266,6 +267,103 @@ def test_extract_evidence_handles_missing_run_timestamps() -> None:
     evidence = extract_evidence(run, [], [])
 
     assert evidence.execution_time_ms == 0.0
+
+
+def test_extract_rag_evidence_sources_preserves_identity_and_scores() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "results": [
+                    {
+                        "content": "Vehicle V001 reported 72 km/h.",
+                        "chunk_id": "chunk-1",
+                        "document_id": "doc-1",
+                        "retrieval_score": 0.82,
+                        "reranker_score": 0.94,
+                    },
+                    {
+                        "content": "Vehicle V001 reported 68 km/h.",
+                        "chunk_id": "chunk-2",
+                        "document_id": "doc-1",
+                        "score": 0.71,
+                    },
+                ]
+            },
+        )
+    ]
+
+    sources = extract_rag_evidence_sources(steps)
+
+    assert len(sources) == 2
+
+    assert sources[0].source_index == 0
+    assert sources[0].content == "Vehicle V001 reported 72 km/h."
+    assert sources[0].chunk_id == "chunk-1"
+    assert sources[0].document_id == "doc-1"
+    assert sources[0].retrieval_score == 0.82
+    assert sources[0].reranker_score == 0.94
+
+    assert sources[1].source_index == 1
+    assert sources[1].content == "Vehicle V001 reported 68 km/h."
+    assert sources[1].chunk_id == "chunk-2"
+    assert sources[1].document_id == "doc-1"
+    assert sources[1].retrieval_score == 0.71
+    assert sources[1].reranker_score is None
+
+
+def test_extract_rag_source_texts_remains_compatible() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "results": [
+                    {"content": "First source.", "chunk_id": "chunk-1"},
+                    {"content": "Second source.", "chunk_id": "chunk-2"},
+                ]
+            },
+        )
+    ]
+
+    assert extract_rag_source_texts(steps) == [
+        "First source.",
+        "Second source.",
+    ]
+
+
+def test_extract_rag_evidence_sources_ignores_invalid_source_content() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            output={
+                "results": [
+                    {"chunk_id": "chunk-ignored"},
+                    {"content": ""},
+                    {"content": "  "},
+                    {"content": "Valid source.", "chunk_id": "chunk-valid"},
+                ]
+            },
+        )
+    ]
+
+    sources = extract_rag_evidence_sources(steps)
+
+    assert len(sources) == 1
+    assert sources[0].source_index == 0
+    assert sources[0].content == "Valid source."
+    assert sources[0].chunk_id == "chunk-valid"
 
 
 def test_extract_evidence_counts_rag_queries_and_sources_from_provenance() -> None:

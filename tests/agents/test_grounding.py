@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from ai_platform.agents.evaluation.grounding import (
     GROUNDING_METHOD,
     AgentGroundingEvaluator,
@@ -145,3 +147,99 @@ def test_grounding_rejects_numeric_claim_when_supporting_source_statement_disagr
     assert result.supported is False
     assert result.support_ratio == 0.0
     assert result.supported_sources_total == 0
+
+
+@dataclass(frozen=True)
+class _StructuredSource:
+    content: str
+    chunk_id: str | None = None
+
+
+def test_grounding_attributes_supported_claim_to_exact_source() -> None:
+    result = AgentGroundingEvaluator.evaluate(
+        answer_text="The battery temperature reached 42 degrees Celsius.",
+        sources=[
+            _StructuredSource(
+                content="Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius.",
+                chunk_id="chunk-001",
+            ),
+            _StructuredSource(
+                content="The vehicle was inspected at the service center.",
+                chunk_id="chunk-002",
+            ),
+        ],
+    )
+
+    assert result.evaluated is True
+    assert result.supported is True
+    assert len(result.attributions) == 1
+
+    attribution = result.attributions[0]
+
+    assert attribution.claim_index == 0
+    assert attribution.claim_text == ("The battery temperature reached 42 degrees Celsius.")
+    assert attribution.supported is True
+    assert attribution.supporting_source_indexes == (0,)
+    assert attribution.supporting_source_ids == ("chunk-001",)
+
+
+def test_grounding_attributes_unsupported_claim_without_sources() -> None:
+    result = AgentGroundingEvaluator.evaluate(
+        answer_text="The battery temperature reached 99 degrees Celsius.",
+        sources=[
+            _StructuredSource(
+                content="Vehicle V001 telemetry shows the battery temperature reached 42 degrees Celsius.",
+                chunk_id="chunk-001",
+            ),
+        ],
+    )
+
+    assert result.evaluated is True
+    assert result.supported is False
+    assert len(result.attributions) == 1
+
+    attribution = result.attributions[0]
+
+    assert attribution.claim_index == 0
+    assert attribution.supported is False
+    assert attribution.supporting_source_indexes == ()
+    assert attribution.supporting_source_ids == ()
+
+
+def test_grounding_attributes_claim_to_multiple_supporting_sources() -> None:
+    result = AgentGroundingEvaluator.evaluate(
+        answer_text="The vehicle battery temperature reached 42 degrees Celsius.",
+        sources=[
+            _StructuredSource(
+                content="Vehicle V001 battery temperature reached 42 degrees Celsius.",
+                chunk_id="chunk-001",
+            ),
+            _StructuredSource(
+                content="The battery temperature for the vehicle reached 42 degrees Celsius.",
+                chunk_id="chunk-002",
+            ),
+        ],
+    )
+
+    assert result.evaluated is True
+    assert result.supported is True
+    assert result.supported_sources_total == 2
+
+    attribution = result.attributions[0]
+
+    assert attribution.supporting_source_indexes == (0, 1)
+    assert attribution.supporting_source_ids == ("chunk-001", "chunk-002")
+
+
+def test_grounding_legacy_source_texts_do_not_create_source_ids() -> None:
+    result = AgentGroundingEvaluator.evaluate(
+        answer_text="The battery temperature reached 42 degrees Celsius.",
+        source_texts=[
+            "Battery temperature reached 42 degrees Celsius.",
+        ],
+    )
+
+    assert result.evaluated is True
+    assert result.supported is True
+    assert result.attributions[0].supporting_source_indexes == (0,)
+    assert result.attributions[0].supporting_source_ids == ()
