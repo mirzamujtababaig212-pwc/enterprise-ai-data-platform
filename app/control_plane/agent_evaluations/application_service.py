@@ -4,6 +4,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from ai_platform.agents.evaluation.diagnostics import (
+    AgentEvaluationDiagnostics,
+    AgentEvaluationResult,
+)
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
 from ai_platform.agents.evaluation.semantic_answer_evaluator import (
     SemanticAnswerEvaluator,
@@ -60,6 +64,24 @@ class AgentEvaluationApplicationService:
         policy: AgentEvaluationPolicy,
         expected_answer: str | None = None,
     ) -> AgentEvaluationRun:
+        result = await self.evaluate_run_with_diagnostics(
+            run_id,
+            tenant_id=tenant_id,
+            principal=principal,
+            policy=policy,
+            expected_answer=expected_answer,
+        )
+        return result.evaluation_run
+
+    async def evaluate_run_with_diagnostics(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        principal: str,
+        policy: AgentEvaluationPolicy,
+        expected_answer: str | None = None,
+    ) -> AgentEvaluationResult:
         if not run_id.strip():
             raise ValueError("run_id must not be empty.")
 
@@ -175,7 +197,14 @@ class AgentEvaluationApplicationService:
             context_quality=context_quality,
         )
 
-        return self._evaluation_repository.save(evaluation_run)
+        persisted_evaluation = self._evaluation_repository.save(evaluation_run)
+
+        return AgentEvaluationResult(
+            evaluation_run=persisted_evaluation,
+            diagnostics=AgentEvaluationDiagnostics(
+                grounding_attributions=grounding_evaluation.attributions,
+            ),
+        )
 
     def list_evaluations(
         self,

@@ -648,3 +648,80 @@ async def test_evaluate_run_persists_context_quality_from_context_assembly_event
         == result.context_quality.minimum_estimated_remaining_after_context
     )
     assert repository.get(result.evaluation_run_id) == result
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_with_diagnostics_preserves_transient_grounding_attribution():
+    service, _, _, _, repository = make_service(
+        run=make_run(
+            output={
+                "answer": "Vehicle V001 traveled at 62 miles per hour.",
+            }
+        ),
+        steps=[
+            AgentRunStep(
+                run_id="run-1",
+                step_id="step-rag",
+                step_index=0,
+                step_type="tool",
+                status=AgentRunStepStatus.COMPLETED,
+                tool_name="rag.search",
+                call_id="call-rag-1",
+                output={
+                    "results": [
+                        {
+                            "content": (
+                                "Vehicle V001 traveled at 62 miles per hour "
+                                "during the recorded interval."
+                            ),
+                            "chunk_id": "chunk-v001-001",
+                            "document_id": "doc-v001",
+                            "retrieval_score": 0.91,
+                            "reranker_score": 0.95,
+                        },
+                    ],
+                },
+                metadata={
+                    "rag_provenance": {
+                        "retrieved_count": 1,
+                        "sources": [
+                            {
+                                "chunk_id": "chunk-v001-001",
+                                "document_id": "doc-v001",
+                                "retrieval_score": 0.91,
+                                "reranker_score": 0.95,
+                            }
+                        ],
+                    }
+                },
+            ),
+        ],
+    )
+
+    result = await service.evaluate_run_with_diagnostics(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert result.evaluation_run is repository.get(result.evaluation_run.evaluation_run_id)
+
+    attributions = result.diagnostics.grounding_attributions
+
+    assert len(attributions) == 1
+    assert attributions[0].claim_index == 0
+    assert attributions[0].supported is True
+    assert attributions[0].supporting_source_indexes == (0,)
+    assert attributions[0].supporting_source_ids == ("chunk-v001-001",)
+
+    persisted = repository.get(result.evaluation_run.evaluation_run_id)
+    assert persisted is not None
+
+    assert persisted.metrics.grounding_evaluated is True
+    assert persisted.metrics.grounding_supported is True
+    assert persisted.metrics.grounding_support_ratio == 1.0
+
+    persisted_payload = persisted.as_dict()
+    assert "grounding_attributions" not in persisted_payload
+    assert "attributions" not in persisted_payload["metrics"]
