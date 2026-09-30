@@ -10,6 +10,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from ai_platform.agents.evaluation.semantic_answer_evaluator import (
+    SemanticAnswerEvaluation,
+    SemanticAnswerEvaluator,
+)
 from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
 )
@@ -85,22 +89,37 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
 
         run_id = run_payload["run_id"]
 
-        evaluation_response = client.post(
-            f"/api/v1/agents/runs/{run_id}/evaluations",
-            headers={
-                "x-api-key": API_KEY,
-            },
-            json={
-                "expected_answer": "Deterministic integration-test response.",
-                "max_execution_time_ms": 60_000,
-                "max_steps_per_run": 10,
-                "max_invalid_tool_calls": 0,
-                "allow_governance_denials": False,
-                "require_task_completed": True,
-                "require_answer_match": True,
-                "name": "production-integration-quality-gate",
-            },
-        )
+        with patch.object(
+            SemanticAnswerEvaluator,
+            "evaluate",
+            new=AsyncMock(
+                return_value=SemanticAnswerEvaluation(
+                    score=1.0,
+                    passed=True,
+                    method="llm_judge_v1",
+                    evaluator_model="integration-test-model",
+                    evaluator_provider="integration-test",
+                )
+            ),
+        ) as mock_semantic_evaluate:
+            evaluation_response = client.post(
+                f"/api/v1/agents/runs/{run_id}/evaluations",
+                headers={
+                    "x-api-key": API_KEY,
+                },
+                json={
+                    "expected_answer": "Deterministic integration-test response.",
+                    "max_execution_time_ms": 60_000,
+                    "max_steps_per_run": 10,
+                    "max_invalid_tool_calls": 0,
+                    "allow_governance_denials": False,
+                    "require_task_completed": True,
+                    "require_answer_match": True,
+                    "name": "production-integration-quality-gate",
+                },
+            )
+
+        assert mock_semantic_evaluate.await_count == 1
 
         assert evaluation_response.status_code == 200, evaluation_response.text
 
@@ -141,6 +160,10 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "name": "production-integration-quality-gate",
             "policy_id": None,
             "policy_version": None,
+            "min_grounding_support_ratio": None,
+            "min_reranker_score": None,
+            "min_retrieval_score": None,
+            "require_rag_provenance": False,
         }
 
         assert evaluation_payload["quality_gate"] == {
@@ -152,12 +175,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "evaluated": True,
             "exact_match": True,
             "normalization": "whitespace_casefold",
-            "semantic_evaluated": False,
-            "semantic_score": None,
-            "semantic_passed": None,
-            "semantic_method": None,
-            "evaluator_model": None,
-            "evaluator_provider": None,
+            "semantic_evaluated": True,
+            "semantic_score": 1.0,
+            "semantic_passed": True,
+            "semantic_method": "llm_judge_v1",
+            "evaluator_model": "integration-test-model",
+            "evaluator_provider": "integration-test",
         }
 
         evaluation_run_id = evaluation_payload["evaluation_run_id"]
@@ -199,10 +222,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "require_task_completed": True,
                 "require_answer_match": True,
                 "name": "production-integration-quality-gate",
-                "min_retrieval_score": None,
-                "min_reranker_score": None,
                 "policy_id": None,
                 "policy_version": None,
+                "min_grounding_support_ratio": None,
+                "min_reranker_score": None,
+                "min_retrieval_score": None,
+                "require_rag_provenance": False,
             }
 
             assert evaluation_record.quality_gate == {
@@ -214,12 +239,12 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "evaluated": True,
                 "exact_match": True,
                 "normalization": "whitespace_casefold",
-                "semantic_evaluated": False,
-                "semantic_score": None,
-                "semantic_passed": None,
-                "semantic_method": None,
-                "evaluator_model": None,
-                "evaluator_provider": None,
+                "semantic_evaluated": True,
+                "semantic_score": 1.0,
+                "semantic_passed": True,
+                "semantic_method": "llm_judge_v1",
+                "evaluator_model": "integration-test-model",
+                "evaluator_provider": "integration-test",
             }
 
         list_response = client.get(
@@ -350,13 +375,32 @@ def test_production_control_plane_persists_agent_run_events() -> None:
         assert context_assembly_payload["run_id"] == run_id
         assert context_assembly_payload["session_id"] == session_id
         assert context_assembly_payload["user_id"] == "integration-test-user"
-        assert context_assembly_payload["metadata"] == {
-            "total_messages": 2,
-            "source_counts": {
-                "system_prompt": 1,
-                "user_input": 1,
-            },
+        metadata = context_assembly_payload["metadata"]
+
+        assert metadata["total_messages"] == 2
+        assert metadata["source_counts"] == {
+            "system_prompt": 1,
+            "user_input": 1,
         }
+        assert metadata["source_lineage"] == [
+            {
+                "source_type": "system_prompt",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+            {
+                "source_type": "user_input",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+        ]
+
+        assert "estimated_tokens" in metadata
+        assert "estimated_tokens_by_role" in metadata
+        assert metadata["token_estimation"]["method"] == "chars_per_4"
+        assert "budget_status" in metadata
 
         runtime_decision_payload = next(
             event for event in events_payload["events"] if event["event_type"] == "runtime.decision"
@@ -422,13 +466,32 @@ def test_production_control_plane_persists_agent_run_events() -> None:
         assert context_assembly_event.run_id == run_id
         assert context_assembly_event.session_id == session_id
         assert context_assembly_event.user_id == "integration-test-user"
-        assert context_assembly_event.event_metadata == {
-            "total_messages": 2,
-            "source_counts": {
-                "system_prompt": 1,
-                "user_input": 1,
-            },
+        metadata = context_assembly_event.event_metadata
+
+        assert metadata["total_messages"] == 2
+        assert metadata["source_counts"] == {
+            "system_prompt": 1,
+            "user_input": 1,
         }
+        assert metadata["source_lineage"] == [
+            {
+                "source_type": "system_prompt",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+            {
+                "source_type": "user_input",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+        ]
+
+        assert "estimated_tokens" in metadata
+        assert "estimated_tokens_by_role" in metadata
+        assert metadata["token_estimation"]["method"] == "chars_per_4"
+        assert "budget_status" in metadata
 
         runtime_decision = next(event for event in events if event.event_type == "runtime.decision")
 

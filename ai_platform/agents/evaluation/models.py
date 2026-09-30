@@ -50,6 +50,7 @@ class AgentRunEvidence:
     context_budget_exceeded: bool = False
     context_source_profile_changes: int = 0
     context_source_counts: dict[str, int] | None = None
+    context_source_lineage: tuple[tuple[dict[str, object], ...], ...] = ()
     error_type: str | None = None
     error_message: str | None = None
 

@@ -45,7 +45,17 @@ def _extract_answer_text(output: Any) -> str | None:
 
 def _extract_context_diagnostics(
     events: list[AgentExecutionEvent],
-) -> tuple[int, int, int, int, int | None, bool, int, dict[str, int]]:
+) -> tuple[
+    int,
+    int,
+    int,
+    int,
+    int | None,
+    bool,
+    int,
+    dict[str, int],
+    tuple[tuple[dict[str, object], ...], ...],
+]:
     """Aggregate bounded context-assembly diagnostics from durable events."""
     context_assembly_events_total = 0
     context_messages_total = 0
@@ -55,6 +65,7 @@ def _extract_context_diagnostics(
     context_budget_exceeded = False
     context_source_profile_changes = 0
     context_source_counts: dict[str, int] = {}
+    context_source_lineage: list[tuple[dict[str, object], ...]] = []
     previous_source_profile: frozenset[str] | None = None
 
     for event in events:
@@ -63,6 +74,24 @@ def _extract_context_diagnostics(
 
         context_assembly_events_total += 1
         metadata = event.metadata
+
+        source_lineage = metadata.get("source_lineage")
+        if isinstance(source_lineage, (list, tuple)):
+            assembly_lineage: list[dict[str, object]] = []
+
+            for source in source_lineage:
+                if not isinstance(source, dict):
+                    continue
+
+                entry = dict(source)
+
+                provenance = entry.get("provenance")
+                if isinstance(provenance, dict):
+                    entry["provenance"] = dict(provenance)
+
+                assembly_lineage.append(entry)
+
+            context_source_lineage.append(tuple(assembly_lineage))
 
         total_messages = metadata.get("total_messages")
         if isinstance(total_messages, int) and not isinstance(total_messages, bool):
@@ -130,6 +159,7 @@ def _extract_context_diagnostics(
         context_budget_exceeded,
         context_source_profile_changes,
         context_source_counts,
+        tuple(context_source_lineage),
     )
 
 
@@ -424,6 +454,7 @@ def extract_evidence(
         context_budget_exceeded,
         context_source_profile_changes,
         context_source_counts,
+        context_source_lineage,
     ) = _extract_context_diagnostics(events)
 
     return AgentRunEvidence(
@@ -470,6 +501,7 @@ def extract_evidence(
         context_budget_exceeded=context_budget_exceeded,
         context_source_profile_changes=context_source_profile_changes,
         context_source_counts=context_source_counts,
+        context_source_lineage=context_source_lineage,
         error_type=run.error_type,
         error_message=run.error_message,
     )

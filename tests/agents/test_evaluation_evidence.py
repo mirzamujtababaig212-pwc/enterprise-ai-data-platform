@@ -1233,3 +1233,162 @@ def test_extract_rag_source_texts_ignores_missing_or_non_string_content() -> Non
     source_texts = extract_rag_source_texts(steps)
 
     assert source_texts == ["Valid source text."]
+
+
+def test_extract_evidence_preserves_context_source_lineage_by_assembly() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_lineage": [
+                    {
+                        "source_type": "system_prompt",
+                        "item_id": None,
+                        "score": None,
+                        "reranker_score": None,
+                    },
+                    {
+                        "source_type": "semantic_memory",
+                        "item_id": "memory-1",
+                        "score": 0.91,
+                        "reranker_score": 0.87,
+                        "provenance": {
+                            "retrieval_method": "vector",
+                            "rank": 1,
+                            "source": "qdrant",
+                        },
+                    },
+                    {
+                        "source_type": "user_input",
+                        "item_id": None,
+                        "score": None,
+                        "reranker_score": None,
+                    },
+                ],
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_lineage": [
+                    {
+                        "source_type": "system_prompt",
+                        "item_id": None,
+                        "score": None,
+                        "reranker_score": None,
+                    },
+                    {
+                        "source_type": "tool_result",
+                        "item_id": "tool-1",
+                        "score": None,
+                        "reranker_score": None,
+                    },
+                ],
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_source_lineage == (
+        (
+            {
+                "source_type": "system_prompt",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+            {
+                "source_type": "semantic_memory",
+                "item_id": "memory-1",
+                "score": 0.91,
+                "reranker_score": 0.87,
+                "provenance": {
+                    "retrieval_method": "vector",
+                    "rank": 1,
+                    "source": "qdrant",
+                },
+            },
+            {
+                "source_type": "user_input",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+        ),
+        (
+            {
+                "source_type": "system_prompt",
+                "item_id": None,
+                "score": None,
+                "reranker_score": None,
+            },
+            {
+                "source_type": "tool_result",
+                "item_id": "tool-1",
+                "score": None,
+                "reranker_score": None,
+            },
+        ),
+    )
+
+
+def test_extract_evidence_ignores_malformed_context_source_lineage() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_lineage": [
+                    "invalid",
+                    None,
+                    123,
+                    {
+                        "source_type": "valid",
+                        "provenance": "invalid",
+                    },
+                ],
+            },
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "source_lineage": "invalid",
+            },
+        ),
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_source_lineage == (
+        (
+            {
+                "source_type": "valid",
+                "provenance": "invalid",
+            },
+        ),
+    )
+
+
+def test_extract_evidence_defaults_context_source_lineage_for_missing_metadata() -> None:
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            metadata={
+                "total_messages": 2,
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), [], events)
+
+    assert evidence.context_source_lineage == ()

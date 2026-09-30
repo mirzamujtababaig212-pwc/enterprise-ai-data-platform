@@ -297,6 +297,7 @@ def test_describe_context_preserves_memory_retrieval_provenance():
     assert semantic_source.provenance_metadata == {
         "retrieval_method": "vector",
         "rank": 1,
+        "source": "qdrant",
     }
 
     assert episodic_source.source_type == "episodic_memory"
@@ -305,7 +306,45 @@ def test_describe_context_preserves_memory_retrieval_provenance():
     assert episodic_source.provenance_metadata == {
         "retrieval_method": "hybrid",
         "rank": 2,
+        "source": "memory-index",
     }
+
+    assert result.diagnostics["source_lineage"] == [
+        {
+            "source_type": "system_prompt",
+            "item_id": None,
+            "score": None,
+            "reranker_score": None,
+        },
+        {
+            "source_type": "semantic_memory",
+            "item_id": "semantic-1",
+            "score": 0.91,
+            "reranker_score": 0.87,
+            "provenance": {
+                "retrieval_method": "vector",
+                "rank": 1,
+                "source": "qdrant",
+            },
+        },
+        {
+            "source_type": "episodic_memory",
+            "item_id": "episodic-1",
+            "score": 0.82,
+            "reranker_score": None,
+            "provenance": {
+                "retrieval_method": "hybrid",
+                "rank": 2,
+                "source": "memory-index",
+            },
+        },
+        {
+            "source_type": "user_input",
+            "item_id": None,
+            "score": None,
+            "reranker_score": None,
+        },
+    ]
 
 
 def test_describe_context_does_not_duplicate_memory_items_with_retrieval_results():
