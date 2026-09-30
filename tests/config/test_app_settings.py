@@ -95,6 +95,47 @@ def test_agent_run_lease_duration_can_be_overridden(
     assert settings.agent_run_lease_duration_seconds == 120
 
 
+def test_approval_risk_tiers_default_to_high_and_critical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(
+        "APPROVAL_RISK_TIERS",
+        raising=False,
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.approval_risk_tiers == frozenset({"high", "critical"})
+
+
+def test_approval_risk_tiers_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "APPROVAL_RISK_TIERS",
+        "medium, high,critical",
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.approval_risk_tiers == frozenset({"medium", "high", "critical"})
+
+
+def test_approval_risk_tiers_rejects_empty_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "APPROVAL_RISK_TIERS",
+        " , ",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="APPROVAL_RISK_TIERS must contain at least one risk tier",
+    ):
+        Settings.from_environment()
+
+
 def test_mcp_servers_rejects_non_array_args(monkeypatch) -> None:
     monkeypatch.setenv(
         "MCP_SERVERS",
@@ -492,3 +533,31 @@ def test_tenant_policies_reject_invalid_tools(
         match="TENANT_POLICIES contains an invalid policy configuration",
     ):
         Settings.from_environment()
+
+
+def test_approval_override_principals_default_to_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APPROVAL_OVERRIDE_PRINCIPALS", raising=False)
+
+    settings = Settings.from_environment()
+
+    assert settings.approval_override_principals == frozenset()
+
+
+def test_approval_override_principals_are_parsed_and_trimmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "APPROVAL_OVERRIDE_PRINCIPALS",
+        " api_key:operator-1,api_key:operator-2 ,, api_key:operator-1 ",
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.approval_override_principals == frozenset(
+        {
+            "api_key:operator-1",
+            "api_key:operator-2",
+        }
+    )
