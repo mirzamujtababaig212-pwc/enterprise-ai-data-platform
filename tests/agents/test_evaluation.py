@@ -10,6 +10,9 @@ from ai_platform.agents.evaluation.models import (
     AgentRunEvidence,
 )
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
+from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
+    SemanticGroundingEvaluation,
+)
 from ai_platform.agents.evaluation.run import (
     AgentEvaluationLineage,
     AgentEvaluationRun,
@@ -793,6 +796,140 @@ def test_evaluation_policy_rejects_invalid_grounding_threshold():
 
     with pytest.raises(ValueError, match="min_grounding_support_ratio"):
         AgentEvaluationPolicy(min_grounding_support_ratio=1.01)
+
+
+def test_quality_gate_passes_semantic_grounding_above_threshold():
+    policy = AgentEvaluationPolicy(
+        min_semantic_grounding_score=0.80,
+    )
+    semantic_grounding = SemanticGroundingEvaluation(
+        score=0.93,
+        passed=True,
+        method="llm_grounding_judge_v1",
+        evaluator_model="gpt-4.1-mini",
+        evaluator_provider="openai",
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        semantic_grounding_evaluation=semantic_grounding,
+    )
+
+    assert metrics.semantic_grounding_evaluated is True
+    assert metrics.semantic_grounding_score == 0.93
+    assert metrics.semantic_grounding_passed is True
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_quality_gate_passes_semantic_grounding_at_exact_threshold():
+    policy = AgentEvaluationPolicy(
+        min_semantic_grounding_score=0.80,
+    )
+    semantic_grounding = SemanticGroundingEvaluation(
+        score=0.80,
+        passed=True,
+        method="llm_grounding_judge_v1",
+        evaluator_model="gpt-4.1-mini",
+        evaluator_provider="openai",
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        semantic_grounding_evaluation=semantic_grounding,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_quality_gate_rejects_semantic_grounding_below_threshold():
+    policy = AgentEvaluationPolicy(
+        min_semantic_grounding_score=0.80,
+    )
+    semantic_grounding = SemanticGroundingEvaluation(
+        score=0.79,
+        passed=False,
+        method="llm_grounding_judge_v1",
+        evaluator_model="gpt-4.1-mini",
+        evaluator_provider="openai",
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        semantic_grounding_evaluation=semantic_grounding,
+    )
+
+    assert metrics.semantic_grounding_score == 0.79
+    assert gate.passed is False
+    assert gate.violations == (
+        "Semantic grounding score (0.79) was below minimum threshold (0.80).",
+    )
+
+
+def test_quality_gate_rejects_missing_semantic_grounding_when_threshold_required():
+    policy = AgentEvaluationPolicy(
+        min_semantic_grounding_score=0.80,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Semantic grounding score was unavailable but minimum threshold " "(0.80) is required.",
+    )
+
+
+def test_quality_gate_ignores_semantic_grounding_without_threshold():
+    policy = AgentEvaluationPolicy()
+
+    semantic_grounding = SemanticGroundingEvaluation(
+        score=0.20,
+        passed=False,
+        method="llm_grounding_judge_v1",
+        evaluator_model="gpt-4.1-mini",
+        evaluator_provider="openai",
+    )
+
+    metrics, gate = AgentEvaluator.evaluate_run(
+        _evidence(),
+        policy,
+        semantic_grounding_evaluation=semantic_grounding,
+    )
+
+    assert metrics.semantic_grounding_evaluated is True
+    assert metrics.semantic_grounding_score == 0.20
+    assert metrics.semantic_grounding_passed is False
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
+def test_evaluation_policy_serializes_semantic_grounding_threshold():
+    policy = AgentEvaluationPolicy(
+        min_semantic_grounding_score=0.80,
+    )
+
+    assert policy.as_dict()["min_semantic_grounding_score"] == 0.80
+
+
+def test_evaluation_policy_rejects_invalid_semantic_grounding_threshold():
+    with pytest.raises(
+        ValueError,
+        match="min_semantic_grounding_score must be between 0 and 1",
+    ):
+        AgentEvaluationPolicy(min_semantic_grounding_score=-0.01)
+
+    with pytest.raises(
+        ValueError,
+        match="min_semantic_grounding_score must be between 0 and 1",
+    ):
+        AgentEvaluationPolicy(min_semantic_grounding_score=1.01)
 
 
 def test_quality_gate_rejects_missing_rag_scores_when_threshold_required():

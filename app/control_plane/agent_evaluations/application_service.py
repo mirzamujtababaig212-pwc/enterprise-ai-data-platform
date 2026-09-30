@@ -147,13 +147,7 @@ class AgentEvaluationApplicationService:
             sources=rag_sources,
         )
 
-        metrics, quality_gate = self._evaluator.evaluate_run(
-            evidence,
-            policy,
-            answer_evaluation=answer_evaluation,
-            grounding_evaluation=grounding_evaluation,
-        )
-
+        semantic_grounding_evaluation = None
         if (
             self._semantic_grounding_evaluator is not None
             and evidence.final_answer_text is not None
@@ -163,17 +157,14 @@ class AgentEvaluationApplicationService:
                 answer_text=evidence.final_answer_text,
                 source_texts=[source.content for source in rag_sources],
             )
-            metrics = replace(
-                metrics,
-                semantic_grounding_evaluated=True,
-                semantic_grounding_score=semantic_grounding_evaluation.score,
-                semantic_grounding_passed=semantic_grounding_evaluation.passed,
-                semantic_grounding_method=semantic_grounding_evaluation.method,
-                semantic_grounding_evaluator_model=(semantic_grounding_evaluation.evaluator_model),
-                semantic_grounding_evaluator_provider=(
-                    semantic_grounding_evaluation.evaluator_provider
-                ),
-            )
+
+        metrics, quality_gate = self._evaluator.evaluate_run(
+            evidence,
+            policy,
+            answer_evaluation=answer_evaluation,
+            grounding_evaluation=grounding_evaluation,
+            semantic_grounding_evaluation=semantic_grounding_evaluation,
+        )
 
         context_quality = self._evaluator.evaluate_context(evidence)
 

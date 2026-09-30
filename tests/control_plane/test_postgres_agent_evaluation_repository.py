@@ -125,6 +125,7 @@ def _run(
             require_task_completed=True,
             require_rag_provenance=True,
             min_grounding_support_ratio=0.88,
+            min_semantic_grounding_score=0.80,
             name="default-agent-quality",
         ),
         quality_gate=AgentQualityGateResult(
@@ -163,6 +164,7 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
         )
         assert restored.policy.require_rag_provenance is True
         assert restored.policy.min_grounding_support_ratio == 0.88
+        assert restored.policy.min_semantic_grounding_score == 0.80
         assert restored.metrics.retrieval_score_min == run.metrics.retrieval_score_min
         assert restored.metrics.retrieval_score_max == run.metrics.retrieval_score_max
         assert restored.metrics.retrieval_score_avg == run.metrics.retrieval_score_avg
@@ -226,6 +228,7 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
 
         legacy_policy = dict(record.policy)
         legacy_policy.pop("require_rag_provenance", None)
+        legacy_policy.pop("min_semantic_grounding_score", None)
         record.policy = legacy_policy
 
         record.created_at = run.created_at
@@ -243,6 +246,7 @@ def test_get_legacy_run_without_score_diagnostics_preserves_compatibility():
         assert restored.metrics.has_rag_provenance is False
         assert restored.metrics.has_rag_sources_available is False
         assert restored.policy.require_rag_provenance is False
+        assert restored.policy.min_semantic_grounding_score is None
     finally:
         repository.close()
         engine.dispose()

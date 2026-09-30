@@ -142,6 +142,7 @@ def make_evaluation(
     passed: bool = True,
     policy_id: str | None = None,
     policy_version: str | None = None,
+    min_semantic_grounding_score: float | None = None,
 ) -> AgentEvaluationRun:
     return AgentEvaluationRun(
         evaluation_run_id=evaluation_run_id,
@@ -189,6 +190,7 @@ def make_evaluation(
             min_retrieval_score=0.72,
             min_reranker_score=0.81,
             min_grounding_support_ratio=0.88,
+            min_semantic_grounding_score=min_semantic_grounding_score,
             allow_governance_denials=False,
             require_task_completed=True,
             require_rag_provenance=True,
@@ -264,6 +266,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
             "min_retrieval_score": 0.72,
             "min_reranker_score": 0.81,
             "min_grounding_support_ratio": 0.88,
+            "min_semantic_grounding_score": 0.80,
             "allow_governance_denials": False,
             "require_task_completed": True,
             "require_rag_provenance": True,
@@ -311,6 +314,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert body["policy"]["min_retrieval_score"] == 0.72
     assert body["policy"]["min_reranker_score"] == 0.81
     assert body["policy"]["min_grounding_support_ratio"] == 0.88
+    assert body["policy"]["min_semantic_grounding_score"] is None
     assert body["policy"]["require_rag_provenance"] is True
     assert body["quality_gate"]["passed"] is True
     assert body["answer_evaluation"] == {
@@ -359,8 +363,44 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     assert policy.min_retrieval_score == 0.72
     assert policy.min_reranker_score == 0.81
     assert policy.min_grounding_support_ratio == 0.88
+    assert policy.min_semantic_grounding_score == 0.80
     assert policy.require_rag_provenance is True
     assert policy.name == "route-quality-policy"
+
+
+def test_create_agent_run_evaluation_response_exposes_semantic_grounding_threshold() -> None:
+    service = FakeAgentEvaluationApplicationService(
+        evaluation=make_evaluation(
+            min_semantic_grounding_score=0.80,
+        )
+    )
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/runs/run-1/evaluations",
+        json={
+            "name": "route-quality-policy",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["policy"]["min_semantic_grounding_score"] == 0.80
+
+
+def test_create_agent_run_evaluation_rejects_invalid_semantic_grounding_threshold() -> None:
+    service = FakeAgentEvaluationApplicationService()
+    client = build_client(service)
+
+    for value in (-0.01, 1.01):
+        response = client.post(
+            "/api/v1/agents/runs/run-1/evaluations",
+            json={
+                "min_semantic_grounding_score": value,
+            },
+        )
+
+        assert response.status_code == 422
+        assert service.evaluate_calls == []
 
 
 def test_create_agent_run_evaluation_preserves_policy_identity_and_version() -> None:

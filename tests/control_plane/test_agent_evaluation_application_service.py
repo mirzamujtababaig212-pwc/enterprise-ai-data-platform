@@ -725,6 +725,76 @@ async def test_semantic_grounding_does_not_change_deterministic_quality_gate():
 
 
 @pytest.mark.asyncio
+async def test_semantic_grounding_policy_threshold_controls_quality_gate():
+    semantic_evaluator = FakeSemanticGroundingEvaluator(
+        score=0.79,
+        passed=False,
+    )
+
+    run = make_run(
+        output={
+            "reply": "The vehicle battery temperature reached 42 degrees Celsius.",
+        }
+    )
+    rag_step = make_step(
+        "step-1",
+        tool_name="rag.search",
+        call_id="rag-call-1",
+        output={
+            "results": [
+                {
+                    "chunk_id": "chunk-1",
+                    "content": (
+                        "Vehicle V001 telemetry shows the battery temperature "
+                        "reached 42 degrees Celsius."
+                    ),
+                }
+            ]
+        },
+    )
+
+    service, _, _, _, repository = make_service(
+        run=run,
+        steps=[rag_step],
+        semantic_grounding_evaluator=semantic_evaluator,
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=AgentEvaluationPolicy(
+            min_semantic_grounding_score=0.80,
+        ),
+    )
+
+    assert semantic_evaluator.calls == [
+        {
+            "answer_text": ("The vehicle battery temperature reached 42 degrees Celsius."),
+            "source_texts": [
+                (
+                    "Vehicle V001 telemetry shows the battery temperature "
+                    "reached 42 degrees Celsius."
+                )
+            ],
+        }
+    ]
+
+    assert result.metrics.semantic_grounding_evaluated is True
+    assert result.metrics.semantic_grounding_score == 0.79
+    assert result.metrics.semantic_grounding_passed is False
+
+    assert result.quality_gate.passed is False
+    assert result.quality_gate.violations == (
+        "Semantic grounding score (0.79) was below minimum threshold (0.80).",
+    )
+
+    restored = repository.get(result.evaluation_run_id)
+    assert restored == result
+    assert restored.policy.min_semantic_grounding_score == 0.80
+
+
+@pytest.mark.asyncio
 async def test_evaluate_run_leaves_semantic_grounding_unset_without_answer_or_sources():
     semantic_evaluator = FakeSemanticGroundingEvaluator()
 

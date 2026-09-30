@@ -14,6 +14,7 @@ class AgentEvaluationPolicyRequest(BaseModel):
     min_retrieval_score: float | None = Field(default=None, ge=0.0)
     min_reranker_score: float | None = Field(default=None, ge=0.0)
     min_grounding_support_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_semantic_grounding_score: float | None = Field(default=None, ge=0.0, le=1.0)
     allow_governance_denials: bool = False
     require_task_completed: bool = True
     require_answer_match: bool = False
@@ -37,6 +38,7 @@ class AgentEvaluationRequest(BaseModel):
     min_retrieval_score: float | None = Field(default=None, ge=0.0)
     min_reranker_score: float | None = Field(default=None, ge=0.0)
     min_grounding_support_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_semantic_grounding_score: float | None = Field(default=None, ge=0.0, le=1.0)
     allow_governance_denials: bool = False
     require_task_completed: bool = True
     require_answer_match: bool = False

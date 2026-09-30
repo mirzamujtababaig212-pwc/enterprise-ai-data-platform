@@ -264,6 +264,7 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 min_retrieval_score=policy_data.get("min_retrieval_score"),
                 min_reranker_score=policy_data.get("min_reranker_score"),
                 min_grounding_support_ratio=policy_data.get("min_grounding_support_ratio"),
+                min_semantic_grounding_score=policy_data.get("min_semantic_grounding_score"),
                 allow_governance_denials=policy_data.get(
                     "allow_governance_denials",
                     False,

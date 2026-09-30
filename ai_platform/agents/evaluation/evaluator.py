@@ -19,6 +19,9 @@ from ai_platform.agents.evaluation.policy import (
     AgentQualityGateEvaluator,
     AgentQualityGateResult,
 )
+from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
+    SemanticGroundingEvaluation,
+)
 
 
 class AgentEvaluator:
@@ -31,6 +34,7 @@ class AgentEvaluator:
         *,
         answer_evaluation: AgentAnswerEvaluation | None = None,
         grounding_evaluation: AgentGroundingEvaluation | None = None,
+        semantic_grounding_evaluation: SemanticGroundingEvaluation | None = None,
     ) -> tuple[AgentEvaluationMetrics, AgentQualityGateResult]:
         metrics = AgentEvaluationMetrics(
             execution_time_ms=evidence.execution_time_ms,
@@ -75,6 +79,32 @@ class AgentEvaluator:
             ),
             grounding_method=(
                 grounding_evaluation.method if grounding_evaluation is not None else None
+            ),
+            semantic_grounding_evaluated=(semantic_grounding_evaluation is not None),
+            semantic_grounding_score=(
+                semantic_grounding_evaluation.score
+                if semantic_grounding_evaluation is not None
+                else None
+            ),
+            semantic_grounding_passed=(
+                semantic_grounding_evaluation.passed
+                if semantic_grounding_evaluation is not None
+                else None
+            ),
+            semantic_grounding_method=(
+                semantic_grounding_evaluation.method
+                if semantic_grounding_evaluation is not None
+                else None
+            ),
+            semantic_grounding_evaluator_model=(
+                semantic_grounding_evaluation.evaluator_model
+                if semantic_grounding_evaluation is not None
+                else None
+            ),
+            semantic_grounding_evaluator_provider=(
+                semantic_grounding_evaluation.evaluator_provider
+                if semantic_grounding_evaluation is not None
+                else None
             ),
             task_completed=evidence.status == "completed",
         )

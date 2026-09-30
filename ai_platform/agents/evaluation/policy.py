@@ -17,6 +17,7 @@ class AgentEvaluationPolicy:
     min_retrieval_score: float | None = None
     min_reranker_score: float | None = None
     min_grounding_support_ratio: float | None = None
+    min_semantic_grounding_score: float | None = None
     allow_governance_denials: bool = False
     require_task_completed: bool = True
     require_answer_match: bool = False
@@ -47,6 +48,12 @@ class AgentEvaluationPolicy:
         ):
             raise ValueError("min_grounding_support_ratio must be between 0 and 1.")
 
+        if (
+            self.min_semantic_grounding_score is not None
+            and not 0 <= self.min_semantic_grounding_score <= 1
+        ):
+            raise ValueError("min_semantic_grounding_score must be between 0 and 1.")
+
         if self.policy_id is not None and not self.policy_id.strip():
             raise ValueError("policy_id must not be blank.")
 
@@ -64,6 +71,7 @@ class AgentEvaluationPolicy:
             "min_retrieval_score": self.min_retrieval_score,
             "min_reranker_score": self.min_reranker_score,
             "min_grounding_support_ratio": self.min_grounding_support_ratio,
+            "min_semantic_grounding_score": self.min_semantic_grounding_score,
             "allow_governance_denials": self.allow_governance_denials,
             "require_task_completed": self.require_task_completed,
             "require_answer_match": self.require_answer_match,
@@ -165,6 +173,18 @@ class AgentQualityGateEvaluator:
                 violations.append(
                     f"Grounding support ratio ({metrics.grounding_support_ratio:.2f}) was below "
                     f"minimum threshold ({policy.min_grounding_support_ratio:.2f})."
+                )
+
+        if policy.min_semantic_grounding_score is not None:
+            if metrics.semantic_grounding_score is None:
+                violations.append(
+                    "Semantic grounding score was unavailable but minimum threshold "
+                    f"({policy.min_semantic_grounding_score:.2f}) is required."
+                )
+            elif metrics.semantic_grounding_score < policy.min_semantic_grounding_score:
+                violations.append(
+                    f"Semantic grounding score ({metrics.semantic_grounding_score:.2f}) was below "
+                    f"minimum threshold ({policy.min_semantic_grounding_score:.2f})."
                 )
 
         if policy.require_rag_provenance and not metrics.has_rag_provenance:
