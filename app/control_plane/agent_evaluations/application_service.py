@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from ai_platform.agents.evaluation.evaluator import AgentEvaluator
+from ai_platform.agents.evaluation.semantic_answer_evaluator import (
+    SemanticAnswerEvaluator,
+)
 from ai_platform.agents.evaluation.evidence import (
     extract_evidence,
     extract_rag_source_texts,
@@ -33,14 +37,16 @@ class AgentEvaluationApplicationService:
         agent_run_events_repository: AgentRunEventsRepository,
         evaluation_repository: AgentEvaluationRunsRepository,
         evaluator: AgentEvaluator | None = None,
+        semantic_evaluator: SemanticAnswerEvaluator | None = None,
     ) -> None:
         self._agent_run_repository = agent_run_repository
         self._agent_run_steps_repository = agent_run_steps_repository
         self._agent_run_events_repository = agent_run_events_repository
         self._evaluation_repository = evaluation_repository
         self._evaluator = evaluator or AgentEvaluator()
+        self._semantic_evaluator = semantic_evaluator
 
-    def evaluate_run(
+    async def evaluate_run(
         self,
         run_id: str,
         *,
@@ -87,6 +93,26 @@ class AgentEvaluationApplicationService:
             evidence,
             expected_answer=expected_answer,
         )
+
+        if (
+            self._semantic_evaluator is not None
+            and expected_answer is not None
+            and evidence.final_answer_text is not None
+        ):
+            semantic_evaluation = await self._semantic_evaluator.evaluate(
+                actual_answer=evidence.final_answer_text,
+                expected_answer=expected_answer,
+            )
+            answer_evaluation = replace(
+                answer_evaluation,
+                semantic_evaluated=True,
+                semantic_score=semantic_evaluation.score,
+                semantic_passed=semantic_evaluation.passed,
+                semantic_method=semantic_evaluation.method,
+                evaluator_model=semantic_evaluation.evaluator_model,
+                evaluator_provider=semantic_evaluation.evaluator_provider,
+            )
+
         grounding_evaluation = self._evaluator.evaluate_grounding(
             evidence,
             source_texts=extract_rag_source_texts(steps),

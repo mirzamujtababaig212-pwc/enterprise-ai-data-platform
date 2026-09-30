@@ -503,7 +503,7 @@ async def evaluate_agent_run(
     )
 
     try:
-        evaluation = service.evaluate_run(
+        evaluation = await service.evaluate_run(
             run_id,
             tenant_id=tenant_id,
             principal=principal,

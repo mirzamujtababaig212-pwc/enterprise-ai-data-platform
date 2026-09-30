@@ -452,7 +452,7 @@ async def test_agent_run_executes_cross_backend_hybrid_rag() -> None:
             evaluation_repository=evaluation_repository,
         )
 
-        evaluation = evaluation_service.evaluate_run(
+        evaluation = await evaluation_service.evaluate_run(
             result.run_id,
             tenant_id=persisted_run.tenant_id,
             principal=persisted_run.principal,

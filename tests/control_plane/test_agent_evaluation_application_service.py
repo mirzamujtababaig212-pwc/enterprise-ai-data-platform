@@ -164,7 +164,8 @@ def default_policy() -> AgentEvaluationPolicy:
     )
 
 
-def test_evaluate_run_builds_and_persists_immutable_artifact():
+@pytest.mark.asyncio
+async def test_evaluate_run_builds_and_persists_immutable_artifact():
     service, _, _, _, repository = make_service(
         steps=[
             make_step("step-1"),
@@ -172,7 +173,7 @@ def test_evaluate_run_builds_and_persists_immutable_artifact():
         ]
     )
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -198,10 +199,11 @@ def test_evaluate_run_builds_and_persists_immutable_artifact():
     assert repository.get(result.evaluation_run_id) == result
 
 
-def test_evaluate_run_counts_governance_denials():
+@pytest.mark.asyncio
+async def test_evaluate_run_counts_governance_denials():
     service, _, _, _, _ = make_service(events=[make_governance_denial()])
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -213,7 +215,8 @@ def test_evaluate_run_counts_governance_denials():
     assert "governance denial" in result.quality_gate.violations[0]
 
 
-def test_evaluate_run_preserves_failed_tool_metrics():
+@pytest.mark.asyncio
+async def test_evaluate_run_preserves_failed_tool_metrics():
     service, _, _, _, _ = make_service(
         steps=[
             make_step(
@@ -224,7 +227,7 @@ def test_evaluate_run_preserves_failed_tool_metrics():
         ]
     )
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -236,7 +239,8 @@ def test_evaluate_run_preserves_failed_tool_metrics():
     assert result.metrics.tool_calls_failed == 1
 
 
-def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
+@pytest.mark.asyncio
+async def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
     service, _, _, _, repository = make_service(
         steps=[
             AgentRunStep(
@@ -279,7 +283,7 @@ def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
         name="rag-quality-v1",
     )
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -293,7 +297,8 @@ def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
     assert repository.get(result.evaluation_run_id) == result
 
 
-def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
+@pytest.mark.asyncio
+async def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
     service, _, _, _, repository = make_service(
         steps=[
             AgentRunStep(
@@ -336,7 +341,7 @@ def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
         name="rag-quality-v1",
     )
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -352,14 +357,15 @@ def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
     assert repository.get(result.evaluation_run_id) == result
 
 
-def test_evaluate_run_rejects_missing_run():
+@pytest.mark.asyncio
+async def test_evaluate_run_rejects_missing_run():
     service, _, _, _, _ = make_service(run=None)
 
     with pytest.raises(
         LookupError,
         match="agent run not found: missing",
     ):
-        service.evaluate_run(
+        await service.evaluate_run(
             "missing",
             tenant_id="tenant-1",
             principal="user-1",
@@ -367,7 +373,8 @@ def test_evaluate_run_rejects_missing_run():
         )
 
 
-def test_evaluate_run_enforces_principal_authorization():
+@pytest.mark.asyncio
+async def test_evaluate_run_enforces_principal_authorization():
     service, _, _, _, _ = make_service(
         run=make_run(principal="different-user"),
     )
@@ -376,7 +383,7 @@ def test_evaluate_run_enforces_principal_authorization():
         PermissionError,
         match="principal is not authorized",
     ):
-        service.evaluate_run(
+        await service.evaluate_run(
             "run-1",
             tenant_id="tenant-1",
             principal="user-1",
@@ -384,10 +391,11 @@ def test_evaluate_run_enforces_principal_authorization():
         )
 
 
-def test_evaluate_run_uses_bounded_repository_reads():
+@pytest.mark.asyncio
+async def test_evaluate_run_uses_bounded_repository_reads():
     service, _, steps_repository, events_repository, _ = make_service()
 
-    service.evaluate_run(
+    await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",
@@ -398,7 +406,8 @@ def test_evaluate_run_uses_bounded_repository_reads():
     assert events_repository.requested_limit == 10_000
 
 
-def test_evaluate_run_persists_context_quality_from_context_assembly_events():
+@pytest.mark.asyncio
+async def test_evaluate_run_persists_context_quality_from_context_assembly_events():
     context_event = AgentExecutionEvent(
         event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
         agent_name="vehicle-agent",
@@ -423,7 +432,7 @@ def test_evaluate_run_persists_context_quality_from_context_assembly_events():
         events=[context_event],
     )
 
-    result = service.evaluate_run(
+    result = await service.evaluate_run(
         "run-1",
         tenant_id="tenant-1",
         principal="user-1",

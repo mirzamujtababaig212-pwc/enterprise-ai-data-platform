@@ -51,7 +51,7 @@ class FakeAgentEvaluationApplicationService:
         self.evaluate_calls: list[tuple] = []
         self.list_calls: list[tuple] = []
 
-    def evaluate_run(
+    async def evaluate_run(
         self,
         run_id: str,
         *,
