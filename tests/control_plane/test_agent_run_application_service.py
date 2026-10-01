@@ -44,6 +44,7 @@ from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
 from app.control_plane.agent_runs.lease import heartbeat_loop
+from app.control_plane.agent_runs.exceptions import AgentRunAlreadyExecutingError
 from app.control_plane.agent_run_steps.models import (
     AgentRunStep,
     AgentRunStepStatus,
@@ -69,13 +70,60 @@ def _response(
 
 def _repository() -> Mock:
     repository = Mock(spec=AgentRunRepository)
+    repository.created_run = None
+    repository.running_run = None
+    repository.completed_run = None
+    repository.failed_run = None
+    repository.cancelled_run = None
+    repository.waiting_for_approval_run = None
+
+    def _get(run_id: str) -> AgentRun | None:
+        for candidate in (
+            repository.completed_run,
+            repository.failed_run,
+            repository.cancelled_run,
+            repository.waiting_for_approval_run,
+            repository.running_run,
+            repository.created_run,
+        ):
+            if candidate is not None and candidate.run_id == run_id:
+                return candidate
+
+        configured = repository.get.return_value
+        if isinstance(configured, AgentRun) and configured.run_id == run_id:
+            return configured
+
+        return None
 
     def create_run(run: AgentRun) -> AgentRun:
-        repository.get.return_value = run
+        repository.created_run = run
         return run
 
-    repository.create.side_effect = create_run
-    repository.update.side_effect = lambda run: run
+    def claim_pending_run(
+        run_id: str,
+        *,
+        started_at,
+        lease_id: str,
+        lease_expires_at,
+    ) -> AgentRun | None:
+        base_run = _get(run_id)
+
+        if base_run is None:
+            return None
+
+        if base_run.status is not AgentRunStatus.PENDING:
+            return None
+
+        running_run = base_run.model_copy(
+            update={
+                "status": AgentRunStatus.RUNNING,
+                "started_at": started_at,
+                "lease_id": lease_id,
+                "lease_expires_at": lease_expires_at,
+            }
+        )
+        repository.running_run = running_run
+        return running_run
 
     def complete_if_owner(
         run_id: str,
@@ -84,7 +132,10 @@ def _repository() -> Mock:
         completed_at,
         output,
     ) -> AgentRun:
-        running = repository.update.call_args_list[0].args[0]
+        running = _get(run_id)
+        assert running is not None
+        assert running.status is AgentRunStatus.RUNNING
+
         completed = running.transition_to(
             AgentRunStatus.COMPLETED,
         ).model_copy(
@@ -105,8 +156,12 @@ def _repository() -> Mock:
         completed_at,
         error_type: str,
         error_message: str,
+        error_details: dict | None = None,
     ) -> AgentRun:
-        running = repository.update.call_args_list[0].args[0]
+        running = _get(run_id)
+        assert running is not None
+        assert running.status is AgentRunStatus.RUNNING
+
         failed = running.transition_to(
             AgentRunStatus.FAILED,
         ).model_copy(
@@ -114,6 +169,7 @@ def _repository() -> Mock:
                 "completed_at": completed_at,
                 "error_type": error_type,
                 "error_message": error_message,
+                "error_details": error_details,
                 "lease_id": None,
                 "lease_expires_at": None,
             }
@@ -127,7 +183,10 @@ def _repository() -> Mock:
         lease_id: str,
         completed_at,
     ) -> AgentRun:
-        running = repository.update.call_args_list[0].args[0]
+        running = _get(run_id)
+        assert running is not None
+        assert running.status is AgentRunStatus.RUNNING
+
         cancelled = running.transition_to(
             AgentRunStatus.CANCELLED,
         ).model_copy(
@@ -146,11 +205,15 @@ def _repository() -> Mock:
         lease_id: str,
         updated_at,
     ) -> AgentRun:
-        running = repository.update.call_args_list[0].args[0]
+        running = _get(run_id)
+        assert running is not None
+        assert running.status is AgentRunStatus.RUNNING
+
         waiting = running.transition_to(
             AgentRunStatus.WAITING_FOR_APPROVAL,
         ).model_copy(
             update={
+                "updated_at": updated_at,
                 "lease_id": None,
                 "lease_expires_at": None,
             }
@@ -158,6 +221,9 @@ def _repository() -> Mock:
         repository.waiting_for_approval_run = waiting
         return waiting
 
+    repository.get.side_effect = _get
+    repository.create.side_effect = create_run
+    repository.claim_pending_run.side_effect = claim_pending_run
     repository.complete_if_owner.side_effect = complete_if_owner
     repository.fail_if_owner.side_effect = fail_if_owner
     repository.cancel_if_owner.side_effect = cancel_if_owner
@@ -243,8 +309,9 @@ async def test_execute_resolves_effective_token_budget_from_tenant_policy(
     )
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
 
+    assert running is not None
     assert pending.request_snapshot.execution_budget["max_tokens_per_run"] == expected_max_tokens
     assert running.request_snapshot.execution_budget["max_tokens_per_run"] == expected_max_tokens
 
@@ -432,8 +499,9 @@ async def test_execute_resolves_model_governance_from_tenant_policy() -> None:
     )
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
 
+    assert running is not None
     assert pending.request_snapshot.model_governance == {
         "effective_model": "gpt-5",
         "effective_provider": None,
@@ -905,8 +973,10 @@ async def test_execute_persists_authenticated_tenant_in_run_and_snapshot() -> No
     assert result.run_id
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
     completed = repository.completed_run
+
+    assert running is not None
 
     assert pending.tenant_id == "tenant-acme"
     assert pending.request_snapshot.tenant_id == "tenant-acme"
@@ -944,12 +1014,14 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     assert response.response.output == "completed"
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.complete_if_owner.assert_called_once()
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
     completed = repository.completed_run
+
+    assert running is not None
 
     assert pending.status == AgentRunStatus.PENDING
     assert pending.agent_name == "enterprise-analyst"
@@ -1028,12 +1100,14 @@ async def test_execute_persists_waiting_for_approval_lifecycle() -> None:
         )
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
     waiting = repository.waiting_for_approval_run
 
+    assert running is not None
+    assert waiting is not None
     assert pending.status == AgentRunStatus.PENDING
     assert running.status == AgentRunStatus.RUNNING
     assert waiting.run_id == pending.run_id
@@ -1090,14 +1164,25 @@ async def test_execute_cancels_when_cancellation_is_requested_during_registratio
     running_run = None
     cancellation_checked = False
 
-    original_update = repository.update.side_effect
+    original_claim = repository.claim_pending_run.side_effect
 
-    def capture_running_run(run):
+    def capture_running_run(
+        run_id,
+        *,
+        started_at,
+        lease_id,
+        lease_expires_at,
+    ):
         nonlocal running_run
-        running_run = run
-        return original_update(run)
+        running_run = original_claim(
+            run_id,
+            started_at=started_at,
+            lease_id=lease_id,
+            lease_expires_at=lease_expires_at,
+        )
+        return running_run
 
-    repository.update.side_effect = capture_running_run
+    repository.claim_pending_run.side_effect = capture_running_run
 
     def get_with_registration_race(run_id: str):
         nonlocal cancellation_checked
@@ -1164,7 +1249,9 @@ async def test_execute_uses_one_run_id_across_lifecycle() -> None:
     )
 
     created_run = repository.create.call_args.args[0]
-    running_run = repository.update.call_args_list[0].args[0]
+    running_run = repository.running_run
+
+    assert running_run is not None
     completed_run_id = repository.complete_if_owner.call_args.args[0]
 
     assert created_run.run_id == running_run.run_id
@@ -1195,7 +1282,7 @@ async def test_execute_propagates_execution_ownership_loss_without_terminal_pers
         )
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.fail_if_owner.assert_not_called()
     repository.cancel_if_owner.assert_not_called()
     repository.complete_if_owner.assert_not_called()
@@ -1252,12 +1339,14 @@ async def test_execute_persists_failed_run_and_reraises_runtime_error() -> None:
         )
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.fail_if_owner.assert_called_once()
 
     pending = repository.create.call_args.args[0]
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
     failed = repository.failed_run
+
+    assert running is not None
 
     assert pending.status == AgentRunStatus.PENDING
     assert running.status == AgentRunStatus.RUNNING
@@ -1301,7 +1390,9 @@ async def test_execute_persists_failed_run_for_lookup_error() -> None:
     repository.fail_if_owner.assert_called_once()
 
     failed = repository.failed_run
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
+
+    assert running is not None
 
     assert failed.status == AgentRunStatus.FAILED
     assert failed.error_type == "LookupError"
@@ -1312,11 +1403,8 @@ async def test_execute_persists_failed_run_for_lookup_error() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_does_not_mark_failed_when_running_persistence_fails() -> None:
-    repository = Mock(spec=AgentRunRepository)
-
-    pending = Mock(spec=AgentRun)
-    repository.create.return_value = pending
-    repository.update.side_effect = RuntimeError("running persistence failed")
+    repository = _repository()
+    repository.claim_pending_run.side_effect = RuntimeError("running persistence failed")
 
     runtime = Mock()
     runtime.run = AsyncMock()
@@ -1334,7 +1422,7 @@ async def test_execute_does_not_mark_failed_when_running_persistence_fails() -> 
 
     runtime.run.assert_not_awaited()
     repository.create.assert_called_once()
-    repository.update.assert_called_once()
+    repository.claim_pending_run.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1407,7 +1495,7 @@ async def test_execute_preserves_runtime_error_when_failed_persistence_fails() -
 
     assert exc_info.value is original_error
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.fail_if_owner.assert_called_once()
 
 
@@ -1436,7 +1524,7 @@ async def test_execute_surfaces_completed_persistence_failure() -> None:
 
     runtime.run.assert_awaited_once()
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.complete_if_owner.assert_called_once()
 
 
@@ -1693,7 +1781,7 @@ async def test_execute_rejects_run_before_runtime_when_admission_denied() -> Non
         )
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_not_called()
     runtime.run.assert_not_awaited()
 
     pending = repository.create.call_args.args[0]
@@ -1774,11 +1862,13 @@ async def test_execute_allows_run_when_admission_policy_allows() -> None:
     }
 
     assert repository.create.call_count == 1
-    assert repository.update.call_count == 1
+    repository.claim_pending_run.assert_called_once()
     repository.complete_if_owner.assert_called_once()
 
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
     completed = repository.completed_run
+
+    assert running is not None
 
     assert running.status == AgentRunStatus.RUNNING
     assert running.lease_id is not None
@@ -1990,8 +2080,9 @@ async def test_execute_persists_cancelled_run_and_emits_audit_event() -> None:
 
     await started.wait()
 
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
 
+    assert running is not None
     assert running.status == AgentRunStatus.RUNNING
     assert registry.cancel(running.run_id) is True
 
@@ -2101,7 +2192,8 @@ async def test_execute_cancellation_does_not_emit_event_after_ownership_loss() -
 
     await started.wait()
 
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
+    assert running is not None
 
     assert registry.cancel(running.run_id) is True
 
@@ -2166,7 +2258,8 @@ async def test_execute_cancellation_continues_when_observer_fails() -> None:
 
     await started.wait()
 
-    running = repository.update.call_args_list[0].args[0]
+    running = repository.running_run
+    assert running is not None
 
     assert registry.cancel(running.run_id) is True
 
@@ -3075,3 +3168,44 @@ def test_get_step_requires_step_repository() -> None:
             tenant_id="tenant-acme",
             principal="api_key:test-owner",
         )
+
+
+@pytest.mark.asyncio
+async def test_execute_existing_run_raises_when_already_executing() -> None:
+    repository = _repository()
+
+    run = AgentRun(
+        run_id="run-already-running",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.RUNNING,
+        user_id="user-1",
+        principal="principal-1",
+        tenant_id="tenant-1",
+        session_id="session-1",
+    )
+    repository.running_run = run
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+    )
+
+    request = AgentRequest(
+        input="test request",
+        session_id="session-1",
+        user_id="user-1",
+        principal="principal-1",
+        tenant_id="tenant-1",
+    )
+
+    with pytest.raises(
+        AgentRunAlreadyExecutingError,
+        match="is already executing",
+    ):
+        await service.execute_existing_run(
+            run_id=run.run_id,
+            agent_name=run.agent_name,
+            request=request,
+        )
+
+    repository.claim_pending_run.assert_not_called()

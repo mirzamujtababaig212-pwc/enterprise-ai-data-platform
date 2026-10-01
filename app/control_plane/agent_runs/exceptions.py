@@ -22,5 +22,9 @@ class AgentRunAdmissionRejectedError(RuntimeError):
     """Raised when an agent run is not admitted for execution."""
 
 
+class AgentRunAlreadyExecutingError(RuntimeError):
+    """Raised when another worker already owns execution of an agent run."""
+
+
 class RecoveryExhaustedError(RuntimeError):
     """Raised when an agent run has exhausted its durable recovery attempts."""

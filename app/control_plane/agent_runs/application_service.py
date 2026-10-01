@@ -27,6 +27,7 @@ from app.control_plane.agent_runs.admission import (
     AllowAllAgentRunAdmissionPolicy,
 )
 from app.control_plane.agent_runs.exceptions import (
+    AgentRunAlreadyExecutingError,
     AgentRunAccessDeniedError,
     AgentRunAdmissionRejectedError,
     AgentRunIdempotencyConflictError,
@@ -411,9 +412,113 @@ class AgentRunApplicationService:
                 request=effective_request,
             )
 
+        return await self._execute_persisted_run(
+            run=run,
+            effective_request=effective_request,
+            budget_policy=budget_policy,
+            admission_agent_name=agent_name,
+        )
+
+    async def execute_existing_run(
+        self,
+        *,
+        run_id: str,
+        agent_name: str,
+        request: AgentRequest,
+    ) -> AgentRunExecutionResult:
+        """
+        Execute an already-persisted PENDING run without creating a new run.
+
+        This path is used by durable delegation. It deliberately does not
+        participate in normal idempotency replay semantics because the child
+        run already exists and must retain its durable run_id and hierarchy.
+        """
+        run = self._repository.get(run_id)
+
+        if run is None:
+            raise ValueError(f"agent run does not exist: {run_id}")
+
+        if run.agent_name != agent_name:
+            raise ValueError(
+                f"agent run '{run_id}' belongs to agent '{run.agent_name}', " f"not '{agent_name}'."
+            )
+
+        if run.status is AgentRunStatus.RUNNING:
+            raise AgentRunAlreadyExecutingError(f"Agent run '{run_id}' is already executing.")
+
+        if run.status is not AgentRunStatus.PENDING:
+            raise ValueError(
+                "existing agent run execution requires PENDING status: " f"{run.status.value}"
+            )
+
+        if run.request_snapshot is None:
+            raise ValueError(f"agent run '{run_id}' has no request snapshot.")
+
+        if run.session_id != request.session_id:
+            raise ValueError(
+                f"agent run '{run_id}' request session does not match " "its persisted identity."
+            )
+
+        if run.user_id != request.user_id:
+            raise ValueError(
+                f"agent run '{run_id}' request user does not match " "its persisted identity."
+            )
+
+        if run.principal != request.principal:
+            raise ValueError(
+                f"agent run '{run_id}' request principal does not match " "its persisted identity."
+            )
+
+        if run.tenant_id != request.tenant_id:
+            raise ValueError(
+                f"agent run '{run_id}' request tenant does not match " "its persisted identity."
+            )
+
+        effective_budget, budget_policy = self._resolve_effective_budget(
+            tenant_id=request.tenant_id,
+            requested_budget=request.execution_budget or ExecutionBudget(),
+        )
+        effective_governance_policy = self._resolve_effective_governance_policy(
+            tenant_id=request.tenant_id,
+            requested_policy=request.governance_policy,
+        )
+        effective_model_governance = await self._resolve_model_governance(
+            agent_name=agent_name,
+            tenant_id=request.tenant_id,
+            requested_decision=request.model_governance,
+        )
+
+        effective_request = replace(
+            request,
+            execution_budget=effective_budget,
+            governance_policy=effective_governance_policy,
+            model_governance=effective_model_governance,
+        )
+
+        await self._authorize_memory_namespace(
+            agent_name=agent_name,
+            tenant_id=effective_request.tenant_id,
+            memory_namespace=effective_request.memory_namespace,
+        )
+
+        return await self._execute_persisted_run(
+            run=run,
+            effective_request=effective_request,
+            budget_policy=budget_policy,
+            admission_agent_name=agent_name,
+        )
+
+    async def _execute_persisted_run(
+        self,
+        *,
+        run: AgentRun,
+        effective_request: AgentRequest,
+        budget_policy: TenantPolicy | None,
+        admission_agent_name: str,
+    ) -> AgentRunExecutionResult:
         await self._emit_model_governance_decision(
             run=run,
-            decision=effective_model_governance,
+            decision=effective_request.model_governance,
         )
 
         if budget_policy is not None:
@@ -424,22 +529,21 @@ class AgentRunApplicationService:
                 policy_id=budget_policy.policy_id,
                 policy_version=budget_policy.policy_version,
                 details={
-                    "max_tokens_per_run": effective_budget.max_tokens_per_run,
+                    "max_tokens_per_run": (effective_request.execution_budget.max_tokens_per_run),
                 },
             )
 
         admission = await self._admission_policy.evaluate(
-            agent_name=agent_name,
+            agent_name=admission_agent_name,
             request=effective_request,
             run=run,
         )
 
-        admission_reason = admission.reason
         await self._emit_governance_decision(
             run=run,
             governance_domain="admission",
             decision="allow" if admission.allowed else "deny",
-            reason=admission_reason,
+            reason=admission.reason,
         )
 
         if not admission.allowed:
@@ -465,15 +569,44 @@ class AgentRunApplicationService:
         started_at = datetime.now(UTC)
         lease_id, lease_expires_at = create_lease(self._lease_seconds)
 
-        run = run.transition_to(AgentRunStatus.RUNNING).model_copy(
-            update={
-                "started_at": started_at,
-                "lease_id": lease_id,
-                "lease_expires_at": lease_expires_at,
-            }
+        claimed_run = self._repository.claim_pending_run(
+            run.run_id,
+            started_at=started_at,
+            lease_id=lease_id,
+            lease_expires_at=lease_expires_at,
         )
 
-        self._repository.update(run)
+        if claimed_run is None:
+            current_run = self._repository.get(run.run_id)
+
+            if current_run is None:
+                raise RuntimeError(f"Agent run '{run.run_id}' disappeared while being claimed.")
+
+            if current_run.status is AgentRunStatus.COMPLETED:
+                return AgentRunExecutionResult(
+                    run_id=current_run.run_id,
+                    response=self._build_replayed_response(current_run),
+                )
+
+            if current_run.status is AgentRunStatus.FAILED:
+                message = current_run.error_message or "Agent run failed."
+                raise RuntimeError(f"Agent run '{run.run_id}' previously failed: {message}")
+
+            if current_run.status is AgentRunStatus.RUNNING:
+                raise AgentRunAlreadyExecutingError(
+                    f"Agent run '{run.run_id}' is already executing."
+                )
+
+            raise RuntimeError(
+                f"Agent run '{run.run_id}' could not be claimed from status "
+                f"'{current_run.status.value}'."
+            )
+
+        run = claimed_run
+        lease_id = claimed_run.lease_id
+
+        if lease_id is None:
+            raise RuntimeError(f"Agent run '{run.run_id}' was claimed without a lease.")
 
         ownership_lost = asyncio.Event()
         cancellation_requested = asyncio.Event()
@@ -513,7 +646,7 @@ class AgentRunApplicationService:
                 raise asyncio.CancelledError("Agent run cancellation requested before execution.")
 
             response = await self._runtime.run(
-                agent_name,
+                admission_agent_name,
                 effective_request,
                 lease_id=lease_id,
                 run_id=run.run_id,
@@ -559,7 +692,7 @@ class AgentRunApplicationService:
 
             if paused_run is None:
                 raise RuntimeError(
-                    f"Agent run '{run.run_id}' lost lease ownership while pausing for approval."
+                    f"Agent run '{run.run_id}' lost lease ownership " "while pausing for approval."
                 )
 
             raise
@@ -581,7 +714,7 @@ class AgentRunApplicationService:
             else:
                 if persisted_failed_run is None:
                     raise RuntimeError(
-                        f"Agent run '{run.run_id}' lost lease ownership while failing."
+                        f"Agent run '{run.run_id}' lost lease ownership " "while failing."
                     ) from exc
 
             raise

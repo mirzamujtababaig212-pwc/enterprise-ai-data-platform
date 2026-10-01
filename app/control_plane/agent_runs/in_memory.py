@@ -117,6 +117,35 @@ class InMemoryAgentRunRepository:
             self._runs[run_id] = claimed
             return claimed
 
+    def claim_pending_run(
+        self,
+        run_id: str,
+        *,
+        started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None:
+        with self._lock:
+            run = self._runs.get(run_id)
+
+            if (
+                run is None
+                or run.status is not AgentRunStatus.PENDING
+                or run.cancellation_requested
+            ):
+                return None
+
+            claimed = run.transition_to(AgentRunStatus.RUNNING).model_copy(
+                update={
+                    "started_at": started_at,
+                    "lease_id": lease_id,
+                    "lease_expires_at": lease_expires_at,
+                }
+            )
+
+            self._runs[run_id] = claimed
+            return claimed
+
     def claim_waiting_for_approval(
         self,
         run_id: str,

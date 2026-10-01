@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from ai_platform.agents.contracts import AgentRegistry
+from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.models import AgentRequest
 from app.control_plane.agent_delegation.models import (
     AgentDelegationRequest,
@@ -14,7 +16,10 @@ from app.control_plane.agent_run_steps.models import (
     AgentRunStep,
     AgentRunStepStatus,
 )
-from app.control_plane.agent_runs.exceptions import DuplicateAgentRunError
+from app.control_plane.agent_runs.exceptions import (
+    AgentRunAlreadyExecutingError,
+    DuplicateAgentRunError,
+)
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
@@ -24,8 +29,9 @@ class AgentDelegationService:
     """
     Control-plane primitive for creating durable child-agent delegations.
 
-    This service does not execute the child agent. Child execution is a
-    subsequent lifecycle concern handled by the AgentRuntime in Phase 3.
+    Child execution is optional and, when configured, executes the
+    already-persisted child run so its durable identity and hierarchy remain
+    intact.
     """
 
     def __init__(
@@ -34,11 +40,13 @@ class AgentDelegationService:
         agent_registry: AgentRegistry,
         agent_run_repository: AgentRunRepository,
         agent_run_steps_repository_factory,
+        agent_run_application_service=None,
         policy: AgentDelegationPolicy | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._agent_run_repository = agent_run_repository
         self._agent_run_steps_repository_factory = agent_run_steps_repository_factory
+        self._agent_run_application_service = agent_run_application_service
         self._policy = policy or AgentDelegationPolicy()
 
     async def delegate(
@@ -231,6 +239,266 @@ class AgentDelegationService:
             parent_step_id=step_id,
             created=True,
         )
+
+    async def execute_delegation(
+        self,
+        request: AgentDelegationRequest,
+    ) -> AgentDelegationResult:
+        if self._agent_run_application_service is None:
+            raise RuntimeError(
+                "agent delegation execution requires an " "AgentRunApplicationService."
+            )
+
+        result = await self.delegate(request)
+
+        child = self._agent_run_repository.get(result.child_run.run_id)
+        if child is None:
+            raise RuntimeError(f"delegated child run disappeared: {result.child_run.run_id}")
+
+        steps_repository = self._agent_run_steps_repository_factory()
+        try:
+            step = steps_repository.get(
+                request.parent_run_id,
+                result.parent_step_id,
+            )
+
+            if step is None:
+                raise RuntimeError(
+                    "delegation parent step does not exist: "
+                    f"{request.parent_run_id}/{result.parent_step_id}"
+                )
+
+            if step.step_type != "delegation":
+                raise RuntimeError(
+                    "delegation parent step has unexpected type: " f"{step.step_type}"
+                )
+
+            if step.status in {
+                AgentRunStepStatus.COMPLETED,
+                AgentRunStepStatus.FAILED,
+            }:
+                if child.status in {
+                    AgentRunStatus.COMPLETED,
+                    AgentRunStatus.FAILED,
+                }:
+                    return result
+
+                raise RuntimeError(
+                    "delegation step is terminal while its child run " "is not terminal."
+                )
+
+            if step.status is AgentRunStepStatus.PLANNED:
+                now = datetime.now(UTC)
+                step = steps_repository.transition(
+                    request.parent_run_id,
+                    result.parent_step_id,
+                    status=AgentRunStepStatus.RUNNING,
+                    updated_at=now,
+                    started_at=now,
+                )
+
+                if step is None:
+                    raise RuntimeError("delegation parent step disappeared before execution.")
+
+            if step.status is not AgentRunStepStatus.RUNNING:
+                raise RuntimeError(
+                    "delegation execution requires a PLANNED or RUNNING "
+                    "parent step: "
+                    f"{step.status.value}"
+                )
+        finally:
+            steps_repository.close()
+
+        if child.status in {
+            AgentRunStatus.COMPLETED,
+            AgentRunStatus.FAILED,
+        }:
+            self._reconcile_completed_child(
+                request.parent_run_id,
+                result.parent_step_id,
+                child,
+            )
+            return AgentDelegationResult(
+                child_run=child,
+                parent_step_id=result.parent_step_id,
+                created=result.created,
+            )
+
+        if child.status in {
+            AgentRunStatus.RUNNING,
+            AgentRunStatus.WAITING_FOR_APPROVAL,
+        }:
+            return AgentDelegationResult(
+                child_run=child,
+                parent_step_id=result.parent_step_id,
+                created=result.created,
+            )
+
+        if child.status is not AgentRunStatus.PENDING:
+            raise RuntimeError(
+                "delegated child execution requires PENDING status: " f"{child.status.value}"
+            )
+
+        if child.request_snapshot is None:
+            raise RuntimeError(f"delegated child run '{child.run_id}' has no request snapshot.")
+
+        child_request = child.request_snapshot.to_request(
+            session_id=child.session_id,
+            user_id=child.user_id,
+            principal=child.principal,
+        )
+
+        try:
+            await self._agent_run_application_service.execute_existing_run(
+                run_id=child.run_id,
+                agent_name=child.agent_name,
+                request=child_request,
+            )
+        except AgentExecutionWaitingForApprovalError:
+            waiting_child = self._agent_run_repository.get(child.run_id)
+
+            if waiting_child is None:
+                raise RuntimeError(f"delegated child run disappeared: {child.run_id}")
+
+            return AgentDelegationResult(
+                child_run=waiting_child,
+                parent_step_id=result.parent_step_id,
+                created=result.created,
+            )
+        except AgentRunAlreadyExecutingError:
+            running_child = self._agent_run_repository.get(child.run_id)
+
+            if running_child is None:
+                raise RuntimeError(f"delegated child run disappeared: {child.run_id}")
+
+            if running_child.status is not AgentRunStatus.RUNNING:
+                raise RuntimeError(
+                    "delegated child reported concurrent execution but is no longer "
+                    f"RUNNING: {running_child.status.value}"
+                )
+
+            return AgentDelegationResult(
+                child_run=running_child,
+                parent_step_id=result.parent_step_id,
+                created=result.created,
+            )
+        except Exception as exc:
+            failed_child = self._agent_run_repository.get(child.run_id)
+
+            steps_repository = self._agent_run_steps_repository_factory()
+            try:
+                current_step = steps_repository.get(
+                    request.parent_run_id,
+                    result.parent_step_id,
+                )
+
+                if current_step is not None and current_step.status is AgentRunStepStatus.RUNNING:
+                    now = datetime.now(UTC)
+                    steps_repository.transition(
+                        request.parent_run_id,
+                        result.parent_step_id,
+                        status=AgentRunStepStatus.FAILED,
+                        updated_at=now,
+                        completed_at=now,
+                        error=(
+                            failed_child.error_message if failed_child is not None else str(exc)
+                        ),
+                        failure_category=(
+                            failed_child.error_type
+                            if failed_child is not None
+                            else type(exc).__name__
+                        ),
+                    )
+            finally:
+                steps_repository.close()
+
+            raise
+
+        completed_child = self._agent_run_repository.get(child.run_id)
+
+        if completed_child is None:
+            raise RuntimeError(f"delegated child run disappeared: {child.run_id}")
+
+        self._reconcile_completed_child(
+            request.parent_run_id,
+            result.parent_step_id,
+            completed_child,
+        )
+
+        return AgentDelegationResult(
+            child_run=completed_child,
+            parent_step_id=result.parent_step_id,
+            created=result.created,
+        )
+
+    def _reconcile_completed_child(
+        self,
+        parent_run_id: str,
+        parent_step_id: str,
+        child: AgentRun,
+    ) -> None:
+        if child.status not in {
+            AgentRunStatus.COMPLETED,
+            AgentRunStatus.FAILED,
+        }:
+            raise RuntimeError(
+                "delegated child execution returned a non-terminal run: " f"{child.status.value}"
+            )
+
+        steps_repository = self._agent_run_steps_repository_factory()
+        try:
+            current_step = steps_repository.get(
+                parent_run_id,
+                parent_step_id,
+            )
+
+            if current_step is None:
+                raise RuntimeError("delegation parent step disappeared while reconciling child.")
+
+            if current_step.status is AgentRunStepStatus.COMPLETED:
+                if child.status is AgentRunStatus.COMPLETED:
+                    return
+
+                raise RuntimeError("delegation parent step is COMPLETED while child run is FAILED.")
+
+            if current_step.status is AgentRunStepStatus.FAILED:
+                if child.status is AgentRunStatus.FAILED:
+                    return
+
+                raise RuntimeError("delegation parent step is FAILED while child run is COMPLETED.")
+
+            if current_step.status is not AgentRunStepStatus.RUNNING:
+                raise RuntimeError(
+                    "delegation parent step is not RUNNING while reconciling "
+                    f"terminal child: {current_step.status.value}"
+                )
+
+            now = datetime.now(UTC)
+
+            if child.status is AgentRunStatus.COMPLETED:
+                updated_step = steps_repository.transition(
+                    parent_run_id,
+                    parent_step_id,
+                    status=AgentRunStepStatus.COMPLETED,
+                    updated_at=now,
+                    completed_at=now,
+                    output=child.output,
+                )
+            else:
+                updated_step = steps_repository.transition(
+                    parent_run_id,
+                    parent_step_id,
+                    status=AgentRunStepStatus.FAILED,
+                    updated_at=now,
+                    completed_at=now,
+                    error=child.error_message,
+                    failure_category=child.error_type,
+                )
+
+            if updated_step is None:
+                raise RuntimeError("delegation parent step disappeared while reconciling child.")
+        finally:
+            steps_repository.close()
 
     def _delegation_depth(self, parent: AgentRun) -> int:
         """

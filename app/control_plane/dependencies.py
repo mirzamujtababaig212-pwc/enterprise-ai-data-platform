@@ -490,18 +490,6 @@ async def get_agent_runtime() -> AgentRuntime:
     return _agent_runtime
 
 
-async def get_agent_delegation_service(
-    db: Session = Depends(get_db),
-) -> AgentDelegationService:
-    await _initialize_agents()
-
-    return AgentDelegationService(
-        agent_registry=_agent_registry,
-        agent_run_repository=PostgreSQLAgentRunRepository(db),
-        agent_run_steps_repository_factory=_agent_run_steps_repository_factory,
-    )
-
-
 async def get_agent_run_application_service(
     db: Session = Depends(get_db),
 ) -> AgentRunApplicationService:
@@ -517,6 +505,22 @@ async def get_agent_run_application_service(
         cancellation_registry=_agent_run_cancellation_registry,
         tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
+    )
+
+
+async def get_agent_delegation_service(
+    db: Session = Depends(get_db),
+    agent_run_application_service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service
+    ),
+) -> AgentDelegationService:
+    await _initialize_agents()
+
+    return AgentDelegationService(
+        agent_registry=_agent_registry,
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository_factory=_agent_run_steps_repository_factory,
+        agent_run_application_service=agent_run_application_service,
     )
 
 

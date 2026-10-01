@@ -55,6 +55,15 @@ class AgentRunRepository(Protocol):
         lease_expires_at: datetime,
     ) -> AgentRun | None: ...
 
+    def claim_pending_run(
+        self,
+        run_id: str,
+        *,
+        started_at: datetime,
+        lease_id: str,
+        lease_expires_at: datetime,
+    ) -> AgentRun | None: ...
+
     def reject_waiting_for_approval(
         self,
         run_id: str,
