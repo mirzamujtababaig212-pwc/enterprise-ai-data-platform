@@ -3611,6 +3611,106 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_applies_durable_retry_backoff(monkeypatch) -> None:
+    class RetryGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            if self.generate_count == 1:
+                raise TimeoutError("provider timeout")
+
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "Recovered after backoff.",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [],
+            }
+
+    slept: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(
+        "ai_platform.agents.llm_agent.asyncio.sleep",
+        fake_sleep,
+    )
+
+    definition = AgentDefinition(
+        name="retryable-llm-agent-backoff",
+        description="Test durable LLM retry backoff.",
+        system_prompt="You are a retry test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = RetryGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-retry-backoff"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Answer after retry backoff.",
+            session_id="session-llm-retry-backoff",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_backoff_seconds=2.0,
+            backoff_factor=2.0,
+            jitter=0.0,
+        ),
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "Recovered after backoff."
+    assert gateway.generate_count == 2
+    assert slept == [2.0]
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.attempt == 2
+    assert step.metadata["retry"]["backoff_seconds"] == 2.0
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_retries_transient_provider_failure_until_third_attempt() -> None:
     class RetryGateway(FakeLLMGateway):
         def __init__(self) -> None:

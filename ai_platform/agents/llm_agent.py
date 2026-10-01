@@ -1716,6 +1716,9 @@ class LLMAgent:
 
                     durable_step = retried_step
 
+                    if decision.delay_seconds > 0.0:
+                        await asyncio.sleep(decision.delay_seconds)
+
         finally:
             repository.close()
 
