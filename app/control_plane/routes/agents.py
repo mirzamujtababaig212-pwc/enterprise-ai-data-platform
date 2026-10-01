@@ -1,7 +1,7 @@
 from __future__ import annotations
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
+from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.models import AgentRequest
 
@@ -896,6 +896,10 @@ async def list_agent_run_events(
     request: Request,
     run_id: str,
     limit: int = Query(default=100, ge=1, le=100),
+    event_type: AgentExecutionEventType | None = None,
+    step_id: str | None = None,
+    attempt: int | None = Query(default=None, ge=1),
+    provider: str | None = None,
     service: AgentRunApplicationService = Depends(
         get_agent_run_application_service,
     ),
@@ -905,6 +909,10 @@ async def list_agent_run_events(
             run_id,
             tenant_id=getattr(request.state, "tenant_id", None),
             principal=getattr(request.state, "principal", None),
+            event_type=event_type,
+            step_id=step_id,
+            attempt=attempt,
+            provider=provider,
             limit=limit,
         )
     except AgentRunAccessDeniedError as exc:

@@ -39,6 +39,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunStatus,
 )
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+from app.control_plane.agent_run_events.models import AgentRunEventsPage
 from app.control_plane.agent_run_events.repository import (
     AgentRunEventsRepository,
 )
@@ -849,8 +850,12 @@ class AgentRunApplicationService:
         *,
         tenant_id: str | None = None,
         principal: str | None = None,
+        event_type: AgentExecutionEventType | None = None,
+        step_id: str | None = None,
+        attempt: int | None = None,
+        provider: str | None = None,
         limit: int = 100,
-    ) -> list[AgentExecutionEvent]:
+    ) -> AgentRunEventsPage:
         self._validate_identity_context(
             tenant_id=tenant_id,
             principal=principal,
@@ -880,6 +885,10 @@ class AgentRunApplicationService:
 
         return self._events_repository.list(
             run_id,
+            event_type=event_type,
+            step_id=step_id,
+            attempt=attempt,
+            provider=provider,
             limit=limit,
         )
 

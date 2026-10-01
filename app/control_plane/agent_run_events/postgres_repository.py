@@ -67,7 +67,7 @@ class PostgreSQLAgentRunEventsRepository:
 
         return event
 
-    def list(
+    def list_page(
         self,
         run_id: str,
         *,
@@ -121,12 +121,61 @@ class PostgreSQLAgentRunEventsRepository:
 
         records = self._session.scalars(statement).all()
 
+        has_more = len(records) > limit
+
+        records = records[:limit]
+
         events = [self._to_domain(record) for record in records]
 
         if attempt is not None:
             events = [event for event in events if event.attempt == attempt]
 
-        return events
+        next_cursor = None
+
+        if has_more and records:
+            from app.control_plane.agent_run_events.cursor import (
+                encode_cursor,
+            )
+
+            last_record = records[-1]
+
+            next_cursor = encode_cursor(
+                created_at=last_record.created_at,
+                event_id=last_record.id,
+            )
+
+        from app.control_plane.agent_run_events.models import (
+            AgentRunEventsPage,
+        )
+
+        return AgentRunEventsPage(
+            events=events,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    def list(
+        self,
+        run_id: str,
+        *,
+        event_type: AgentExecutionEventType | None = None,
+        step_id: str | None = None,
+        attempt: int | None = None,
+        provider: str | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> list[AgentExecutionEvent]:
+        page = self.list_page(
+            run_id,
+            event_type=event_type,
+            step_id=step_id,
+            attempt=attempt,
+            provider=provider,
+            cursor=cursor,
+            limit=limit,
+        )
+
+        return page.events
 
     @staticmethod
     def _to_domain(record: AgentRunEventRecord) -> AgentExecutionEvent:
