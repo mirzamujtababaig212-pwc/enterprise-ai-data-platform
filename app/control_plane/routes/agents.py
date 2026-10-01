@@ -932,6 +932,7 @@ async def list_agent_run_events(
                 step_id=event.step_id,
                 step_index=event.step_index,
                 step_name=event.step_name,
+                attempt=event.attempt,
                 provider=event.provider,
                 model=event.model,
                 metadata=event.metadata,

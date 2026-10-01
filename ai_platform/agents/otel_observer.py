@@ -614,6 +614,13 @@ class OpenTelemetryAgentExecutionObserver(AgentExecutionObserver):
             "orchestration.step.name",
             event.step_name,
         )
+
+        if event.attempt is not None:
+            span.set_attribute(
+                "orchestration.step.attempt",
+                event.attempt,
+            )
+
         span.set_attribute(
             "orchestration.step.status",
             "running",

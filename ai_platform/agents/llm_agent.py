@@ -731,6 +731,7 @@ class LLMAgent:
         event_type: AgentExecutionEventType,
         step_index: int,
         *,
+        attempt: int | None = None,
         metadata: dict[str, object] | None = None,
     ) -> None:
         step = context.orchestration_state.steps[step_index]
@@ -745,6 +746,7 @@ class LLMAgent:
                 step_id=step.step_id,
                 step_index=step.step_index,
                 step_name=step.name,
+                attempt=attempt,
                 metadata={} if metadata is None else metadata,
             )
         )
@@ -753,22 +755,30 @@ class LLMAgent:
         self,
         context: AgentExecutionContext,
         step_index: int,
+        *,
+        attempt: int | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         await self._emit_orchestration_step_event(
             context,
             AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
             step_index,
+            attempt=attempt,
+            metadata=metadata,
         )
 
     async def _emit_orchestration_step_completed(
         self,
         context: AgentExecutionContext,
         step_index: int,
+        *,
+        attempt: int | None = None,
     ) -> None:
         await self._emit_orchestration_step_event(
             context,
             AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
             step_index,
+            attempt=attempt,
         )
 
     async def _emit_orchestration_step_failed(
@@ -776,28 +786,35 @@ class LLMAgent:
         context: AgentExecutionContext,
         step_index: int,
         *,
+        attempt: int | None = None,
         error_type: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
-        metadata = {}
+        event_metadata = {} if metadata is None else dict(metadata)
+
         if error_type is not None:
-            metadata["error_type"] = error_type
+            event_metadata["error_type"] = error_type
 
         await self._emit_orchestration_step_event(
             context,
             AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
             step_index,
-            metadata=metadata,
+            attempt=attempt,
+            metadata=event_metadata,
         )
 
     async def _emit_orchestration_step_cancelled(
         self,
         context: AgentExecutionContext,
         step_index: int,
+        *,
+        attempt: int | None = None,
     ) -> None:
         await self._emit_orchestration_step_event(
             context,
             AgentExecutionEventType.ORCHESTRATION_STEP_CANCELLED,
             step_index,
+            attempt=attempt,
         )
 
     @staticmethod
@@ -1203,10 +1220,26 @@ class LLMAgent:
             step,
         )
 
+        durable_repository = context.get_agent_run_steps_repository()
+        durable_step = (
+            durable_repository.get(context.run_id, step.step_id)
+            if durable_repository is not None and context.run_id is not None
+            else None
+        )
+
         await self._emit_orchestration_step_started(
             context,
             step.step_index,
+            attempt=durable_step.attempt if durable_step is not None else None,
+            metadata=(
+                dict(durable_step.metadata)
+                if durable_step is not None and durable_step.metadata
+                else None
+            ),
         )
+
+        if durable_repository is not None:
+            durable_repository.close()
 
         return step.step_index
 
@@ -1369,10 +1402,21 @@ class LLMAgent:
             output=step_result.output if step_result is not None else None,
         )
 
+        durable_repository = context.get_agent_run_steps_repository()
+        durable_step = (
+            durable_repository.get(context.run_id, completed_step.step_id)
+            if durable_repository is not None and context.run_id is not None
+            else None
+        )
+
         await self._emit_orchestration_step_completed(
             context,
             step_index,
+            attempt=durable_step.attempt if durable_step is not None else None,
         )
+
+        if durable_repository is not None:
+            durable_repository.close()
 
     async def _record_orchestration_tool_result(
         self,
@@ -1444,10 +1488,21 @@ class LLMAgent:
             output=tool_result.output,
         )
 
+        durable_repository = context.get_agent_run_steps_repository()
+        durable_step = (
+            durable_repository.get(context.run_id, completed_step.step_id)
+            if durable_repository is not None and context.run_id is not None
+            else None
+        )
+
         await self._emit_orchestration_step_completed(
             context,
             step.step_index,
+            attempt=durable_step.attempt if durable_step is not None else None,
         )
+
+        if durable_repository is not None:
+            durable_repository.close()
 
     def _restore_orchestration_tool_result_from_messages(
         self,
@@ -1696,6 +1751,17 @@ class LLMAgent:
                             f"{context.run_id}/{step.step_id}"
                         )
 
+                    if decision.allowed:
+                        await self._emit_orchestration_step_failed(
+                            context,
+                            step.step_index,
+                            attempt=durable_step.attempt,
+                            error_type=type(exc).__name__,
+                            metadata={
+                                "retry": dict(failed_step.metadata.get("retry", {})),
+                            },
+                        )
+
                     if not decision.allowed:
                         raise
 
@@ -1715,6 +1781,13 @@ class LLMAgent:
                         )
 
                     durable_step = retried_step
+
+                    await self._emit_orchestration_step_started(
+                        context,
+                        step.step_index,
+                        attempt=durable_step.attempt,
+                        metadata=dict(durable_step.metadata),
+                    )
 
                     if decision.delay_seconds > 0.0:
                         await asyncio.sleep(decision.delay_seconds)

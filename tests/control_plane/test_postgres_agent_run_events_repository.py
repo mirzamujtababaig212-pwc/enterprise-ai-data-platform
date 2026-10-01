@@ -24,6 +24,7 @@ def make_event(
     step_id: str | None = None,
     step_index: int | None = None,
     step_name: str | None = None,
+    attempt: int | None = None,
     provider: str | None = None,
     model: str | None = None,
     metadata: dict | None = None,
@@ -41,6 +42,7 @@ def make_event(
         step_id=step_id,
         step_index=step_index,
         step_name=step_name,
+        attempt=attempt,
         provider=provider,
         model=model,
         metadata={} if metadata is None else metadata,
@@ -170,6 +172,42 @@ def test_record_preserves_tool_event_fields() -> None:
         assert restored[0].tool_round == 2
         assert restored[0].tool_name == "vehicle_lookup"
         assert restored[0].call_id == "call-123"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_record_round_trip_preserves_orchestration_attempt_without_metadata_leak() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        event = make_event(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            step_id="produce_answer",
+            step_index=2,
+            step_name="Produce answer",
+            attempt=2,
+            metadata={
+                "retry": {
+                    "category": "timeout",
+                    "retry_allowed": True,
+                }
+            },
+        )
+
+        repository.record(event)
+
+        restored = repository.list("run-1")
+
+        assert restored == [event]
+        assert restored[0].attempt == 2
+        assert restored[0].metadata == {
+            "retry": {
+                "category": "timeout",
+                "retry_allowed": True,
+            }
+        }
+        assert "_event_attempt" not in restored[0].metadata
     finally:
         session.close()
         engine.dispose()

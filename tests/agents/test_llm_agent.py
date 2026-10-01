@@ -3545,6 +3545,7 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
 
     gateway = RetryGateway()
     repository = InMemoryAgentRunStepsRepository()
+    observer = FakeAgentExecutionObserver()
     run_id = "run-llm-retry-success"
 
     context = AgentExecutionContext(
@@ -3578,6 +3579,7 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
 
     agent = LLMAgent(
         definition,
+        observer=observer,
         retry_policy=RetryPolicy(
             max_attempts=3,
             initial_backoff_seconds=0,
@@ -3607,6 +3609,39 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
         "retry_allowed": True,
         "retry_reason": ("Category 'timeout' is retryable on attempt 1/3"),
         "backoff_seconds": 0.0,
+    }
+
+    orchestration_events = [
+        event
+        for event in observer.events
+        if event.event_type
+        in {
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        }
+    ]
+
+    assert [(event.event_type, event.attempt) for event in orchestration_events] == [
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_FAILED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 2),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, 2),
+    ]
+
+    failed_event = orchestration_events[1]
+    assert failed_event.metadata == {
+        "retry": {
+            "category": "timeout",
+            "disposition": "retryable",
+            "provider_category": "timeout",
+            "attempt": 1,
+            "max_attempts": 3,
+            "retry_allowed": True,
+            "retry_reason": ("Category 'timeout' is retryable on attempt 1/3"),
+            "backoff_seconds": 0.0,
+        },
+        "error_type": "TimeoutError",
     }
 
 

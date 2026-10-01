@@ -67,6 +67,7 @@ class AgentExecutionEvent:
     step_id: str | None = None
     step_index: int | None = None
     step_name: str | None = None
+    attempt: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -155,6 +156,13 @@ class AgentExecutionEvent:
 
             if not self.step_name.strip():
                 raise ValueError("Agent execution event step_name must not be empty.")
+
+        if self.attempt is not None:
+            if isinstance(self.attempt, bool) or not isinstance(self.attempt, int):
+                raise TypeError("Agent execution event attempt must be an integer or None.")
+
+            if self.attempt < 1:
+                raise ValueError("Agent execution event attempt must be >= 1.")
 
         if not isinstance(self.metadata, dict):
             raise TypeError("Agent execution event metadata must be a dictionary.")

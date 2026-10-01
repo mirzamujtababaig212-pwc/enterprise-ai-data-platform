@@ -221,6 +221,49 @@ def test_agent_execution_event_accepts_orchestration_fields() -> None:
     assert event.step_name == "Retrieve evidence"
 
 
+def test_agent_execution_event_accepts_orchestration_attempt() -> None:
+    event = AgentExecutionEvent(
+        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+        agent_name="enterprise-rag-analyst",
+        step_id="retrieve_evidence",
+        step_index=0,
+        step_name="Retrieve evidence",
+        attempt=2,
+    )
+
+    assert event.attempt == 2
+
+
+@pytest.mark.parametrize(
+    "value",
+    [0, -1],
+)
+def test_agent_execution_event_rejects_invalid_orchestration_attempt_value(
+    value,
+) -> None:
+    with pytest.raises(ValueError, match="attempt"):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            agent_name="agent",
+            attempt=value,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, "1", 1.0],
+)
+def test_agent_execution_event_rejects_invalid_orchestration_attempt_type(
+    value,
+) -> None:
+    with pytest.raises(TypeError, match="attempt"):
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            agent_name="agent",
+            attempt=value,
+        )
+
+
 @pytest.mark.parametrize(
     "field_name,value",
     [

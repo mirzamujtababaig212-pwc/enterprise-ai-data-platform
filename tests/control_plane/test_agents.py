@@ -631,6 +631,7 @@ def test_list_agent_run_events_returns_events() -> None:
                 "step_id": None,
                 "step_index": None,
                 "step_name": None,
+                "attempt": None,
                 "provider": None,
                 "model": None,
                 "metadata": {"source": "test"},
@@ -647,6 +648,7 @@ def test_list_agent_run_events_returns_events() -> None:
                 "step_id": None,
                 "step_index": None,
                 "step_name": None,
+                "attempt": None,
                 "provider": "mock",
                 "model": "mock-gpt",
                 "metadata": {

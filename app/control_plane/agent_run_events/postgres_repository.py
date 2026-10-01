@@ -23,6 +23,11 @@ class PostgreSQLAgentRunEventsRepository:
         if event.run_id is None:
             return event
 
+        event_metadata = dict(event.metadata)
+
+        if event.attempt is not None:
+            event_metadata["_event_attempt"] = event.attempt
+
         record = AgentRunEventRecord(
             event_id=str(uuid4()),
             run_id=event.run_id,
@@ -39,7 +44,7 @@ class PostgreSQLAgentRunEventsRepository:
             step_name=event.step_name,
             provider=event.provider,
             model=event.model,
-            event_metadata=dict(event.metadata),
+            event_metadata=event_metadata,
         )
 
         try:
@@ -80,6 +85,9 @@ class PostgreSQLAgentRunEventsRepository:
     def _to_domain(record: AgentRunEventRecord) -> AgentExecutionEvent:
         from ai_platform.agents.observability import AgentExecutionEventType
 
+        metadata = dict(record.event_metadata)
+        attempt = metadata.pop("_event_attempt", None)
+
         return AgentExecutionEvent(
             event_type=AgentExecutionEventType(record.event_type),
             agent_name=record.agent_name,
@@ -93,7 +101,8 @@ class PostgreSQLAgentRunEventsRepository:
             step_id=record.step_id,
             step_index=record.step_index,
             step_name=record.step_name,
+            attempt=attempt,
             provider=record.provider,
             model=record.model,
-            metadata=dict(record.event_metadata),
+            metadata=metadata,
         )

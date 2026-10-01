@@ -76,6 +76,7 @@ class AgentRunEventResponse(BaseModel):
     step_id: str | None = None
     step_index: int | None = None
     step_name: str | None = None
+    attempt: int | None = None
 
     provider: str | None = None
     model: str | None = None
