@@ -10,6 +10,7 @@ from app.control_plane.agent_evaluations.application_service import (
 from app.control_plane.agent_evaluations.postgres_repository import (
     PostgreSQLAgentEvaluationRunsRepository,
 )
+from app.control_plane.agent_delegation.service import AgentDelegationService
 from app.control_plane.agent_run_events.postgres_repository import (
     PostgreSQLAgentRunEventsRepository,
 )
@@ -203,6 +204,38 @@ async def test_get_agent_evaluation_application_service_uses_injected_session() 
         PostgreSQLAgentEvaluationRunsRepository,
     )
     assert service._evaluation_repository._session is session
+
+
+@pytest.mark.asyncio
+async def test_get_agent_delegation_service_uses_injected_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    initialized = False
+
+    async def initialize_agents() -> None:
+        nonlocal initialized
+        initialized = True
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+
+    session = Mock()
+
+    service = await dependencies.get_agent_delegation_service(db=session)
+
+    assert isinstance(service, AgentDelegationService)
+    assert initialized is True
+    assert service._agent_registry is dependencies._agent_registry
+    assert isinstance(
+        service._agent_run_repository,
+        PostgreSQLAgentRunRepository,
+    )
+    assert service._agent_run_repository._session is session
+    assert service._agent_run_steps_repository_factory is not None
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,7 @@ from app.control_plane.agent_evaluations.application_service import (
 from app.control_plane.agent_evaluations.postgres_repository import (
     PostgreSQLAgentEvaluationRunsRepository,
 )
+from app.control_plane.agent_delegation.service import AgentDelegationService
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
@@ -487,6 +488,18 @@ async def initialize_agents() -> None:
 async def get_agent_runtime() -> AgentRuntime:
     await _initialize_agents()
     return _agent_runtime
+
+
+async def get_agent_delegation_service(
+    db: Session = Depends(get_db),
+) -> AgentDelegationService:
+    await _initialize_agents()
+
+    return AgentDelegationService(
+        agent_registry=_agent_registry,
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository_factory=_agent_run_steps_repository_factory,
+    )
 
 
 async def get_agent_run_application_service(
