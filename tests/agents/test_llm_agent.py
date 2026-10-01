@@ -81,6 +81,7 @@ from tools.execution.context import ToolExecutionContext
 from tools.authorization.service import ToolAuthorizationService
 from rag.governance import GovernancePolicy
 from rag.models import DocumentChunk, RetrievalResult
+from app.control_plane.retries.policy import RetryPolicy
 from ai_platform.agents.llm_agent import LLMAgent
 from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
 from memory.context.builder import MemoryContext
@@ -3510,6 +3511,418 @@ async def test_llm_agent_rejects_tool_execution_when_durable_binding_fails() -> 
         )
 
     assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
+    class RetryGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            if self.generate_count == 1:
+                raise TimeoutError("provider timeout")
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "Recovered answer.",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [],
+            }
+
+    definition = AgentDefinition(
+        name="retryable-llm-agent",
+        description="Test durable LLM retry.",
+        system_prompt="You are a retry test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = RetryGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-retry-success"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Answer after retry.",
+            session_id="session-llm-retry",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=OrchestrationPlan(
+            steps=(
+                OrchestrationStep(
+                    step_id="answer",
+                    step_index=0,
+                    name="Produce answer",
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+                ),
+            )
+        ),
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "Recovered answer."
+    assert gateway.generate_count == 2
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.attempt == 2
+    assert step.error is None
+    assert step.failure_category is None
+    assert step.completed_at is not None
+    assert step.metadata["retry"] == {
+        "category": "timeout",
+        "disposition": "retryable",
+        "provider_category": "timeout",
+        "attempt": 1,
+        "max_attempts": 3,
+        "retry_allowed": True,
+        "retry_reason": ("Category 'timeout' is retryable on attempt 1/3"),
+        "backoff_seconds": 0.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_retries_transient_provider_failure_until_third_attempt() -> None:
+    class RetryGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            if self.generate_count < 3:
+                raise TimeoutError(f"provider timeout {self.generate_count}")
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "Recovered on third attempt.",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [],
+            }
+
+    definition = AgentDefinition(
+        name="retryable-llm-agent-three-attempts",
+        description="Test multiple durable LLM retries.",
+        system_prompt="You are a retry test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = RetryGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-retry-third-attempt"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Answer after two retries.",
+            session_id="session-llm-retry-three",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    response = await agent.run(context)
+
+    assert response.output == "Recovered on third attempt."
+    assert gateway.generate_count == 3
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.attempt == 3
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_does_not_retry_non_retryable_provider_failure() -> None:
+    class NonRetryableGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            raise ValueError("invalid_request: malformed provider request")
+
+    definition = AgentDefinition(
+        name="non-retryable-llm-agent",
+        description="Test non-retryable LLM failure.",
+        system_prompt="You are a retry test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = NonRetryableGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-non-retryable"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Trigger a non-retryable failure.",
+            session_id="session-llm-non-retryable",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="invalid_request"):
+        await agent.run(context)
+
+    assert gateway.generate_count == 1
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.attempt == 1
+    assert step.failure_category == "invalid_request"
+    assert step.error == ("ValueError: invalid_request: malformed provider request")
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_stops_retrying_at_max_attempts() -> None:
+    class AlwaysTimeoutGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            raise TimeoutError("provider timeout")
+
+    definition = AgentDefinition(
+        name="max-attempts-llm-agent",
+        description="Test maximum durable LLM attempts.",
+        system_prompt="You are a retry test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = AlwaysTimeoutGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-max-attempts"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Trigger maximum retries.",
+            session_id="session-llm-max-attempts",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=2,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await agent.run(context)
+
+    assert gateway.generate_count == 2
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.attempt == 2
+    assert step.failure_category == "timeout"
+    assert step.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_marks_llm_ownership_loss_ambiguous_without_retry() -> None:
+    class OwnershipLossGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            raise AgentExecutionOwnershipLostError("execution ownership lost during LLM call")
+
+    definition = AgentDefinition(
+        name="llm-ownership-loss-agent",
+        description="Test ambiguous LLM ownership loss.",
+        system_prompt="You are an ownership test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = OwnershipLossGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-llm-ownership-loss"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Trigger ownership loss.",
+            session_id="session-llm-ownership-loss",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        execution_ownership_lost=asyncio.Event(),
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    with pytest.raises(AgentExecutionOwnershipLostError):
+        await agent.run(context)
+
+    assert gateway.generate_count == 1
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.AMBIGUOUS
+    assert step.failure_category == "execution_ambiguous"
+    assert step.completed_at is not None
 
 
 @pytest.mark.asyncio

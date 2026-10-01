@@ -26,6 +26,15 @@ from ai_platform.agents.failure_classification import (
     RuntimeFailureCategory,
     classify_runtime_failure,
 )
+from ai_platform.llm_gateway.reliability.failure_classifier import (
+    FailureCategory as ProviderFailureCategory,
+    ProviderFailureClassifier,
+)
+from app.control_plane.retries.models import (
+    FailureClassification,
+    FailureDisposition,
+)
+from app.control_plane.retries.policy import RetryPolicy
 from ai_platform.agents.decision_provider import AgentRuntimeDecisionResult
 from ai_platform.agents.orchestration import (
     AgentRuntimeDecision,
@@ -79,6 +88,8 @@ class LLMAgent:
         *,
         observer: AgentExecutionObserver | None = None,
         checkpoint_handler: AgentCheckpointHandler | None = None,
+        retry_policy: RetryPolicy | None = None,
+        provider_failure_classifier: ProviderFailureClassifier | None = None,
     ) -> None:
         if not isinstance(definition, AgentDefinition):
             raise TypeError("LLMAgent definition must be an AgentDefinition.")
@@ -86,6 +97,12 @@ class LLMAgent:
         self._definition = definition
         self._observer = observer
         self._checkpoint_handler = checkpoint_handler
+        self._retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
+        self._provider_failure_classifier = (
+            provider_failure_classifier
+            if provider_failure_classifier is not None
+            else ProviderFailureClassifier()
+        )
 
     @property
     def definition(self) -> AgentDefinition:
@@ -939,9 +956,12 @@ class LLMAgent:
             now = datetime.now(UTC)
 
             step_result = context.orchestration_state.get_step_result(step.step_id)
-            metadata = (
-                dict(step_result.metadata) if step_result is not None else dict(step.metadata)
-            )
+            metadata = dict(existing.metadata)
+
+            if step_result is not None:
+                metadata.update(step_result.metadata)
+            else:
+                metadata.update(step.metadata)
 
             repository.transition(
                 context.run_id,
@@ -1527,6 +1547,178 @@ class LLMAgent:
 
         return next_step.step_index
 
+    def _classify_llm_failure(
+        self,
+        exc: BaseException,
+    ) -> FailureClassification:
+        """Translate provider failure taxonomy into control-plane semantics."""
+        provider_category = self._provider_failure_classifier.classify(exc)
+
+        retryable_categories = {
+            ProviderFailureCategory.TRANSIENT,
+            ProviderFailureCategory.RATE_LIMITED,
+            ProviderFailureCategory.TIMEOUT,
+        }
+
+        if provider_category in retryable_categories:
+            disposition = FailureDisposition.RETRYABLE
+        else:
+            disposition = FailureDisposition.NON_RETRYABLE
+
+        return FailureClassification(
+            category=(
+                "rate_limit_exceeded"
+                if provider_category is ProviderFailureCategory.RATE_LIMITED
+                else provider_category.value
+            ),
+            disposition=disposition,
+            reason=("Provider failure classified as " f"'{provider_category.value}'"),
+            details={
+                "exception_type": type(exc).__name__,
+                "provider_category": provider_category.value,
+            },
+        )
+
+    async def _generate_with_durable_retry(
+        self,
+        context: AgentExecutionContext,
+        *,
+        messages: list[AgentMessage],
+        tools: tuple,
+        model_override: str | None,
+        provider_override: str | None,
+        max_tokens: int | None,
+    ):
+        """Generate an LLM response with durable step-level retry."""
+        step = context.orchestration_state.current_step
+
+        repository = context.get_agent_run_steps_repository()
+
+        if step is None or repository is None or context.run_id is None:
+            try:
+                return await context.llm.generate(
+                    prompt=context.request.input,
+                    messages=tuple(messages),
+                    tools=tools,
+                    model=model_override,
+                    provider=provider_override,
+                    user_id=context.user_id,
+                    metadata=context.metadata,
+                    max_tokens=max_tokens,
+                )
+            finally:
+                if repository is not None:
+                    repository.close()
+
+        durable_step = repository.get(
+            context.run_id,
+            step.step_id,
+        )
+
+        if durable_step is None:
+            repository.close()
+            raise RuntimeError(
+                "cannot retry missing durable orchestration step: "
+                f"{context.run_id}/{step.step_id}"
+            )
+
+        try:
+            while True:
+                try:
+                    return await context.llm.generate(
+                        prompt=context.request.input,
+                        messages=tuple(messages),
+                        tools=tools,
+                        model=model_override,
+                        provider=provider_override,
+                        user_id=context.user_id,
+                        metadata=context.metadata,
+                        max_tokens=max_tokens,
+                    )
+
+                except AgentExecutionWaitingForApprovalError:
+                    raise
+
+                except AgentExecutionOwnershipLostError as exc:
+                    if context.run_id is not None:
+                        await self._persist_orchestration_step_ambiguous(
+                            context,
+                            step,
+                            error=f"{type(exc).__name__}: {exc}",
+                            failure_category="execution_ambiguous",
+                        )
+                    raise
+
+                except asyncio.CancelledError:
+                    raise
+
+                except Exception as exc:
+                    classification = self._classify_llm_failure(exc)
+
+                    decision = self._retry_policy.evaluate(
+                        category=classification.category,
+                        disposition=classification.disposition,
+                        attempt=durable_step.attempt,
+                    )
+
+                    now = datetime.now(UTC)
+
+                    failed_step = repository.transition(
+                        context.run_id,
+                        step.step_id,
+                        status=AgentRunStepStatus.FAILED,
+                        updated_at=now,
+                        completed_at=now,
+                        error=f"{type(exc).__name__}: {exc}",
+                        failure_category=classification.category,
+                        metadata={
+                            **durable_step.metadata,
+                            "retry": {
+                                "category": classification.category,
+                                "disposition": (classification.disposition.value),
+                                "provider_category": classification.details.get(
+                                    "provider_category"
+                                ),
+                                "attempt": durable_step.attempt,
+                                "max_attempts": decision.max_attempts,
+                                "retry_allowed": decision.allowed,
+                                "retry_reason": decision.reason,
+                                "backoff_seconds": decision.delay_seconds,
+                            },
+                        },
+                        commit=not decision.allowed,
+                    )
+
+                    if failed_step is None:
+                        raise RuntimeError(
+                            "agent run step disappeared while persisting "
+                            f"LLM failure: "
+                            f"{context.run_id}/{step.step_id}"
+                        )
+
+                    if not decision.allowed:
+                        raise
+
+                    retried_step = repository.retry(
+                        context.run_id,
+                        step.step_id,
+                        updated_at=datetime.now(UTC),
+                        started_at=datetime.now(UTC),
+                        commit=True,
+                    )
+
+                    if retried_step is None:
+                        raise RuntimeError(
+                            "agent run step disappeared while starting "
+                            f"retry: "
+                            f"{context.run_id}/{step.step_id}"
+                        )
+
+                    durable_step = retried_step
+
+        finally:
+            repository.close()
+
     async def _continue(
         self,
         context: AgentExecutionContext,
@@ -1625,14 +1817,12 @@ class LLMAgent:
                     model_override = context.request.model_governance.effective_model
                     provider_override = context.request.model_governance.effective_provider
 
-                result = await context.llm.generate(
-                    prompt=context.request.input,
-                    messages=tuple(messages),
+                result = await self._generate_with_durable_retry(
+                    context,
+                    messages=messages,
                     tools=tuple(tools),
-                    model=model_override,
-                    provider=provider_override,
-                    user_id=context.user_id,
-                    metadata=context.metadata,
+                    model_override=model_override,
+                    provider_override=provider_override,
                     max_tokens=max_tokens,
                 )
 
