@@ -33,6 +33,12 @@ from tools.models import ToolDefinition
 from tools.registry.in_memory import InMemoryToolRegistry
 from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.llm_messages import user_message
+from ai_platform.agents.orchestration import (
+    OrchestrationPlan,
+    OrchestrationStep,
+    OrchestrationStepCompletionPolicy,
+    OrchestrationStepStatus,
+)
 from app.control_plane.agent_checkpoints.postgres_repository import (
     PostgreSQLAgentCheckpointsRepository,
 )
@@ -61,6 +67,7 @@ from app.control_plane.agent_runs.recovery_service import (
 from app.control_plane.agent_runs.request_snapshot import (
     AgentRunRequestSnapshot,
 )
+from app.control_plane.retries import RetryPolicy
 from memory.service import MemoryService
 from memory.stores.postgres import PostgreSQLMemoryStore
 
@@ -485,6 +492,350 @@ def test_postgres_recovery_preserves_durable_memory_namespace() -> None:
                 cleanup_memory.commit()
             finally:
                 cleanup_memory.close()
+
+        session.close()
+        engine.dispose()
+
+
+class SimulatedProcessCrash(BaseException):
+    """Interrupt execution without allowing application failure handling."""
+
+
+class RetryRecoveryLLMGateway:
+    def __init__(self) -> None:
+        self.requests = []
+        self.call_count = 0
+
+    async def route_chat(self, request):
+        self.requests.append(request)
+        self.call_count += 1
+
+        if self.call_count == 1:
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [
+                    AgentToolCall(
+                        call_id="retry-recovery-call-001",
+                        name="crash.boundary.tool",
+                        arguments={"value": "fleet-42"},
+                    ),
+                ],
+            }
+
+        if self.call_count == 2:
+            raise TimeoutError("simulated transient provider timeout")
+
+        if self.call_count == 3:
+            raise SimulatedProcessCrash(
+                "simulated process crash while retry attempt 2 was executing"
+            )
+
+        return {
+            "provider": "fake",
+            "model": request["model"],
+            "reply": "Recovered successfully on durable retry attempt 2.",
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 8,
+                "total_tokens": 28,
+            },
+            "tool_calls": [],
+        }
+
+
+class RetryRecoveryPlanProvider:
+    def build_plan(self, context) -> OrchestrationPlan:
+        return OrchestrationPlan(
+            steps=(
+                OrchestrationStep(
+                    step_id="execute_tool",
+                    step_index=0,
+                    name="Execute crash boundary tool",
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                    metadata={
+                        "phase": "tool_execution",
+                        "completion_tool_name": "crash.boundary.tool",
+                    },
+                ),
+                OrchestrationStep(
+                    step_id="produce_answer",
+                    step_index=1,
+                    name="Produce final answer",
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+                    metadata={
+                        "phase": "response_generation",
+                    },
+                ),
+            )
+        )
+
+
+def test_postgres_recovery_reuses_retry_attempt_after_process_crash() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    run_id = "postgres-retry-attempt-recovery-e2e"
+    session = session_factory()
+
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+
+        request = AgentRequest(
+            input="Execute the fleet-42 recovery operation.",
+            session_id="session-retry-recovery",
+            user_id="user-retry-recovery",
+            metadata={
+                "request_id": "retry-attempt-recovery-request",
+                "source": "integration-test",
+            },
+        )
+
+        run_repository.create(
+            AgentRun(
+                run_id=run_id,
+                agent_name="retry-recovery-agent",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                lease_id="initial-retry-recovery-lease",
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                request_snapshot=AgentRunRequestSnapshot.from_request(request),
+            )
+        )
+
+        tool = CrashBoundaryTool()
+        tool_registry = InMemoryToolRegistry()
+
+        import asyncio
+
+        asyncio.run(tool_registry.register(tool))
+
+        idempotency_store = PostgreSQLToolExecutionIdempotencyStore(
+            session_factory,
+        )
+        tool_execution_service = ToolExecutionService(
+            tool_registry,
+            idempotency_store=idempotency_store,
+        )
+
+        llm_gateway = RetryRecoveryLLMGateway()
+        registry = InMemoryAgentRegistry()
+
+        definition = AgentDefinition(
+            name="retry-recovery-agent",
+            description="Durable retry recovery integration agent.",
+            system_prompt=(
+                "Execute the requested operation using the available tool "
+                "and then provide the final answer."
+            ),
+            model="fake-model",
+            temperature=0.0,
+            max_tokens=256,
+            tool_names=("crash.boundary.tool",),
+        )
+
+        checkpoint_handler = CrashBoundaryCheckpointHandler(session_factory)
+        checkpoint_handler.suppress_after_tool_checkpoint = False
+
+        observer = PostgreSQLAgentRunEventObserver(session_factory)
+
+        agent = LLMAgent(
+            definition,
+            observer=observer,
+            checkpoint_handler=checkpoint_handler,
+            retry_policy=RetryPolicy(
+                max_attempts=3,
+                initial_backoff_seconds=0.0,
+                jitter=0.0,
+            ),
+        )
+
+        asyncio.run(registry.register(agent))
+
+        runtime = AgentRuntime(
+            registry,
+            tool_registry=tool_registry,
+            tool_execution_service=tool_execution_service,
+            llm_gateway=llm_gateway,
+            agent_run_steps_repository_factory=lambda: (
+                PostgreSQLAgentRunStepsRepository(session_factory())
+            ),
+            plan_provider=RetryRecoveryPlanProvider(),
+        )
+
+        # Call 1 executes the tool and creates the durable AFTER_TOOL
+        # checkpoint. Call 2 fails transiently, causing the production retry
+        # path to persist FAILED/attempt 1 and then RUNNING/attempt 2.
+        # Call 3 simulates process death while attempt 2 is executing.
+        with pytest.raises(SimulatedProcessCrash, match="retry attempt 2"):
+            asyncio.run(
+                runtime.run(
+                    "retry-recovery-agent",
+                    request,
+                    run_id=run_id,
+                )
+            )
+
+        assert tool.execution_count == 1
+        assert llm_gateway.call_count == 3
+
+        checkpoint = checkpoint_repository.get_latest(run_id)
+
+        assert checkpoint is not None
+        assert checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
+        assert checkpoint.tool_round == 1
+
+        # The process disappeared after retry() committed attempt 2 to RUNNING.
+        # Recovery must therefore resume that existing attempt instead of
+        # creating attempt 3.
+        running_step_record = session.scalar(
+            select(AgentRunStepRecord).where(
+                AgentRunStepRecord.run_id == run_id,
+                AgentRunStepRecord.status == AgentRunStepStatus.RUNNING.value,
+                AgentRunStepRecord.step_type == "model",
+            )
+        )
+
+        assert running_step_record is not None
+
+        step_repository = PostgreSQLAgentRunStepsRepository(session)
+        stranded_step = step_repository.get(
+            run_id,
+            running_step_record.step_id,
+        )
+
+        assert stranded_step is not None
+        assert stranded_step.status is AgentRunStepStatus.RUNNING
+        assert stranded_step.attempt == 2
+        assert stranded_step.metadata["retry"]["category"] == "timeout"
+        assert stranded_step.metadata["retry"]["disposition"] == "retryable"
+        assert stranded_step.metadata["retry"]["attempt"] == 1
+        assert stranded_step.metadata["retry"]["max_attempts"] == 3
+        assert stranded_step.metadata["retry"]["retry_allowed"] is True
+
+        stranded_run = run_repository.get(run_id)
+
+        assert stranded_run is not None
+        assert stranded_run.status is AgentRunStatus.RUNNING
+
+        # Simulate the crashed worker disappearing by expiring its lease.
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == run_id)
+            .values(
+                lease_expires_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+        )
+        session.commit()
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            observer=observer,
+            tool_idempotency_store=idempotency_store,
+            lease_seconds=60,
+            max_recovery_attempts=3,
+        )
+
+        results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert results.failed_run_ids == ()
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == run_id
+        assert results.recovered[0].response.output == (
+            "Recovered successfully on durable retry attempt 2."
+        )
+
+        session.expire_all()
+
+        restored_step = step_repository.get(
+            run_id,
+            running_step_record.step_id,
+        )
+
+        assert restored_step is not None
+        assert restored_step.status is AgentRunStepStatus.COMPLETED
+
+        # Critical invariant: recovery reused durable attempt 2.
+        assert restored_step.attempt == 2
+
+        assert restored_step.error is None
+        assert restored_step.failure_category is None
+
+        # Retry metadata must survive the RUNNING → COMPLETED transition.
+        assert restored_step.metadata["retry"] == {
+            "category": "timeout",
+            "disposition": "retryable",
+            "provider_category": "timeout",
+            "attempt": 1,
+            "max_attempts": 3,
+            "retry_allowed": True,
+            "retry_reason": ("Category 'timeout' is retryable on attempt 1/3"),
+            "backoff_seconds": 0.0,
+        }
+
+        restored_run = run_repository.get(run_id)
+
+        assert restored_run is not None
+        assert restored_run.status is AgentRunStatus.COMPLETED
+        assert restored_run.output == ("Recovered successfully on durable retry attempt 2.")
+
+        # Calls:
+        #   1 = initial LLM request producing the tool call
+        #   2 = attempt 1 transient failure
+        #   3 = attempt 2 process crash
+        #   4 = recovery of the already-persisted attempt 2
+        assert llm_gateway.call_count == 4
+
+        # The tool side effect occurred only once before the checkpoint.
+        assert tool.execution_count == 1
+
+    finally:
+        session.rollback()
+
+        session.execute(
+            delete(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunStepRecord).where(
+                AgentRunStepRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunCheckpointRecord).where(
+                AgentRunCheckpointRecord.run_id == run_id,
+            )
+        )
+        session.execute(
+            delete(AgentRunRecord).where(
+                AgentRunRecord.run_id == run_id,
+            )
+        )
+        session.commit()
 
         session.close()
         engine.dispose()
