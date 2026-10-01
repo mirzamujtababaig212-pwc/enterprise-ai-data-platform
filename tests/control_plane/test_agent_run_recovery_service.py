@@ -538,6 +538,183 @@ async def test_recovery_claims_failed_run_and_resumes_from_checkpoint():
 
 
 @pytest.mark.asyncio
+async def test_recovery_reconciles_terminal_run_after_successful_persistence():
+    repository = RecordingRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    reconciled = []
+
+    def reconcile_terminal_run(recovered_run: AgentRun) -> None:
+        persisted = repository.get(recovered_run.run_id)
+        assert persisted is not None
+        assert persisted.status is AgentRunStatus.COMPLETED
+        assert recovered_run.status is AgentRunStatus.COMPLETED
+        reconciled.append(recovered_run)
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        terminal_run_reconciler=reconcile_terminal_run,
+    )
+
+    await service.recover("run-123")
+
+    assert len(reconciled) == 1
+    assert reconciled[0].run_id == "run-123"
+    assert reconciled[0].status is AgentRunStatus.COMPLETED
+    assert reconciled[0].output == "Recovered successfully."
+
+
+@pytest.mark.asyncio
+async def test_recovery_reconciles_terminal_run_after_failed_persistence():
+    class FailingRuntime:
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+            lease_id=None,
+            execution_ownership_lost=None,
+            cancellation_requested=None,
+        ):
+            raise RuntimeError("recovered execution failed")
+
+    repository = RecordingRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    reconciled = []
+
+    def reconcile_terminal_run(recovered_run: AgentRun) -> None:
+        persisted = repository.get(recovered_run.run_id)
+        assert persisted is not None
+        assert persisted.status is AgentRunStatus.FAILED
+        assert recovered_run.status is AgentRunStatus.FAILED
+        reconciled.append(recovered_run)
+
+    service = AgentRunRecoveryService(
+        runtime=FailingRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        terminal_run_reconciler=reconcile_terminal_run,
+    )
+
+    with pytest.raises(RuntimeError, match="recovered execution failed"):
+        await service.recover("run-123")
+
+    assert len(reconciled) == 1
+    assert reconciled[0].run_id == "run-123"
+    assert reconciled[0].status is AgentRunStatus.FAILED
+    assert reconciled[0].error_type == "RuntimeError"
+    assert reconciled[0].error_message == "recovered execution failed"
+
+
+@pytest.mark.asyncio
+async def test_recovery_reconciliation_failure_does_not_replace_original_execution_failure():
+    class FailingRuntime:
+        async def resume(
+            self,
+            agent_name,
+            request,
+            checkpoint,
+            *,
+            run_id=None,
+            lease_id=None,
+            execution_ownership_lost=None,
+            cancellation_requested=None,
+        ):
+            raise RuntimeError("original recovery failure")
+
+    repository = RecordingRepository()
+
+    run = failed_run(
+        request_snapshot=request_snapshot(),
+    )
+    repository.create(run)
+
+    def reconcile_terminal_run(recovered_run: AgentRun) -> None:
+        assert recovered_run.status is AgentRunStatus.FAILED
+        raise RuntimeError("parent reconciliation failed")
+
+    service = AgentRunRecoveryService(
+        runtime=FailingRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+        terminal_run_reconciler=reconcile_terminal_run,
+    )
+
+    with pytest.raises(RuntimeError, match="original recovery failure"):
+        await service.recover("run-123")
+
+    persisted = repository.get("run-123")
+
+    assert persisted is not None
+    assert persisted.status is AgentRunStatus.FAILED
+    assert persisted.error_type == "RuntimeError"
+    assert persisted.error_message == "original recovery failure"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_reconciles_recovery_exhausted_run():
+    repository = RecordingRepository()
+
+    exhausted = AgentRun(
+        run_id="run-exhausted",
+        agent_name="recoverable-agent",
+        session_id="session-exhausted",
+        user_id="user-exhausted",
+        status=AgentRunStatus.RUNNING,
+        started_at=datetime.now(UTC),
+        lease_id="lease-exhausted",
+        lease_expires_at=datetime.now(UTC),
+        recovery_attempts=3,
+        metadata={},
+    )
+    repository.create(exhausted)
+
+    reconciled = []
+
+    def reconcile_terminal_run(recovered_run: AgentRun) -> None:
+        persisted = repository.get(recovered_run.run_id)
+        assert persisted is not None
+        assert persisted.status is AgentRunStatus.FAILED
+        assert persisted.error_type == RecoveryExhaustedError.__name__
+        reconciled.append(recovered_run)
+
+    service = AgentRunRecoveryService(
+        runtime=FakeRuntime(),
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(None),
+        terminal_run_reconciler=reconcile_terminal_run,
+        max_recovery_attempts=3,
+    )
+
+    results = await service.recover_stale_runs(limit=10)
+
+    assert results.recovered == ()
+    assert results.failed_run_ids == ()
+    assert len(reconciled) == 1
+    assert reconciled[0].run_id == "run-exhausted"
+    assert reconciled[0].status is AgentRunStatus.FAILED
+
+    persisted = repository.get("run-exhausted")
+
+    assert persisted is not None
+    assert persisted.status is AgentRunStatus.FAILED
+    assert persisted.error_type == RecoveryExhaustedError.__name__
+
+
+@pytest.mark.asyncio
 async def test_recovery_rejects_memory_namespace_removed_by_current_tenant_policy():
     repository = RecordingRepository()
 

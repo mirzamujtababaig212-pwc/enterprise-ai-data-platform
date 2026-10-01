@@ -284,6 +284,169 @@ async def test_get_agent_run_application_service_uses_configured_lease_duration(
     assert service._cancellation_registry is dependencies._agent_run_cancellation_registry
 
 
+def test_build_delegated_child_reconciler_reconciles_delegated_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    session = Mock()
+    delegation_service = Mock(spec=AgentDelegationService)
+
+    monkeypatch.setattr(
+        dependencies,
+        "AgentDelegationService",
+        lambda **kwargs: delegation_service,
+    )
+
+    reconciler = dependencies._build_delegated_child_reconciler(session)
+
+    run = Mock()
+    run.parent_run_id = "parent-run-123"
+    run.parent_step_id = "step-456"
+
+    reconciler(run)
+
+    delegation_service.reconcile_child_run.assert_called_once_with(
+        parent_run_id="parent-run-123",
+        parent_step_id="step-456",
+        child_run=run,
+    )
+
+
+def test_build_delegated_child_reconciler_ignores_root_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    session = Mock()
+    delegation_service = Mock(spec=AgentDelegationService)
+
+    monkeypatch.setattr(
+        dependencies,
+        "AgentDelegationService",
+        lambda **kwargs: delegation_service,
+    )
+
+    reconciler = dependencies._build_delegated_child_reconciler(session)
+
+    run = Mock()
+    run.parent_run_id = None
+    run.parent_step_id = None
+
+    reconciler(run)
+
+    delegation_service.reconcile_child_run.assert_not_called()
+
+
+def test_build_delegated_child_reconciler_requires_complete_parent_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    session = Mock()
+    delegation_service = Mock(spec=AgentDelegationService)
+
+    monkeypatch.setattr(
+        dependencies,
+        "AgentDelegationService",
+        lambda **kwargs: delegation_service,
+    )
+
+    reconciler = dependencies._build_delegated_child_reconciler(session)
+
+    run = Mock()
+    run.parent_run_id = "parent-run-123"
+    run.parent_step_id = None
+
+    reconciler(run)
+
+    delegation_service.reconcile_child_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_agent_run_recovery_service_wires_delegated_child_reconciler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=123,
+        agent_run_max_recovery_attempts=3,
+    )
+
+    async def initialize_agents() -> None:
+        return None
+
+    reconciler = Mock()
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies.Settings.from_environment",
+        classmethod(lambda cls: configured_settings),
+    )
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "_build_delegated_child_reconciler",
+        Mock(return_value=reconciler),
+    )
+
+    service = await get_agent_run_recovery_service(db=Mock())
+
+    assert isinstance(service, AgentRunRecoveryService)
+    assert service._terminal_run_reconciler is reconciler
+
+
+@pytest.mark.asyncio
+async def test_build_agent_run_recovery_service_wires_delegated_child_reconciler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.control_plane import dependencies
+
+    configured_settings = Settings(
+        environment="test",
+        aws_region="us-east-1",
+        default_provider="mock",
+        log_level="INFO",
+        provider_credentials={},
+        external_evaluation_release_required=False,
+        agent_run_lease_duration_seconds=123,
+        agent_run_max_recovery_attempts=3,
+    )
+
+    async def initialize_agents() -> None:
+        return None
+
+    reconciler = Mock()
+
+    monkeypatch.setattr(
+        "app.control_plane.dependencies.Settings.from_environment",
+        classmethod(lambda cls: configured_settings),
+    )
+    monkeypatch.setattr(
+        "app.control_plane.dependencies._initialize_agents",
+        initialize_agents,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "_build_delegated_child_reconciler",
+        Mock(return_value=reconciler),
+    )
+
+    service = await dependencies.build_agent_run_recovery_service(Mock())
+
+    assert isinstance(service, AgentRunRecoveryService)
+    assert service._terminal_run_reconciler is reconciler
+
+
 @pytest.mark.asyncio
 async def test_get_agent_run_recovery_service_uses_configured_lease_duration(
     monkeypatch: pytest.MonkeyPatch,

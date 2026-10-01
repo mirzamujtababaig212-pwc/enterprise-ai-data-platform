@@ -618,11 +618,34 @@ async def get_agent_run_approval_continuation_service(
     )
 
 
+def _build_delegated_child_reconciler(
+    db: Session,
+):
+    delegation_service = AgentDelegationService(
+        agent_registry=_agent_registry,
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository_factory=lambda: PostgreSQLAgentRunStepsRepository(db),
+    )
+
+    def reconcile_terminal_run(run) -> None:
+        if run.parent_run_id is None or run.parent_step_id is None:
+            return
+
+        delegation_service.reconcile_child_run(
+            parent_run_id=run.parent_run_id,
+            parent_step_id=run.parent_step_id,
+            child_run=run,
+        )
+
+    return reconcile_terminal_run
+
+
 async def get_agent_run_recovery_service(
     db: Session = Depends(get_db),
 ) -> AgentRunRecoveryService:
     await _initialize_agents()
     app_settings = Settings.from_environment()
+    delegated_child_reconciler = _build_delegated_child_reconciler(db)
 
     return AgentRunRecoveryService(
         runtime=_agent_runtime,
@@ -634,6 +657,7 @@ async def get_agent_run_recovery_service(
         tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
+        terminal_run_reconciler=delegated_child_reconciler,
     )
 
 
@@ -642,6 +666,7 @@ async def build_agent_run_recovery_service(
 ) -> AgentRunRecoveryService:
     await _initialize_agents()
     app_settings = Settings.from_environment()
+    delegated_child_reconciler = _build_delegated_child_reconciler(db)
 
     return AgentRunRecoveryService(
         runtime=_agent_runtime,
@@ -653,6 +678,7 @@ async def build_agent_run_recovery_service(
         tenant_policy_engine=_tenant_policy_engine,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
         max_recovery_attempts=app_settings.agent_run_max_recovery_attempts,
+        terminal_run_reconciler=delegated_child_reconciler,
     )
 
 

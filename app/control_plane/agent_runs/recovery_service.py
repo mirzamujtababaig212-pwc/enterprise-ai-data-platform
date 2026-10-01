@@ -4,6 +4,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Callable
 
 from ai_platform.agents.exceptions import AgentExecutionOwnershipLostError
 from ai_platform.agents.observability import (
@@ -70,6 +71,7 @@ class AgentRunRecoveryService:
         tenant_policy_engine: TenantPolicyEngine | None = None,
         lease_seconds: int = 60,
         max_recovery_attempts: int = 3,
+        terminal_run_reconciler: Callable[[AgentRun], None] | None = None,
     ) -> None:
         if max_recovery_attempts <= 0:
             raise ValueError("max_recovery_attempts must be greater than zero.")
@@ -82,6 +84,16 @@ class AgentRunRecoveryService:
         self._tenant_policy_engine = tenant_policy_engine
         self._lease_seconds = lease_seconds
         self._max_recovery_attempts = max_recovery_attempts
+        self._terminal_run_reconciler = terminal_run_reconciler
+
+    def _reconcile_terminal_run(
+        self,
+        run: AgentRun | None,
+    ) -> None:
+        if self._terminal_run_reconciler is None or run is None:
+            return
+
+        self._terminal_run_reconciler(run)
 
     async def _emit(
         self,
@@ -208,6 +220,8 @@ class AgentRunRecoveryService:
                         f"the maximum of {self._max_recovery_attempts} recovery attempts."
                     ),
                 )
+
+                self._reconcile_terminal_run(exhausted_run)
 
                 if exhausted_run is not None:
                     await self._emit(
@@ -473,6 +487,8 @@ class AgentRunRecoveryService:
                 f"Agent run '{run.run_id}' lost lease ownership before completion.",
             )
 
+        self._reconcile_terminal_run(completed_run)
+
         duration_ms = round(
             (time.perf_counter() - recovery_started_at) * 1000,
             3,
@@ -506,13 +522,19 @@ class AgentRunRecoveryService:
         failed_at = datetime.now(UTC)
 
         try:
-            self._repository.fail_if_owner(
+            failed_run = self._repository.fail_if_owner(
                 run.run_id,
                 lease_id=run.lease_id,
                 completed_at=failed_at,
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
+
+            if failed_run is None:
+                failed_run = self._repository.get(run.run_id)
+
+            if failed_run is not None and failed_run.status is AgentRunStatus.FAILED:
+                self._reconcile_terminal_run(failed_run)
         except Exception:
             # Recovery must preserve the original execution failure.
             pass

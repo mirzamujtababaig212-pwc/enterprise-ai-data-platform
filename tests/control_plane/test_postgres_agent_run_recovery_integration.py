@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,6 +20,7 @@ from ai_platform.agents.tool_calls import AgentToolCall
 from app.control_plane.persistence.models import (
     AgentRunCheckpointRecord,
     AgentRunRecord,
+    AgentRunStepRecord,
     MemoryItemRecord,
     ToolExecutionIdempotencyRecord,
 )
@@ -33,6 +35,12 @@ from ai_platform.agents.observability import AgentExecutionEventType
 from ai_platform.agents.llm_messages import user_message
 from app.control_plane.agent_checkpoints.postgres_repository import (
     PostgreSQLAgentCheckpointsRepository,
+)
+from app.control_plane.agent_delegation.models import AgentDelegationRequest
+from app.control_plane.agent_delegation.service import AgentDelegationService
+from app.control_plane.agent_run_steps.models import AgentRunStepStatus
+from app.control_plane.agent_run_steps.postgres_repository import (
+    PostgreSQLAgentRunStepsRepository,
 )
 from app.control_plane.agent_runs.models import (
     AgentRun,
@@ -75,6 +83,7 @@ class FakeRuntime:
         run_id=None,
         lease_id=None,
         execution_ownership_lost=None,
+        cancellation_requested=None,
     ):
         self.calls.append(
             {
@@ -395,6 +404,7 @@ def test_postgres_recovery_preserves_durable_memory_namespace() -> None:
                 run_id=None,
                 lease_id=None,
                 execution_ownership_lost=None,
+                cancellation_requested=None,
             ):
                 recovered_requests.append(request)
 
@@ -405,6 +415,7 @@ def test_postgres_recovery_preserves_durable_memory_namespace() -> None:
                     run_id=run_id,
                     lease_id=lease_id,
                     execution_ownership_lost=execution_ownership_lost,
+                    cancellation_requested=cancellation_requested,
                 )
 
         runtime = MemoryRecoveryRuntime()
@@ -1166,6 +1177,262 @@ def test_postgres_recovery_does_not_repeat_side_effect_after_lease_loss() -> Non
         engine.dispose()
 
 
+def test_postgres_recovery_reconciles_delegated_child_completion() -> None:
+    engine = make_engine()
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    import asyncio
+
+    parent_run_id = "pg-delegated-recovery-parent"
+    child_run_id = None
+    parent_step_id = None
+
+    session = session_factory()
+
+    try:
+        run_repository = PostgreSQLAgentRunRepository(session)
+        checkpoint_repository = PostgreSQLAgentCheckpointsRepository(session)
+        step_repository = PostgreSQLAgentRunStepsRepository(session)
+
+        parent_request = AgentRequest(
+            input="Delegate fleet-42 recovery analysis.",
+            session_id="session-delegated-recovery",
+            user_id="user-delegated-recovery",
+            principal="api_key:delegated-recovery-principal",
+            tenant_id="tenant-delegated-recovery",
+            metadata={
+                "request_id": "delegated-recovery-parent-request",
+                "source": "phase-3d-integration-test",
+            },
+        )
+
+        parent = AgentRun(
+            run_id=parent_run_id,
+            agent_name="delegated-parent-agent",
+            root_run_id=parent_run_id,
+            session_id=parent_request.session_id,
+            user_id=parent_request.user_id,
+            principal=parent_request.principal,
+            tenant_id=parent_request.tenant_id,
+            status=AgentRunStatus.RUNNING,
+            started_at=datetime.now(UTC),
+            request_snapshot=AgentRunRequestSnapshot.from_request(parent_request),
+        )
+
+        run_repository.create(parent)
+
+        registry = InMemoryAgentRegistry()
+
+        delegated_agent = AgentDefinition(
+            name="recoverable-agent",
+            description="Delegated recovery target.",
+            system_prompt="Recover the requested operation.",
+        )
+
+        agent = LLMAgent(delegated_agent)
+        asyncio.run(registry.register(agent))
+
+        delegation_service = AgentDelegationService(
+            agent_registry=registry,
+            agent_run_repository=run_repository,
+            agent_run_steps_repository_factory=lambda: (
+                PostgreSQLAgentRunStepsRepository(session_factory())
+            ),
+        )
+
+        delegation_request = AgentDelegationRequest(
+            parent_run_id=parent_run_id,
+            child_agent_name="recoverable-agent",
+            child_request=AgentRequest(
+                input="Recover fleet-42 incidents.",
+                session_id=parent_request.session_id,
+                user_id=parent_request.user_id,
+                principal=parent_request.principal,
+                tenant_id=parent_request.tenant_id,
+                metadata={
+                    "source": "phase-3d-integration-test",
+                },
+            ),
+            idempotency_key="phase-3d-recovery-child",
+            causation_id="phase-3d-recovery-causation",
+        )
+
+        delegation = asyncio.run(
+            delegation_service.delegate(delegation_request),
+        )
+
+        child_run_id = delegation.child_run.run_id
+        parent_step_id = delegation.parent_step_id
+
+        # The parent delegation is now actively executing while the child
+        # worker is assumed to have disappeared.
+        now = datetime.now(UTC)
+
+        running_step = step_repository.transition(
+            parent_run_id,
+            parent_step_id,
+            status=AgentRunStepStatus.RUNNING,
+            updated_at=now,
+            started_at=now,
+        )
+
+        assert running_step is not None
+        assert running_step.status is AgentRunStepStatus.RUNNING
+
+        child = run_repository.get(child_run_id)
+        assert child is not None
+        assert child.status is AgentRunStatus.PENDING
+
+        expired_at = datetime.now(UTC) - timedelta(minutes=5)
+
+        session.execute(
+            update(AgentRunRecord)
+            .where(AgentRunRecord.run_id == child_run_id)
+            .values(
+                status=AgentRunStatus.RUNNING.value,
+                started_at=expired_at - timedelta(minutes=1),
+                lease_id="expired-delegated-child",
+                lease_expires_at=expired_at,
+            )
+        )
+        session.commit()
+
+        # The child has a durable recovery checkpoint. Recovery should be
+        # able to complete the child without invoking the delegation service
+        # to execute it again.
+        checkpoint = replace(
+            make_checkpoint(child_run_id),
+            agent_name="recoverable-agent",
+            session_id=child.session_id,
+            user_id=child.user_id,
+        )
+        checkpoint_repository.save(checkpoint)
+
+        runtime = FakeRuntime()
+
+        def reconcile_terminal_run(run: AgentRun) -> None:
+            if run.parent_run_id is None or run.parent_step_id is None:
+                return
+
+            delegation_service.reconcile_child_run(
+                parent_run_id=run.parent_run_id,
+                parent_step_id=run.parent_step_id,
+                child_run=run,
+            )
+
+        recovery_service = AgentRunRecoveryService(
+            runtime=runtime,
+            repository=run_repository,
+            checkpoints_repository=checkpoint_repository,
+            terminal_run_reconciler=reconcile_terminal_run,
+            lease_seconds=60,
+            max_recovery_attempts=3,
+        )
+
+        results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert len(results.recovered) == 1
+        assert results.recovered[0].run_id == child_run_id
+        assert results.recovered[0].response.output == ("Recovered from PostgreSQL checkpoint.")
+        assert results.failed_run_ids == ()
+
+        assert len(runtime.calls) == 1
+        assert runtime.calls[0]["run_id"] == child_run_id
+
+        session.expire_all()
+
+        recovered_child = run_repository.get(child_run_id)
+        assert recovered_child is not None
+        assert recovered_child.status is AgentRunStatus.COMPLETED
+        assert recovered_child.output == "Recovered from PostgreSQL checkpoint."
+        assert recovered_child.lease_id is None
+        assert recovered_child.lease_expires_at is None
+
+        recovered_step = step_repository.get(
+            parent_run_id,
+            parent_step_id,
+        )
+        assert recovered_step is not None
+        assert recovered_step.status is AgentRunStepStatus.COMPLETED
+        assert recovered_step.output == "Recovered from PostgreSQL checkpoint."
+        assert recovered_step.completed_at is not None
+
+        # A second recovery sweep must not execute the already-completed
+        # child again, and the already-completed delegation step remains
+        # terminal.
+        second_results = asyncio.run(
+            recovery_service.recover_stale_runs(
+                stale_before=datetime.now(UTC),
+                limit=10,
+            )
+        )
+
+        assert second_results.recovered == ()
+        assert second_results.failed_run_ids == ()
+        assert len(runtime.calls) == 1
+
+        session.expire_all()
+
+        final_child = run_repository.get(child_run_id)
+        assert final_child is not None
+        assert final_child.status is AgentRunStatus.COMPLETED
+
+        final_step = step_repository.get(
+            parent_run_id,
+            parent_step_id,
+        )
+        assert final_step is not None
+        assert final_step.status is AgentRunStepStatus.COMPLETED
+        assert final_step.output == "Recovered from PostgreSQL checkpoint."
+
+    finally:
+        session.rollback()
+
+        cleanup_session = session_factory()
+        try:
+            if child_run_id is not None:
+                cleanup_session.execute(
+                    delete(AgentRunCheckpointRecord).where(
+                        AgentRunCheckpointRecord.run_id == child_run_id,
+                    )
+                )
+                cleanup_session.execute(
+                    delete(AgentRunRecord).where(
+                        AgentRunRecord.run_id == child_run_id,
+                    )
+                )
+
+            if parent_step_id is not None:
+                cleanup_session.execute(
+                    delete(AgentRunStepRecord).where(
+                        AgentRunStepRecord.run_id == parent_run_id,
+                        AgentRunStepRecord.step_id == parent_step_id,
+                    )
+                )
+
+            cleanup_session.execute(
+                delete(AgentRunRecord).where(
+                    AgentRunRecord.run_id == parent_run_id,
+                )
+            )
+
+            cleanup_session.commit()
+        finally:
+            cleanup_session.close()
+            session.close()
+            engine.dispose()
+
+
 def test_postgres_stale_run_recovers_from_persisted_checkpoint() -> None:
     engine = make_engine()
     session_factory = sessionmaker(
@@ -1446,6 +1713,7 @@ def test_postgres_recovery_live_heartbeat_blocks_second_worker_claim() -> None:
                 run_id=None,
                 lease_id=None,
                 execution_ownership_lost=None,
+                cancellation_requested=None,
             ):
                 execution_started.set()
                 await release_execution.wait()
@@ -1456,6 +1724,7 @@ def test_postgres_recovery_live_heartbeat_blocks_second_worker_claim() -> None:
                     run_id=run_id,
                     lease_id=lease_id,
                     execution_ownership_lost=execution_ownership_lost,
+                    cancellation_requested=cancellation_requested,
                 )
 
         worker_a_service = AgentRunRecoveryService(
