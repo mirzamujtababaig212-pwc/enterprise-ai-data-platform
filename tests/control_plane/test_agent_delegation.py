@@ -7,6 +7,7 @@ import pytest
 
 from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.models import AgentDefinition, AgentRequest
+from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.agents.registry import InMemoryAgentRegistry
 from app.control_plane.agent_delegation.models import AgentDelegationRequest
 from app.control_plane.agent_delegation.policy import AgentDelegationPolicy
@@ -899,3 +900,244 @@ async def test_execute_delegation_preserves_existing_waiting_child(registry):
     assert parent_step is not None
     assert parent_step.status is AgentRunStepStatus.RUNNING
     assert parent_step.completed_at is None
+
+
+class Phase3BDelegationLLMGateway:
+    """Provider-neutral fake gateway for parent/child delegation E2E."""
+
+    def __init__(self) -> None:
+        self.requests: list[dict] = []
+
+    async def route_chat(
+        self,
+        request: dict,
+    ) -> dict:
+        self.requests.append(request)
+
+        model = request["model"]
+
+        if model == "parent-gpt":
+            parent_requests = [item for item in self.requests if item["model"] == "parent-gpt"]
+
+            if len(parent_requests) == 1:
+                return {
+                    "provider": "fake",
+                    "model": model,
+                    "reply": "",
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "tool_calls": [
+                        AgentToolCall(
+                            call_id="call-delegate-1",
+                            name="agent.delegate",
+                            arguments={
+                                "agent_name": "child-agent",
+                                "input": "Process chunk A",
+                                "idempotency_key": "delegation-e2e-1",
+                            },
+                        )
+                    ],
+                }
+
+            messages = request["messages"]
+            tool_messages = [message for message in messages if message.get("role") == "tool"]
+
+            assert tool_messages, (
+                "Parent's second LLM request must contain the " "agent.delegate tool result."
+            )
+
+            tool_message = tool_messages[-1]
+
+            assert tool_message["tool_name"] == "agent.delegate"
+            assert "child execution result" in tool_message["content"]
+
+            return {
+                "provider": "fake",
+                "model": model,
+                "reply": ("Final Answer based on child result: " f"{tool_message['content']}"),
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 10,
+                    "total_tokens": 25,
+                },
+                "tool_calls": [],
+            }
+
+        if model == "child-gpt":
+            return {
+                "provider": "fake",
+                "model": model,
+                "reply": "child execution result",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [],
+            }
+
+        raise AssertionError(f"Unexpected model: {model}")
+
+
+@pytest.mark.asyncio
+async def test_phase_3b_synchronous_delegation_e2e() -> None:
+    """Exercise real parent -> delegation tool -> child -> parent continuation."""
+
+    from contextlib import asynccontextmanager
+
+    from ai_platform.agents.llm_agent import LLMAgent
+    from ai_platform.agents.runtime import AgentRuntime
+    from app.control_plane.agent_delegation.tool import AgentDelegationTool
+    from app.control_plane.agent_runs.application_service import (
+        AgentRunApplicationService,
+    )
+    from app.control_plane.agent_run_steps.in_memory import (
+        InMemoryAgentRunStepsRepository,
+    )
+    from tools.execution.service import ToolExecutionService
+    from tools.registry.in_memory import InMemoryToolRegistry
+
+    registry = InMemoryAgentRegistry()
+    run_repository = InMemoryAgentRunRepository()
+    steps_repository = InMemoryAgentRunStepsRepository()
+
+    def steps_repository_factory():
+        return steps_repository
+
+    gateway = Phase3BDelegationLLMGateway()
+
+    parent_definition = AgentDefinition(
+        name="parent-agent",
+        description="Phase 3B parent agent.",
+        system_prompt="You are the parent agent.",
+        model="parent-gpt",
+        tool_names=("agent.delegate",),
+    )
+
+    child_definition = AgentDefinition(
+        name="child-agent",
+        description="Phase 3B child agent.",
+        system_prompt="You are the child agent.",
+        model="child-gpt",
+    )
+
+    await registry.register(LLMAgent(parent_definition))
+    await registry.register(LLMAgent(child_definition))
+
+    tool_registry = InMemoryToolRegistry()
+
+    runtime = AgentRuntime(
+        registry,
+        tool_registry=tool_registry,
+        llm_gateway=gateway,
+        agent_run_steps_repository_factory=steps_repository_factory,
+    )
+
+    application_service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=run_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    application_service_holder = {}
+
+    @asynccontextmanager
+    async def delegation_service_scope():
+        yield application_service_holder["delegation_service"]
+
+    tool_execution_service = ToolExecutionService(
+        tool_registry,
+    )
+
+    runtime_with_tools = AgentRuntime(
+        registry,
+        tool_registry=tool_registry,
+        tool_execution_service=tool_execution_service,
+        llm_gateway=gateway,
+        agent_run_steps_repository_factory=steps_repository_factory,
+    )
+
+    application_service = AgentRunApplicationService(
+        runtime=runtime_with_tools,
+        repository=run_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    delegation_service = AgentDelegationService(
+        agent_registry=registry,
+        agent_run_repository=run_repository,
+        agent_run_steps_repository_factory=steps_repository_factory,
+        agent_run_application_service=application_service,
+    )
+
+    application_service_holder["delegation_service"] = delegation_service
+
+    delegation_tool = AgentDelegationTool(delegation_service_scope)
+
+    await tool_registry.register(delegation_tool)
+
+    parent_request = AgentRequest(
+        input="Summarize the quarterly report using a helper agent.",
+        session_id="session-001",
+        user_id="user-001",
+        principal="principal-001",
+        tenant_id="tenant-001",
+    )
+
+    execution = await application_service.execute(
+        agent_name="parent-agent",
+        request=parent_request,
+    )
+
+    parent_run = run_repository.get(execution.run_id)
+
+    assert parent_run is not None
+    assert parent_run.status is AgentRunStatus.COMPLETED
+    assert "Final Answer based on child result" in (parent_run.output or "")
+    assert "child execution result" in (parent_run.output or "")
+
+    child_runs = [run for run in run_repository.list() if run.parent_run_id == parent_run.run_id]
+
+    assert len(child_runs) == 1
+
+    child_run = child_runs[0]
+
+    assert child_run.agent_name == "child-agent"
+    assert child_run.status is AgentRunStatus.COMPLETED
+    assert child_run.output == "child execution result"
+
+    assert child_run.parent_run_id == parent_run.run_id
+    assert child_run.root_run_id == parent_run.root_run_id
+    assert child_run.parent_step_id is not None
+
+    assert child_run.session_id == parent_run.session_id
+    assert child_run.user_id == parent_run.user_id
+    assert child_run.principal == parent_run.principal
+    assert child_run.tenant_id == parent_run.tenant_id
+
+    delegation_step = steps_repository.get(
+        parent_run.run_id,
+        child_run.parent_step_id,
+    )
+
+    assert delegation_step is not None
+    assert delegation_step.status is AgentRunStepStatus.COMPLETED
+    assert delegation_step.output == child_run.output
+
+    parent_requests = [request for request in gateway.requests if request["model"] == "parent-gpt"]
+
+    child_requests = [request for request in gateway.requests if request["model"] == "child-gpt"]
+
+    assert len(parent_requests) == 2
+    assert len(child_requests) == 1
+
+    second_parent_messages = parent_requests[1]["messages"]
+
+    tool_messages = [message for message in second_parent_messages if message.get("role") == "tool"]
+
+    assert tool_messages
+    assert tool_messages[-1]["tool_name"] == "agent.delegate"
+    assert "child execution result" in tool_messages[-1]["content"]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -47,6 +49,7 @@ from app.control_plane.agent_evaluations.postgres_repository import (
     PostgreSQLAgentEvaluationRunsRepository,
 )
 from app.control_plane.agent_delegation.service import AgentDelegationService
+from app.control_plane.agent_delegation.tool import AgentDelegationTool
 from app.control_plane.agent_runs.application_service import AgentRunApplicationService
 from app.control_plane.agent_runs.cancellation import AgentRunCancellationRegistry
 from app.control_plane.agent_runs.postgres_repository import PostgreSQLAgentRunRepository
@@ -355,6 +358,10 @@ async def _initialize_agents() -> None:
             _vehicle_data_service,
         )
         await _tool_registry.register(vehicle_data_query_tool)
+        agent_delegation_tool = AgentDelegationTool(
+            _agent_delegation_service_scope,
+        )
+        await _tool_registry.register(agent_delegation_tool)
 
         await _tool_authorizer.allow(
             "enterprise-demo-user",
@@ -389,6 +396,8 @@ async def _initialize_agents() -> None:
                 "Use the rag.search tool when relevant enterprise "
                 "knowledge is needed. Use vehicle.data.query when "
                 "structured vehicle telemetry evidence is required. "
+                "Use agent.delegate when a task is better handled by another "
+                "enabled enterprise agent. "
                 "Ground your answer in retrieved sources and structured "
                 "enterprise data, and clearly distinguish retrieved "
                 "information from general reasoning. Do not invent facts "
@@ -400,6 +409,7 @@ async def _initialize_agents() -> None:
             tool_names=(
                 "rag.search",
                 "vehicle.data.query",
+                "agent.delegate",
             ),
         )
 
@@ -488,6 +498,36 @@ async def initialize_agents() -> None:
 async def get_agent_runtime() -> AgentRuntime:
     await _initialize_agents()
     return _agent_runtime
+
+
+@asynccontextmanager
+async def _agent_delegation_service_scope() -> AsyncIterator[AgentDelegationService]:
+    await _initialize_agents()
+
+    db = SessionLocal()
+
+    try:
+        app_settings = Settings.from_environment()
+
+        agent_run_application_service = AgentRunApplicationService(
+            runtime=_agent_runtime,
+            repository=PostgreSQLAgentRunRepository(db),
+            events_repository=PostgreSQLAgentRunEventsRepository(db),
+            agent_run_steps_repository=PostgreSQLAgentRunStepsRepository(db),
+            observer=_agent_observer,
+            cancellation_registry=_agent_run_cancellation_registry,
+            tenant_policy_engine=_tenant_policy_engine,
+            lease_seconds=app_settings.agent_run_lease_duration_seconds,
+        )
+
+        yield AgentDelegationService(
+            agent_registry=_agent_registry,
+            agent_run_repository=PostgreSQLAgentRunRepository(db),
+            agent_run_steps_repository_factory=_agent_run_steps_repository_factory,
+            agent_run_application_service=agent_run_application_service,
+        )
+    finally:
+        db.close()
 
 
 async def get_agent_run_application_service(

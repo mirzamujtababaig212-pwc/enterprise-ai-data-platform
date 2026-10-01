@@ -344,6 +344,7 @@ async def test_agent_runtime_initializes_rag_enabled_agent() -> None:
     assert rag_agent.definition.tool_names == (
         "rag.search",
         "vehicle.data.query",
+        "agent.delegate",
     )
 
     tools = await dependencies._tool_registry.list_tools()

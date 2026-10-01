@@ -49,6 +49,13 @@ class AgentDelegationService:
         self._agent_run_application_service = agent_run_application_service
         self._policy = policy or AgentDelegationPolicy()
 
+    def get_parent_run(self, run_id: str):
+        """Return the durable run used as the delegation parent."""
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValueError("run_id must be a non-empty string.")
+
+        return self._agent_run_repository.get(run_id)
+
     async def delegate(
         self,
         request: AgentDelegationRequest,
