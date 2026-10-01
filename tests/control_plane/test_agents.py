@@ -70,9 +70,14 @@ class FakeAgentRunApplicationService:
         *,
         tenant_id: str | None = None,
         principal: str | None = None,
+        event_type: AgentExecutionEventType | None = None,
+        step_id: str | None = None,
+        attempt: int | None = None,
+        provider: str | None = None,
         limit=100,
     ):
         del tenant_id, principal
+
         if run_id not in self.runs:
             raise LookupError(
                 f"Agent run '{run_id}' was not found.",
@@ -81,10 +86,29 @@ class FakeAgentRunApplicationService:
         self.event_list_calls.append(
             {
                 "run_id": run_id,
+                "event_type": event_type,
+                "step_id": step_id,
+                "attempt": attempt,
+                "provider": provider,
                 "limit": limit,
             }
         )
-        return list(self.events.get(run_id, []))[:limit]
+
+        events = list(self.events.get(run_id, []))
+
+        if event_type is not None:
+            events = [event for event in events if event.event_type == event_type]
+
+        if step_id is not None:
+            events = [event for event in events if event.step_id == step_id]
+
+        if attempt is not None:
+            events = [event for event in events if event.attempt == attempt]
+
+        if provider is not None:
+            events = [event for event in events if event.provider == provider]
+
+        return events[:limit]
 
     async def execute(
         self,
@@ -663,6 +687,10 @@ def test_list_agent_run_events_returns_events() -> None:
     assert service.event_list_calls == [
         {
             "run_id": "run-events-123",
+            "event_type": None,
+            "step_id": None,
+            "attempt": None,
+            "provider": None,
             "limit": 25,
         }
     ]
@@ -688,6 +716,10 @@ def test_list_agent_run_events_returns_empty_for_known_run_without_events() -> N
     assert service.event_list_calls == [
         {
             "run_id": "run-empty-events",
+            "event_type": None,
+            "step_id": None,
+            "attempt": None,
+            "provider": None,
             "limit": 100,
         }
     ]

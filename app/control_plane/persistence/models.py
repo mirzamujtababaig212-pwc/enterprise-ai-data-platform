@@ -846,6 +846,12 @@ class AgentRunEventRecord(Base):
             "run_id",
             "created_at",
         ),
+        Index(
+            "ix_agent_run_events_run_id_created_at_id",
+            "run_id",
+            "created_at",
+            "id",
+        ),
     )
 
 
