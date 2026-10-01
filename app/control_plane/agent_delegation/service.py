@@ -438,6 +438,26 @@ class AgentDelegationService:
             created=result.created,
         )
 
+    def reconcile_child_run(
+        self,
+        *,
+        parent_run_id: str,
+        parent_step_id: str,
+        child_run: AgentRun,
+    ) -> None:
+        """Reconcile a terminal delegated child into its parent step.
+
+        This method is intentionally public so lifecycle services that can
+        complete a child outside AgentDelegationService.execute_delegation()
+        (for example approval continuation) can finalize the durable
+        delegation step without re-executing the child.
+        """
+        self._reconcile_completed_child(
+            parent_run_id,
+            parent_step_id,
+            child_run,
+        )
+
     def _reconcile_completed_child(
         self,
         parent_run_id: str,
@@ -447,6 +467,7 @@ class AgentDelegationService:
         if child.status not in {
             AgentRunStatus.COMPLETED,
             AgentRunStatus.FAILED,
+            AgentRunStatus.REJECTED,
         }:
             raise RuntimeError(
                 "delegated child execution returned a non-terminal run: " f"{child.status.value}"
@@ -466,13 +487,21 @@ class AgentDelegationService:
                 if child.status is AgentRunStatus.COMPLETED:
                     return
 
-                raise RuntimeError("delegation parent step is COMPLETED while child run is FAILED.")
+                raise RuntimeError(
+                    "delegation parent step is COMPLETED while child run is "
+                    f"{child.status.value}."
+                )
 
             if current_step.status is AgentRunStepStatus.FAILED:
-                if child.status is AgentRunStatus.FAILED:
+                if child.status in {
+                    AgentRunStatus.FAILED,
+                    AgentRunStatus.REJECTED,
+                }:
                     return
 
-                raise RuntimeError("delegation parent step is FAILED while child run is COMPLETED.")
+                raise RuntimeError(
+                    "delegation parent step is FAILED while child run is " f"{child.status.value}."
+                )
 
             if current_step.status is not AgentRunStepStatus.RUNNING:
                 raise RuntimeError(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Callable
 
 from ai_platform.agents.checkpoint import (
     AgentCheckpointPosition,
@@ -61,6 +62,7 @@ class AgentRunApprovalContinuationService:
         lease_seconds: int = 60,
         override_authorizer: ApprovalOverrideAuthorizer | None = None,
         observer: AgentExecutionObserver | None = None,
+        delegated_child_reconciler: Callable[..., None] | None = None,
     ) -> None:
         self._runtime = runtime
         self._approval_repository = approval_repository
@@ -72,6 +74,7 @@ class AgentRunApprovalContinuationService:
         self._lease_seconds = lease_seconds
         self._override_authorizer = override_authorizer
         self._observer = observer
+        self._delegated_child_reconciler = delegated_child_reconciler
 
     async def continue_approval(
         self,
@@ -201,6 +204,8 @@ class AgentRunApprovalContinuationService:
                 call_id=approval.call_id,
                 step_id=approval.step_id,
             )
+
+            self._reconcile_delegated_child(rejected_run)
 
             raise RuntimeError(rejection_reason)
 
@@ -555,7 +560,24 @@ class AgentRunApprovalContinuationService:
                 "before approval continuation completion."
             )
 
+        self._reconcile_delegated_child(completed_run)
+
         return response
+
+    def _reconcile_delegated_child(self, run: AgentRun | None) -> None:
+        if (
+            self._delegated_child_reconciler is None
+            or run is None
+            or run.parent_run_id is None
+            or run.parent_step_id is None
+        ):
+            return
+
+        self._delegated_child_reconciler(
+            parent_run_id=run.parent_run_id,
+            parent_step_id=run.parent_step_id,
+            child_run=run,
+        )
 
     @staticmethod
     def _validate_checkpoint(

@@ -34,7 +34,6 @@ from app.control_plane.approvals.models import (
 )
 from ai_platform.agents.llm_messages import user_message
 
-
 RUN_ID = "run-1"
 STEP_ID = "step-1"
 CALL_ID = "call-1"
@@ -161,6 +160,7 @@ def _service(
     override_repository: MagicMock | None = None,
     override_authorizer: ConfiguredApprovalOverrideAuthorizer | None = None,
     observer: object | None = None,
+    delegated_child_reconciler: MagicMock | None = None,
 ):
     runtime = MagicMock()
     runtime.resume = AsyncMock(
@@ -238,6 +238,7 @@ def _service(
             lease_seconds=60,
             override_authorizer=override_authorizer,
             observer=observer,
+            delegated_child_reconciler=delegated_child_reconciler,
         ),
         runtime,
         approval_repository,
@@ -315,6 +316,58 @@ async def test_approved_continuation_resumes_and_completes_run() -> None:
         "actor": "approver-1",
         "reason": "Approved for execution",
     }
+
+
+@pytest.mark.asyncio
+async def test_approved_delegated_child_reconciles_parent_step() -> None:
+    approval = _approval()
+    run = _run().model_copy(
+        update={
+            "parent_run_id": "parent-run-1",
+            "parent_step_id": "delegation-step-1",
+        }
+    )
+    step = _step()
+    checkpoint = _checkpoint()
+    reconciler = MagicMock()
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        delegated_child_reconciler=reconciler,
+    )
+
+    response = await service.continue_approval(
+        APPROVAL_ID,
+        status=ApprovalStatus.APPROVED,
+        resolved_by="approver-1",
+        resolution_reason="Approved for execution",
+    )
+
+    assert response.output == "Payment completed"
+    runtime.resume.assert_awaited_once()
+    agent_run_repository.complete_if_owner.assert_called_once()
+
+    reconciler.assert_called_once()
+
+    reconciler_kwargs = reconciler.call_args.kwargs
+    assert reconciler_kwargs["parent_run_id"] == "parent-run-1"
+    assert reconciler_kwargs["parent_step_id"] == "delegation-step-1"
+
+    completed_child = reconciler_kwargs["child_run"]
+    assert completed_child.status is AgentRunStatus.COMPLETED
+    assert completed_child.output == "Payment completed"
+    assert completed_child.parent_run_id == "parent-run-1"
+    assert completed_child.parent_step_id == "delegation-step-1"
 
 
 @pytest.mark.asyncio
@@ -445,6 +498,95 @@ async def test_rejected_continuation_rejects_run_without_resuming() -> None:
         "actor": "approver-1",
         "reason": "Payment not authorized",
     }
+
+
+@pytest.mark.asyncio
+async def test_rejected_delegated_child_reconciles_parent_step() -> None:
+    approval = _approval()
+    run = _run().model_copy(
+        update={
+            "parent_run_id": "parent-run-1",
+            "parent_step_id": "delegation-step-1",
+        }
+    )
+    step = _step()
+    checkpoint = _checkpoint()
+    reconciler = MagicMock()
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        delegated_child_reconciler=reconciler,
+    )
+
+    rejected_run = run.model_copy(
+        update={
+            "status": AgentRunStatus.REJECTED,
+            "completed_at": datetime.now(UTC),
+            "error_type": "ApprovalRejected",
+            "error_message": "Payment not authorized",
+        }
+    )
+    agent_run_repository.reject_waiting_for_approval.return_value = rejected_run
+
+    with pytest.raises(RuntimeError, match="Payment not authorized"):
+        await service.continue_approval(
+            APPROVAL_ID,
+            status=ApprovalStatus.REJECTED,
+            resolved_by="approver-1",
+            resolution_reason="Payment not authorized",
+        )
+
+    reconciler.assert_called_once_with(
+        parent_run_id="parent-run-1",
+        parent_step_id="delegation-step-1",
+        child_run=rejected_run,
+    )
+
+    runtime.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_delegated_approval_does_not_invoke_reconciler() -> None:
+    approval = _approval()
+    run = _run()
+    step = _step()
+    checkpoint = _checkpoint()
+    reconciler = MagicMock()
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        delegated_child_reconciler=reconciler,
+    )
+
+    await service.continue_approval(
+        APPROVAL_ID,
+        status=ApprovalStatus.APPROVED,
+        resolved_by="approver-1",
+    )
+
+    runtime.resume.assert_awaited_once()
+    agent_run_repository.complete_if_owner.assert_called_once()
+    reconciler.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -657,6 +799,65 @@ async def test_authorized_override_persists_and_resumes_without_approving_reques
         "actor": "api_key:operator-1",
         "reason": "Emergency operational bypass.",
     }
+
+
+@pytest.mark.asyncio
+async def test_authorized_override_of_delegated_child_reconciles_parent_step() -> None:
+    approval = _approval()
+    run = _run().model_copy(
+        update={
+            "parent_run_id": "parent-run-1",
+            "parent_step_id": "delegation-step-1",
+        }
+    )
+    step = _step()
+    checkpoint = _checkpoint()
+    reconciler = MagicMock()
+
+    override_repository = MagicMock()
+    override_repository.get_by_approval.return_value = None
+
+    (
+        service,
+        runtime,
+        approval_repository,
+        agent_run_repository,
+        _,
+        _,
+    ) = _service(
+        approval=approval,
+        run=run,
+        step=step,
+        checkpoint=checkpoint,
+        override_repository=override_repository,
+        delegated_child_reconciler=reconciler,
+    )
+
+    response = await service.override_approval(
+        APPROVAL_ID,
+        actor="api_key:operator-1",
+        reason="Emergency operational bypass.",
+    )
+
+    assert response.output == "Payment completed"
+
+    approval_repository.update_status.assert_not_called()
+    override_repository.create.assert_called_once()
+    agent_run_repository.claim_waiting_for_approval.assert_called_once()
+    runtime.resume.assert_awaited_once()
+    agent_run_repository.complete_if_owner.assert_called_once()
+
+    reconciler.assert_called_once()
+
+    reconciler_kwargs = reconciler.call_args.kwargs
+    assert reconciler_kwargs["parent_run_id"] == "parent-run-1"
+    assert reconciler_kwargs["parent_step_id"] == "delegation-step-1"
+
+    completed_child = reconciler_kwargs["child_run"]
+    assert completed_child.status is AgentRunStatus.COMPLETED
+    assert completed_child.output == "Payment completed"
+    assert completed_child.parent_run_id == "parent-run-1"
+    assert completed_child.parent_step_id == "delegation-step-1"
 
 
 @pytest.mark.asyncio

@@ -595,6 +595,12 @@ async def get_agent_run_approval_continuation_service(
     await _initialize_agents()
     app_settings = Settings.from_environment()
 
+    delegation_service = AgentDelegationService(
+        agent_registry=_agent_registry,
+        agent_run_repository=PostgreSQLAgentRunRepository(db),
+        agent_run_steps_repository_factory=lambda: PostgreSQLAgentRunStepsRepository(db),
+    )
+
     return AgentRunApprovalContinuationService(
         runtime=_agent_runtime,
         approval_repository=PostgreSQLApprovalRequestRepository(db),
@@ -608,6 +614,7 @@ async def get_agent_run_approval_continuation_service(
         override_authorizer=ConfiguredApprovalOverrideAuthorizer(
             app_settings.approval_override_principals,
         ),
+        delegated_child_reconciler=delegation_service.reconcile_child_run,
     )
 
 
