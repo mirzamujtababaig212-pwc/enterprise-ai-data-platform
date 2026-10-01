@@ -153,6 +153,23 @@ def test_deterministic_and_bounded_jitter() -> None:
     )
 
 
+def test_jitter_respects_absolute_max_backoff() -> None:
+    policy = RetryPolicy(
+        initial_backoff_seconds=20.0,
+        backoff_factor=2.0,
+        max_backoff_seconds=30.0,
+        jitter=0.5,
+    )
+
+    assert (
+        policy.calculate_delay(
+            attempt=2,
+            rng=1.0,
+        )
+        == 30.0
+    )
+
+
 def test_invalid_jitter_random_factor_is_rejected() -> None:
     policy = RetryPolicy(jitter=0.2)
 
