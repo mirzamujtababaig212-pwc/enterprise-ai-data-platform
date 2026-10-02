@@ -1749,6 +1749,84 @@ def test_production_control_plane_reconstructs_persisted_retry_timeline() -> Non
             ("orchestration.step.completed", 2),
         ]
 
+        filtered_first_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            params={
+                "attempt": 2,
+                "limit": 1,
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert filtered_first_response.status_code == 200, filtered_first_response.text
+
+        filtered_first_payload = filtered_first_response.json()
+
+        assert filtered_first_payload["run_id"] == run_id
+        assert filtered_first_payload["has_more"] is True
+        assert filtered_first_payload["next_cursor"]
+
+        assert [
+            (entry["event_type"], entry["attempt"])
+            for entry in filtered_first_payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ] == [
+            ("orchestration.step.started", 2),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in filtered_first_payload["attempts"]
+        ] == [
+            ("retryable_step", 2, "running"),
+        ]
+
+        filtered_second_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            params={
+                "attempt": 2,
+                "limit": 1,
+                "cursor": filtered_first_payload["next_cursor"],
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert filtered_second_response.status_code == 200, filtered_second_response.text
+
+        filtered_second_payload = filtered_second_response.json()
+
+        assert filtered_second_payload["run_id"] == run_id
+        assert filtered_second_payload["has_more"] is False
+        assert filtered_second_payload["next_cursor"] is None
+
+        assert [
+            (entry["event_type"], entry["attempt"])
+            for entry in filtered_second_payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ] == [
+            ("orchestration.step.completed", 2),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in filtered_second_payload["attempts"]
+        ] == [
+            ("retryable_step", 2, "completed"),
+        ]
+
+        assert [
+            (entry["event_type"], entry["attempt"])
+            for payload in (
+                filtered_first_payload,
+                filtered_second_payload,
+            )
+            for entry in payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ] == [
+            ("orchestration.step.started", 2),
+            ("orchestration.step.completed", 2),
+        ]
+
         with SessionLocal() as session:
             persisted_step = session.scalar(
                 select(AgentRunStepRecord).where(
