@@ -1389,6 +1389,277 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
                 session.commit()
 
 
+def test_production_control_plane_reconstructs_persisted_retry_timeline() -> None:
+    """Reconstruct historical retry attempts from persisted PostgreSQL events."""
+
+    from datetime import UTC, datetime
+
+    from ai_platform.agents.observability import (
+        AgentExecutionEvent,
+        AgentExecutionEventType,
+    )
+    from app.control_plane.agent_run_events.postgres_repository import (
+        PostgreSQLAgentRunEventsRepository,
+    )
+    from app.control_plane.auth import identity_from_api_key
+    from app.control_plane.agent_run_steps.models import (
+        AgentRunStep,
+        AgentRunStepStatus,
+    )
+    from app.control_plane.agent_run_steps.postgres_repository import (
+        PostgreSQLAgentRunStepsRepository,
+    )
+
+    client = TestClient(app)
+    run_id = "9f5c2a71-6d84-4e13-9b27-1a6f3c8d4205"
+    session_id = "3b7e1c92-4a56-4d08-8f31-6c2b9e5740a1"
+    identity = identity_from_api_key(API_KEY)
+
+    try:
+        with SessionLocal() as session:
+            session.query(AgentRunStepRecord).filter(AgentRunStepRecord.run_id == run_id).delete()
+            session.query(AgentRunEventRecord).filter(AgentRunEventRecord.run_id == run_id).delete()
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+            session.commit()
+
+            run_repository = PostgreSQLAgentRunRepository(session)
+            events_repository = PostgreSQLAgentRunEventsRepository(session)
+            steps_repository = PostgreSQLAgentRunStepsRepository(session)
+
+            run_repository.create(
+                AgentRun(
+                    run_id=run_id,
+                    agent_name="enterprise-rag-analyst",
+                    session_id=session_id,
+                    user_id="integration-retry-user",
+                    principal=identity.principal,
+                    tenant_id=identity.tenant_id,
+                    status=AgentRunStatus.RUNNING,
+                    recovery_attempts=0,
+                    metadata={"test": "production-retry-timeline"},
+                )
+            )
+
+            steps_repository.create(
+                AgentRunStep(
+                    run_id=run_id,
+                    step_id="retryable_step",
+                    step_index=0,
+                    step_type="model",
+                    status=AgentRunStepStatus.PLANNED,
+                    attempt=1,
+                    input={"input": "retry timeline"},
+                    metadata={"step_name": "Retryable model step"},
+                )
+            )
+
+            started_at = datetime.now(UTC)
+
+            running = steps_repository.transition(
+                run_id,
+                "retryable_step",
+                status=AgentRunStepStatus.RUNNING,
+                updated_at=started_at,
+                started_at=started_at,
+            )
+
+            assert running is not None
+            assert running.attempt == 1
+
+            events = [
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                    agent_name="enterprise-rag-analyst",
+                    run_id=run_id,
+                    session_id=session_id,
+                    user_id="integration-retry-user",
+                    principal=identity.principal,
+                    step_id="retryable_step",
+                    step_index=0,
+                    step_name="Retryable model step",
+                    attempt=1,
+                ),
+                AgentExecutionEvent(
+                    event_type=AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+                    agent_name="enterprise-rag-analyst",
+                    run_id=run_id,
+                    session_id=session_id,
+                    user_id="integration-retry-user",
+                    principal=identity.principal,
+                    step_id="retryable_step",
+                    step_index=0,
+                    step_name="Retryable model step",
+                    attempt=1,
+                    metadata={
+                        "failure_category": "timeout",
+                        "error_type": "TimeoutError",
+                    },
+                ),
+            ]
+
+            for event in events:
+                events_repository.record(event)
+
+            failed_at = datetime.now(UTC)
+
+            failed = steps_repository.transition(
+                run_id,
+                "retryable_step",
+                status=AgentRunStepStatus.FAILED,
+                updated_at=failed_at,
+                completed_at=failed_at,
+                error="provider timeout",
+                failure_category="timeout",
+            )
+
+            assert failed is not None
+            assert failed.attempt == 1
+            assert failed.status is AgentRunStepStatus.FAILED
+
+            retry_started_at = datetime.now(UTC)
+
+            retried = steps_repository.retry(
+                run_id,
+                "retryable_step",
+                updated_at=retry_started_at,
+                started_at=retry_started_at,
+            )
+
+            assert retried is not None
+            assert retried.attempt == 2
+            assert retried.status is AgentRunStepStatus.RUNNING
+
+            events.extend(
+                [
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                        agent_name="enterprise-rag-analyst",
+                        run_id=run_id,
+                        session_id=session_id,
+                        user_id="integration-retry-user",
+                        principal=identity.principal,
+                        step_id="retryable_step",
+                        step_index=0,
+                        step_name="Retryable model step",
+                        attempt=2,
+                    ),
+                    AgentExecutionEvent(
+                        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+                        agent_name="enterprise-rag-analyst",
+                        run_id=run_id,
+                        session_id=session_id,
+                        user_id="integration-retry-user",
+                        principal=identity.principal,
+                        step_id="retryable_step",
+                        step_index=0,
+                        step_name="Retryable model step",
+                        attempt=2,
+                    ),
+                ]
+            )
+
+            for event in events[2:]:
+                events_repository.record(event)
+
+            completed_at = datetime.now(UTC)
+
+            completed = steps_repository.transition(
+                run_id,
+                "retryable_step",
+                status=AgentRunStepStatus.COMPLETED,
+                updated_at=completed_at,
+                completed_at=completed_at,
+                output={"result": "recovered"},
+            )
+
+            assert completed is not None
+            assert completed.attempt == 2
+            assert completed.status is AgentRunStepStatus.COMPLETED
+
+            session.commit()
+
+        response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert response.status_code == 200, response.text
+
+        payload = response.json()
+
+        assert payload["run_id"] == run_id
+        assert payload["has_more"] is False
+        assert payload["next_cursor"] is None
+
+        orchestration_entries = [
+            entry
+            for entry in payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ]
+
+        assert [(entry["event_type"], entry["attempt"]) for entry in orchestration_entries] == [
+            ("orchestration.step.started", 1),
+            ("orchestration.step.failed", 1),
+            ("orchestration.step.started", 2),
+            ("orchestration.step.completed", 2),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in payload["attempts"]
+        ] == [
+            ("retryable_step", 1, "failed"),
+            ("retryable_step", 2, "completed"),
+        ]
+
+        assert payload["attempts"][0]["event_count"] == 2
+        assert payload["attempts"][0]["first_sequence"] < payload["attempts"][0]["last_sequence"]
+        assert payload["attempts"][0]["failure_category"] == "timeout"
+
+        assert payload["attempts"][1]["event_count"] == 2
+        assert payload["attempts"][1]["first_sequence"] < payload["attempts"][1]["last_sequence"]
+        assert payload["attempts"][1]["failure_category"] is None
+
+        with SessionLocal() as session:
+            persisted_step = session.scalar(
+                select(AgentRunStepRecord).where(
+                    AgentRunStepRecord.run_id == run_id,
+                    AgentRunStepRecord.step_id == "retryable_step",
+                )
+            )
+
+            persisted_events = list(
+                session.scalars(
+                    select(AgentRunEventRecord)
+                    .where(AgentRunEventRecord.run_id == run_id)
+                    .order_by(
+                        AgentRunEventRecord.created_at.asc(),
+                        AgentRunEventRecord.id.asc(),
+                    )
+                )
+            )
+
+        assert persisted_step is not None
+        assert persisted_step.attempt == 2
+        assert persisted_step.status == "completed"
+
+        assert [
+            (event.event_type, event.event_metadata.get("_event_attempt"))
+            for event in persisted_events
+        ] == [
+            ("orchestration.step.started", 1),
+            ("orchestration.step.failed", 1),
+            ("orchestration.step.started", 2),
+            ("orchestration.step.completed", 2),
+        ]
+    finally:
+        with SessionLocal() as session:
+            session.query(AgentRunStepRecord).filter(AgentRunStepRecord.run_id == run_id).delete()
+            session.query(AgentRunEventRecord).filter(AgentRunEventRecord.run_id == run_id).delete()
+            session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete()
+            session.commit()
+
+
 def test_production_rag_checkpoint_failure_preserves_postgres_tool_result() -> None:
     """Verify checkpoint failure does not lose a completed tool execution."""
 
