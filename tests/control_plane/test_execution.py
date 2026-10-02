@@ -59,9 +59,14 @@ def test_control_plane_vehicle_risk_executes_champion_model() -> None:
     mock_model.predict.return_value = np.array([1])
     mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])
 
-    with patch(
-        "mlflow.sklearn.load_model",
-        return_value=mock_model,
+    with (
+        patch(
+            "mlflow.sklearn.load_model",
+            return_value=mock_model,
+        ),
+        patch(
+            "mlflow.MlflowClient",
+        ),
     ):
         response = client.post(
             "/api/v1/ml/vehicle-risk/predict",

@@ -1694,6 +1694,10 @@ def test_list_events_delegates_to_event_repository() -> None:
     repository.get.assert_called_once_with("run-123")
     events_repository.list.assert_called_once_with(
         "run-123",
+        event_type=None,
+        step_id=None,
+        attempt=None,
+        provider=None,
         limit=25,
     )
 

@@ -33,6 +33,10 @@ def test_agent_run_record_columns() -> None:
         "cancellation_requested",
         "cancellation_requested_at",
         "recovery_attempts",
+        "parent_step_id",
+        "causation_id",
+        "parent_run_id",
+        "root_run_id",
     }
 
 
