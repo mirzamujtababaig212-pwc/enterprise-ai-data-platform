@@ -1578,47 +1578,176 @@ def test_production_control_plane_reconstructs_persisted_retry_timeline() -> Non
 
             session.commit()
 
-        response = client.get(
-            f"/api/v1/agents/runs/{run_id}/timeline",
+        first_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline?limit=1",
             headers={"x-api-key": API_KEY},
         )
 
-        assert response.status_code == 200, response.text
+        assert first_response.status_code == 200, first_response.text
 
-        payload = response.json()
+        first_payload = first_response.json()
 
-        assert payload["run_id"] == run_id
-        assert payload["has_more"] is False
-        assert payload["next_cursor"] is None
+        assert first_payload["run_id"] == run_id
+        assert first_payload["has_more"] is True
+        assert first_payload["next_cursor"]
 
-        orchestration_entries = [
+        first_entries = [
             entry
-            for entry in payload["entries"]
+            for entry in first_payload["entries"]
             if entry["event_type"].startswith("orchestration.step.")
         ]
 
-        assert [(entry["event_type"], entry["attempt"]) for entry in orchestration_entries] == [
+        assert [(entry["event_type"], entry["attempt"]) for entry in first_entries] == [
             ("orchestration.step.started", 1),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in first_payload["attempts"]
+        ] == [
+            ("retryable_step", 1, "running"),
+        ]
+
+        assert first_payload["attempts"][0]["event_count"] == 1
+        assert first_payload["attempts"][0]["first_sequence"] == 0
+        assert first_payload["attempts"][0]["last_sequence"] == 0
+        assert first_payload["attempts"][0]["failure_category"] is None
+
+        second_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            params={
+                "limit": 1,
+                "cursor": first_payload["next_cursor"],
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert second_response.status_code == 200, second_response.text
+
+        second_payload = second_response.json()
+
+        assert second_payload["run_id"] == run_id
+        assert second_payload["has_more"] is True
+        assert second_payload["next_cursor"]
+
+        second_entries = [
+            entry
+            for entry in second_payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ]
+
+        assert [(entry["event_type"], entry["attempt"]) for entry in second_entries] == [
             ("orchestration.step.failed", 1),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in second_payload["attempts"]
+        ] == [
+            ("retryable_step", 1, "failed"),
+        ]
+
+        assert second_payload["attempts"][0]["event_count"] == 1
+        assert second_payload["attempts"][0]["first_sequence"] == 0
+        assert second_payload["attempts"][0]["last_sequence"] == 0
+        assert second_payload["attempts"][0]["failure_category"] == "timeout"
+
+        third_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            params={
+                "limit": 1,
+                "cursor": second_payload["next_cursor"],
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert third_response.status_code == 200, third_response.text
+
+        third_payload = third_response.json()
+
+        assert third_payload["run_id"] == run_id
+        assert third_payload["has_more"] is True
+        assert third_payload["next_cursor"]
+
+        third_entries = [
+            entry
+            for entry in third_payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ]
+
+        assert [(entry["event_type"], entry["attempt"]) for entry in third_entries] == [
             ("orchestration.step.started", 2),
+        ]
+
+        assert [
+            (attempt["step_id"], attempt["attempt"], attempt["status"])
+            for attempt in third_payload["attempts"]
+        ] == [
+            ("retryable_step", 2, "running"),
+        ]
+
+        assert third_payload["attempts"][0]["event_count"] == 1
+        assert third_payload["attempts"][0]["first_sequence"] == 0
+        assert third_payload["attempts"][0]["last_sequence"] == 0
+        assert third_payload["attempts"][0]["failure_category"] is None
+
+        fourth_response = client.get(
+            f"/api/v1/agents/runs/{run_id}/timeline",
+            params={
+                "limit": 1,
+                "cursor": third_payload["next_cursor"],
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert fourth_response.status_code == 200, fourth_response.text
+
+        fourth_payload = fourth_response.json()
+
+        assert fourth_payload["run_id"] == run_id
+        assert fourth_payload["has_more"] is False
+        assert fourth_payload["next_cursor"] is None
+
+        fourth_entries = [
+            entry
+            for entry in fourth_payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ]
+
+        assert [(entry["event_type"], entry["attempt"]) for entry in fourth_entries] == [
             ("orchestration.step.completed", 2),
         ]
 
         assert [
             (attempt["step_id"], attempt["attempt"], attempt["status"])
-            for attempt in payload["attempts"]
+            for attempt in fourth_payload["attempts"]
         ] == [
-            ("retryable_step", 1, "failed"),
             ("retryable_step", 2, "completed"),
         ]
 
-        assert payload["attempts"][0]["event_count"] == 2
-        assert payload["attempts"][0]["first_sequence"] < payload["attempts"][0]["last_sequence"]
-        assert payload["attempts"][0]["failure_category"] == "timeout"
+        assert fourth_payload["attempts"][0]["event_count"] == 1
+        assert fourth_payload["attempts"][0]["first_sequence"] == 0
+        assert fourth_payload["attempts"][0]["last_sequence"] == 0
+        assert fourth_payload["attempts"][0]["failure_category"] is None
 
-        assert payload["attempts"][1]["event_count"] == 2
-        assert payload["attempts"][1]["first_sequence"] < payload["attempts"][1]["last_sequence"]
-        assert payload["attempts"][1]["failure_category"] is None
+        paged_events = [
+            (entry["event_type"], entry["attempt"])
+            for payload in (
+                first_payload,
+                second_payload,
+                third_payload,
+                fourth_payload,
+            )
+            for entry in payload["entries"]
+            if entry["event_type"].startswith("orchestration.step.")
+        ]
+
+        assert paged_events == [
+            ("orchestration.step.started", 1),
+            ("orchestration.step.failed", 1),
+            ("orchestration.step.started", 2),
+            ("orchestration.step.completed", 2),
+        ]
 
         with SessionLocal() as session:
             persisted_step = session.scalar(

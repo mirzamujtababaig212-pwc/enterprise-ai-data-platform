@@ -129,6 +129,74 @@ def test_reconstructs_failed_attempt_followed_by_successful_retry() -> None:
     assert second.last_sequence == 3
 
 
+def test_page_local_reconstruction_handles_attempt_split_across_pages() -> None:
+    page_one = reconstruct_timeline(
+        [
+            _event(
+                AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                step_id="step-2",
+                step_index=1,
+                attempt=1,
+            ),
+        ]
+    )
+
+    page_two = reconstruct_timeline(
+        [
+            _event(
+                AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+                step_id="step-2",
+                step_index=1,
+                attempt=1,
+                metadata={
+                    "failure_category": "provider_timeout",
+                },
+            ),
+            _event(
+                AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+                step_id="step-2",
+                step_index=1,
+                attempt=2,
+            ),
+            _event(
+                AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+                step_id="step-2",
+                step_index=1,
+                attempt=2,
+            ),
+        ]
+    )
+
+    assert page_one.run_id == RUN_ID
+    assert len(page_one.entries) == 1
+    assert page_one.entries[0].sequence == 0
+
+    assert len(page_one.attempts) == 1
+    assert page_one.attempts[0].attempt == 1
+    assert page_one.attempts[0].status is AgentRunStepStatus.RUNNING
+    assert page_one.attempts[0].event_count == 1
+    assert page_one.attempts[0].first_sequence == 0
+    assert page_one.attempts[0].last_sequence == 0
+
+    assert page_two.run_id == RUN_ID
+    assert [entry.sequence for entry in page_two.entries] == [0, 1, 2]
+
+    assert [
+        (attempt.step_id, attempt.attempt, attempt.status, attempt.event_count)
+        for attempt in page_two.attempts
+    ] == [
+        ("step-2", 1, AgentRunStepStatus.FAILED, 1),
+        ("step-2", 2, AgentRunStepStatus.COMPLETED, 2),
+    ]
+
+    assert page_two.attempts[0].failure_category == "provider_timeout"
+    assert page_two.attempts[0].first_sequence == 0
+    assert page_two.attempts[0].last_sequence == 0
+
+    assert page_two.attempts[1].first_sequence == 1
+    assert page_two.attempts[1].last_sequence == 2
+
+
 def test_preserves_interleaved_events_and_attempt_order() -> None:
     timeline = reconstruct_timeline(
         [
