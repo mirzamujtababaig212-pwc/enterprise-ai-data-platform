@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
@@ -18,6 +19,11 @@ from ai_platform.agents.evaluation.policy import (
 from ai_platform.agents.evaluation.run import (
     AgentEvaluationLineage,
     AgentEvaluationRun,
+)
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RerankerConfiguration,
+    RetrievalEvaluationArtifact,
 )
 from app.control_plane.dependencies import (
     get_agent_evaluation_application_service,
@@ -153,6 +159,23 @@ def make_evaluation(
             agent_version="1.2.3",
             tenant_id=tenant_id,
             evidence_fingerprint="c" * 64,
+            retrieval_artifact=RetrievalEvaluationArtifact(
+                retriever_type="RerankingRetriever",
+                vector_store_type="QdrantVectorStore",
+                hybrid_configuration=HybridRetrievalConfiguration(
+                    candidate_k=20,
+                    rrf_k=60,
+                    semantic_weight=0.7,
+                    lexical_weight=0.3,
+                ),
+                reranker_configuration=RerankerConfiguration(
+                    type="CrossEncoderReranker",
+                    model_id="cross-encoder/ms-marco-MiniLM-L-6-v2",
+                    onnx_filename="reranker.onnx",
+                    max_length=512,
+                    candidate_k=20,
+                ),
+            ),
         ),
         metrics=AgentEvaluationMetrics(
             execution_time_ms=125.5,
@@ -254,6 +277,30 @@ def build_client(
     return TestClient(app)
 
 
+def test_create_agent_run_evaluation_returns_null_retrieval_artifact_for_legacy_evaluation() -> (
+    None
+):
+    evaluation = make_evaluation()
+    evaluation = replace(
+        evaluation,
+        lineage=replace(
+            evaluation.lineage,
+            retrieval_artifact=None,
+        ),
+    )
+
+    service = FakeAgentEvaluationApplicationService(evaluation=evaluation)
+    client = build_client(service)
+
+    response = client.post(
+        "/api/v1/agents/runs/run-1/evaluations",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lineage"]["retrieval_artifact"] is None
+
+
 def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
     service = FakeAgentEvaluationApplicationService()
     client = build_client(service)
@@ -290,6 +337,23 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
         "model_policy_id": None,
         "model_policy_version": None,
         "evidence_fingerprint": "c" * 64,
+        "retrieval_artifact": {
+            "retriever_type": "RerankingRetriever",
+            "vector_store_type": "QdrantVectorStore",
+            "hybrid_configuration": {
+                "candidate_k": 20,
+                "rrf_k": 60,
+                "semantic_weight": 0.7,
+                "lexical_weight": 0.3,
+            },
+            "reranker_configuration": {
+                "type": "CrossEncoderReranker",
+                "model_id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                "onnx_filename": "reranker.onnx",
+                "max_length": 512,
+                "candidate_k": 20,
+            },
+        },
     }
     assert body["metrics"]["steps_total"] == 3
     assert body["metrics"]["tool_calls_total"] == 2
@@ -667,6 +731,25 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
     for evaluation in body["evaluations"]:
         assert evaluation["lineage"]["evidence_fingerprint"] == "c" * 64
         assert len(evaluation["lineage"]["evidence_fingerprint"]) == 64
+        assert evaluation["lineage"]["retrieval_artifact"]["retriever_type"] == (
+            "RerankingRetriever"
+        )
+        assert evaluation["lineage"]["retrieval_artifact"]["vector_store_type"] == (
+            "QdrantVectorStore"
+        )
+        assert evaluation["lineage"]["retrieval_artifact"]["hybrid_configuration"] == {
+            "candidate_k": 20,
+            "rrf_k": 60,
+            "semantic_weight": 0.7,
+            "lexical_weight": 0.3,
+        }
+        assert evaluation["lineage"]["retrieval_artifact"]["reranker_configuration"] == {
+            "type": "CrossEncoderReranker",
+            "model_id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            "onnx_filename": "reranker.onnx",
+            "max_length": 512,
+            "candidate_k": 20,
+        }
         assert evaluation["policy"]["policy_id"] == "rag-quality"
         assert evaluation["policy"]["policy_version"] == "1.0"
         assert evaluation["policy"]["min_retrieval_score"] == 0.72

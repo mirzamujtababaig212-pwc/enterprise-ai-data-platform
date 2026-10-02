@@ -29,6 +29,9 @@ from app.control_plane.schemas.agent_evaluation import (
     AgentAnswerEvaluationResponse,
     AgentEvaluationLineageResponse,
     AgentEvaluationMetricsResponse,
+    AgentEvaluationRetrievalArtifactResponse,
+    AgentHybridRetrievalConfigurationResponse,
+    AgentRerankerConfigurationResponse,
     AgentEvaluationDiagnosticsResponse,
     AgentEvaluationContextQualityResponse,
     AgentGroundingClaimAttributionResponse,
@@ -475,6 +478,39 @@ async def get_agent_run_step(
     )
 
 
+def _build_agent_evaluation_retrieval_artifact_response(
+    artifact,
+) -> AgentEvaluationRetrievalArtifactResponse | None:
+    if artifact is None:
+        return None
+
+    return AgentEvaluationRetrievalArtifactResponse(
+        retriever_type=artifact.retriever_type,
+        vector_store_type=artifact.vector_store_type,
+        hybrid_configuration=(
+            AgentHybridRetrievalConfigurationResponse(
+                candidate_k=artifact.hybrid_configuration.candidate_k,
+                rrf_k=artifact.hybrid_configuration.rrf_k,
+                semantic_weight=artifact.hybrid_configuration.semantic_weight,
+                lexical_weight=artifact.hybrid_configuration.lexical_weight,
+            )
+            if artifact.hybrid_configuration is not None
+            else None
+        ),
+        reranker_configuration=(
+            AgentRerankerConfigurationResponse(
+                type=artifact.reranker_configuration.type,
+                model_id=artifact.reranker_configuration.model_id,
+                onnx_filename=artifact.reranker_configuration.onnx_filename,
+                max_length=artifact.reranker_configuration.max_length,
+                candidate_k=artifact.reranker_configuration.candidate_k,
+            )
+            if artifact.reranker_configuration is not None
+            else None
+        ),
+    )
+
+
 @router.post(
     "/runs/{run_id}/evaluations",
     response_model=AgentEvaluationRunResponse,
@@ -556,6 +592,9 @@ async def evaluate_agent_run(
             model_policy_id=evaluation.lineage.model_policy_id,
             model_policy_version=evaluation.lineage.model_policy_version,
             evidence_fingerprint=evaluation.lineage.evidence_fingerprint,
+            retrieval_artifact=_build_agent_evaluation_retrieval_artifact_response(
+                evaluation.lineage.retrieval_artifact,
+            ),
         ),
         metrics=AgentEvaluationMetricsResponse(
             execution_time_ms=evaluation.metrics.execution_time_ms,
@@ -783,6 +822,9 @@ async def list_agent_run_evaluations(
                     model_policy_id=evaluation.lineage.model_policy_id,
                     model_policy_version=evaluation.lineage.model_policy_version,
                     evidence_fingerprint=evaluation.lineage.evidence_fingerprint,
+                    retrieval_artifact=_build_agent_evaluation_retrieval_artifact_response(
+                        evaluation.lineage.retrieval_artifact,
+                    ),
                 ),
                 metrics=AgentEvaluationMetricsResponse(
                     execution_time_ms=evaluation.metrics.execution_time_ms,

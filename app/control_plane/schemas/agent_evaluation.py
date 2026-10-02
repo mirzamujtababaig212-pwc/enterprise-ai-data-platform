@@ -52,6 +52,28 @@ class AgentEvaluationRequest(BaseModel):
         return self
 
 
+class AgentHybridRetrievalConfigurationResponse(BaseModel):
+    candidate_k: int
+    rrf_k: int
+    semantic_weight: float
+    lexical_weight: float
+
+
+class AgentRerankerConfigurationResponse(BaseModel):
+    type: str
+    model_id: str | None = None
+    onnx_filename: str | None = None
+    max_length: int | None = None
+    candidate_k: int | None = None
+
+
+class AgentEvaluationRetrievalArtifactResponse(BaseModel):
+    retriever_type: str
+    vector_store_type: str
+    hybrid_configuration: AgentHybridRetrievalConfigurationResponse | None = None
+    reranker_configuration: AgentRerankerConfigurationResponse | None = None
+
+
 class AgentEvaluationLineageResponse(BaseModel):
     evaluated_run_id: str
     agent_name: str
@@ -62,6 +84,7 @@ class AgentEvaluationLineageResponse(BaseModel):
     model_policy_id: str | None = None
     model_policy_version: str | None = None
     evidence_fingerprint: str | None = None
+    retrieval_artifact: AgentEvaluationRetrievalArtifactResponse | None = None
 
 
 class AgentEvaluationMetricsResponse(BaseModel):
