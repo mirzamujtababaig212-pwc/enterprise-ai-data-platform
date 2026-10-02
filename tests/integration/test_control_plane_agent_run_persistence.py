@@ -18,6 +18,7 @@ from app.control_plane.agent_runs.postgres_repository import (
     PostgreSQLAgentRunRepository,
 )
 from app.control_plane.app import app
+from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
 from app.control_plane.persistence.database import SessionLocal
 from app.control_plane.persistence.models import (
     AgentEvaluationRunRecord,
@@ -47,6 +48,161 @@ def _deterministic_chat_response() -> dict:
         },
         "tool_calls": [],
     }
+
+
+def test_production_control_plane_persists_governed_evaluation_lineage() -> None:
+    """Verify governed model lineage survives run and evaluation PostgreSQL persistence."""
+
+    import app.control_plane.dependencies as dependencies
+
+    client = TestClient(app)
+    session_id = "production-governed-evaluation-integration-session"
+
+    original_policy_engine = dependencies._tenant_policy_engine
+
+    governed_policy_engine = TenantPolicyEngine()
+    governed_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-a",
+            allowed_tools=frozenset({"rag.search", "vehicle.data.query", "search_documents"}),
+            allowed_mcp_servers=frozenset({"document-server"}),
+            allowed_models=frozenset({"gpt-4.1-mini"}),
+            policy_id="tenant-a-model-governance",
+            policy_version="v1",
+        )
+    )
+
+    dependencies._tenant_policy_engine = governed_policy_engine
+
+    run_id: str | None = None
+
+    expected_lineage = {
+        "evaluated_run_id": None,
+        "agent_name": "enterprise-analyst",
+        "agent_version": None,
+        "tenant_id": "tenant-a",
+        "effective_model": "gpt-4.1-mini",
+        "effective_provider": None,
+        "model_policy_id": "tenant-a-model-governance",
+        "model_policy_version": "v1",
+    }
+
+    try:
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(return_value=_deterministic_chat_response()),
+        ) as mock_route_chat:
+            response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={"x-api-key": API_KEY},
+                json={
+                    "input": "Evaluate governed production agent execution.",
+                    "session_id": session_id,
+                    "user_id": "integration-governed-evaluation-user",
+                    "metadata": {
+                        "test": "production-governed-agent-evaluation-lineage",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert mock_route_chat.await_count == 1
+
+        run_payload = response.json()
+        run_id = run_payload["run_id"]
+
+        with SessionLocal() as session:
+            run_record = session.get(AgentRunRecord, run_id)
+
+            assert run_record is not None
+            assert run_record.tenant_id == "tenant-a"
+            assert run_record.request_snapshot is not None
+
+            model_governance = run_record.request_snapshot["model_governance"]
+
+            assert model_governance == {
+                "effective_model": "gpt-4.1-mini",
+                "effective_provider": None,
+                "policy_id": "tenant-a-model-governance",
+                "policy_version": "v1",
+            }
+
+        expected_lineage["evaluated_run_id"] = run_id
+
+        with patch.object(
+            SemanticAnswerEvaluator,
+            "evaluate",
+            new=AsyncMock(
+                return_value=SemanticAnswerEvaluation(
+                    score=1.0,
+                    passed=True,
+                    method="llm_judge_v1",
+                    evaluator_model="integration-test-model",
+                    evaluator_provider="integration-test",
+                )
+            ),
+        ):
+            evaluation_response = client.post(
+                f"/api/v1/agents/runs/{run_id}/evaluations",
+                headers={"x-api-key": API_KEY},
+                json={
+                    "expected_answer": "Deterministic integration-test response.",
+                    "max_execution_time_ms": 60_000,
+                    "max_steps_per_run": 10,
+                    "max_invalid_tool_calls": 0,
+                    "allow_governance_denials": False,
+                    "require_task_completed": True,
+                    "require_answer_match": True,
+                    "name": "production-governed-lineage-quality-gate",
+                },
+            )
+
+        assert evaluation_response.status_code == 200, evaluation_response.text
+
+        evaluation_payload = evaluation_response.json()
+
+        assert evaluation_payload["lineage"] == expected_lineage
+
+        evaluation_run_id = evaluation_payload["evaluation_run_id"]
+
+        with SessionLocal() as session:
+            evaluation_record = session.get(
+                AgentEvaluationRunRecord,
+                evaluation_run_id,
+            )
+
+            assert evaluation_record is not None
+            assert evaluation_record.lineage == expected_lineage
+
+        from app.control_plane.agent_evaluations.postgres_repository import (
+            PostgreSQLAgentEvaluationRunsRepository,
+        )
+
+        with SessionLocal() as session:
+            repository = PostgreSQLAgentEvaluationRunsRepository(session)
+            restored = repository.get(evaluation_run_id)
+
+            assert restored is not None
+            assert restored.lineage.as_dict() == expected_lineage
+
+    finally:
+        dependencies._tenant_policy_engine = original_policy_engine
+
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(AgentEvaluationRunRecord).filter(
+                    AgentEvaluationRunRecord.evaluated_run_id == run_id
+                ).delete(synchronize_session=False)
+                session.query(AgentRunStepRecord).filter(
+                    AgentRunStepRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+                session.query(AgentRunEventRecord).filter(
+                    AgentRunEventRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                    synchronize_session=False
+                )
+                session.commit()
 
 
 def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
