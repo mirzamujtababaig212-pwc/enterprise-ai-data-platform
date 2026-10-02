@@ -185,6 +185,11 @@ class AgentDelegationService:
 
         child_metadata = dict(child_request.metadata)
         child_metadata.update(request.metadata)
+
+        parent_retrieval_artifact = parent.metadata.get("rag_retriever_artifact")
+        if parent_retrieval_artifact is not None:
+            child_metadata["rag_retriever_artifact"] = parent_retrieval_artifact
+
         child_metadata["delegation"] = {
             "parent_run_id": parent.run_id,
             "parent_step_id": step_id,

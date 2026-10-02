@@ -22,6 +22,7 @@ from app.control_plane.agent_evaluations.postgres_repository import (
     PostgreSQLAgentEvaluationRunsRepository,
 )
 from app.control_plane.persistence.models import AgentEvaluationRunRecord, Base
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 
 
 def _repository():
@@ -587,6 +588,71 @@ def test_get_legacy_run_without_semantic_grounding_diagnostics_preserves_compati
         assert restored.metrics.semantic_grounding_method is None
         assert restored.metrics.semantic_grounding_evaluator_model is None
         assert restored.metrics.semantic_grounding_evaluator_provider is None
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_save_and_get_round_trip_preserves_retrieval_artifact_and_legacy_compatibility():
+    repository, engine = _repository()
+
+    try:
+        artifact = RetrievalEvaluationArtifact(
+            retriever_type="HybridRetriever",
+            vector_store_type="QdrantVectorStore",
+        )
+
+        run = _run("evaluation-retrieval-artifact")
+        run = AgentEvaluationRun(
+            evaluation_run_id=run.evaluation_run_id,
+            created_at=run.created_at,
+            lineage=AgentEvaluationLineage(
+                evaluated_run_id=run.lineage.evaluated_run_id,
+                agent_name=run.lineage.agent_name,
+                agent_version=run.lineage.agent_version,
+                tenant_id=run.lineage.tenant_id,
+                effective_model=run.lineage.effective_model,
+                effective_provider=run.lineage.effective_provider,
+                model_policy_id=run.lineage.model_policy_id,
+                model_policy_version=run.lineage.model_policy_version,
+                evidence_fingerprint=run.lineage.evidence_fingerprint,
+                retrieval_artifact=artifact,
+            ),
+            metrics=run.metrics,
+            policy=run.policy,
+            quality_gate=run.quality_gate,
+            answer_evaluation=run.answer_evaluation,
+            context_quality=run.context_quality,
+        )
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+        assert record is not None
+        assert record.lineage["retrieval_artifact"] == artifact.as_dict()
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.lineage.retrieval_artifact == artifact
+
+        # Simulate an older persisted evaluation whose lineage predates
+        # retrieval-artifact persistence.
+        legacy_lineage = dict(record.lineage)
+        legacy_lineage.pop("retrieval_artifact", None)
+        record.lineage = legacy_lineage
+        repository._session.flush()
+
+        legacy_restored = repository.get(run.evaluation_run_id)
+
+        assert legacy_restored is not None
+        assert legacy_restored.lineage.retrieval_artifact is None
     finally:
         repository.close()
         engine.dispose()

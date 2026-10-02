@@ -25,6 +25,7 @@ from ai_platform.agents.evaluation.run import (
     AgentEvaluationLineage,
     AgentEvaluationRun,
 )
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 from app.control_plane.agent_evaluations.repository import (
     AgentEvaluationRunsRepository,
 )
@@ -123,6 +124,14 @@ class AgentEvaluationApplicationService:
             events,
         )
 
+        retrieval_artifact = None
+        raw_retrieval_artifact = run.metadata.get("rag_retriever_artifact")
+
+        if raw_retrieval_artifact is not None:
+            retrieval_artifact = RetrievalEvaluationArtifact.from_dict(
+                raw_retrieval_artifact,
+            )
+
         answer_evaluation = self._evaluator.evaluate_answer(
             evidence,
             expected_answer=expected_answer,
@@ -188,6 +197,7 @@ class AgentEvaluationApplicationService:
                 model_policy_id=evidence.model_policy_id,
                 model_policy_version=evidence.model_policy_version,
                 evidence_fingerprint=evidence_fingerprint,
+                retrieval_artifact=retrieval_artifact,
             ),
             metrics=metrics,
             policy=policy,

@@ -13,6 +13,7 @@ from ai_platform.agents.exceptions import (
 from ai_platform.agents.models import AgentRequest, AgentResponse
 from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
 from rag.governance import GovernancePolicy
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -75,6 +76,7 @@ class AgentRunApplicationService:
         admission_policy: AgentRunAdmissionPolicy | None = None,
         cancellation_registry: AgentRunCancellationRegistry | None = None,
         tenant_policy_engine: TenantPolicyEngine | None = None,
+        retrieval_artifact: RetrievalEvaluationArtifact | None = None,
         lease_seconds: int = 60,
     ) -> None:
         self._runtime = runtime
@@ -88,6 +90,7 @@ class AgentRunApplicationService:
         self._lease_seconds = lease_seconds
         self._cancellation_registry = cancellation_registry
         self._tenant_policy_engine = tenant_policy_engine
+        self._retrieval_artifact = retrieval_artifact
 
     async def _emit_governance_decision(
         self,
@@ -382,6 +385,13 @@ class AgentRunApplicationService:
 
         run_id = str(uuid4())
 
+        run_metadata = dict(effective_request.metadata)
+
+        # Retrieval provenance is server-owned execution metadata. Never allow
+        # caller-supplied metadata to spoof the retriever actually used.
+        if self._retrieval_artifact is not None:
+            run_metadata["rag_retriever_artifact"] = self._retrieval_artifact.as_dict()
+
         run = AgentRun(
             run_id=run_id,
             agent_name=agent_name,
@@ -392,7 +402,7 @@ class AgentRunApplicationService:
             tenant_id=effective_request.tenant_id,
             idempotency_key=idempotency_key,
             status=AgentRunStatus.PENDING,
-            metadata=dict(effective_request.metadata),
+            metadata=run_metadata,
             request_snapshot=AgentRunRequestSnapshot.from_request(effective_request),
         )
 

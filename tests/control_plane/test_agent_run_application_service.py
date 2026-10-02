@@ -41,6 +41,10 @@ from app.control_plane.agent_runs.models import (
 )
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.request_snapshot import AgentRunRequestSnapshot
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RetrievalEvaluationArtifact,
+)
 from app.control_plane.agent_runs.application_service import (
     AgentRunApplicationService,
 )
@@ -3486,3 +3490,58 @@ async def test_execute_existing_run_raises_when_already_executing() -> None:
         )
 
     repository.claim_pending_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_injects_retrieval_artifact_and_overrides_caller_metadata_spoofing():
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    real_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="QdrantVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=20,
+            rrf_k=60,
+            semantic_weight=0.7,
+            lexical_weight=0.3,
+        ),
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        retrieval_artifact=real_artifact,
+    )
+
+    request = AgentRequest(
+        input="Explain the platform",
+        session_id="session-rag-provenance-1",
+        user_id="user-rag-provenance-1",
+        principal="principal-rag-provenance-1",
+        tenant_id="tenant-acme",
+        metadata={
+            "rag_retriever_artifact": {
+                "retriever_type": "SpoofedRetriever",
+                "vector_store_type": "SpoofedVectorStore",
+            },
+        },
+    )
+
+    await service.execute(
+        agent_name="enterprise-analyst",
+        request=request,
+    )
+
+    pending = repository.create.call_args.args[0]
+
+    assert pending.metadata["rag_retriever_artifact"] == real_artifact.as_dict()
+    assert pending.metadata["rag_retriever_artifact"] != request.metadata["rag_retriever_artifact"]
+
+    # The request snapshot preserves the caller's original request metadata.
+    assert (
+        pending.request_snapshot.metadata["rag_retriever_artifact"]
+        == request.metadata["rag_retriever_artifact"]
+    )

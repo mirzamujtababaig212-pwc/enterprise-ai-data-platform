@@ -21,6 +21,7 @@ from app.control_plane.agent_evaluations.repository import (
     DuplicateAgentEvaluationRunError,
 )
 from app.control_plane.persistence.models import AgentEvaluationRunRecord
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 
 
 class PostgreSQLAgentEvaluationRunsRepository:
@@ -183,6 +184,11 @@ class PostgreSQLAgentEvaluationRunsRepository:
                 model_policy_id=lineage_data.get("model_policy_id"),
                 model_policy_version=lineage_data.get("model_policy_version"),
                 evidence_fingerprint=lineage_data.get("evidence_fingerprint"),
+                retrieval_artifact=(
+                    RetrievalEvaluationArtifact.from_dict(lineage_data["retrieval_artifact"])
+                    if lineage_data.get("retrieval_artifact") is not None
+                    else None
+                ),
             ),
             metrics=AgentEvaluationMetrics(
                 execution_time_ms=metrics_data["execution_time_ms"],

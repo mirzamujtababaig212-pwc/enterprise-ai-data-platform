@@ -313,6 +313,10 @@ _rag_retriever = _build_rag_retriever(
     lexical_retriever=_rag_lexical_retriever,
 )
 
+_rag_retrieval_artifact = RAGRetrieverFactory.build_retrieval_artifact(
+    _rag_retriever,
+)
+
 _rag_query_service = RAGQueryService(
     retriever=_rag_retriever,
     chat_service=_rag_chat_service,
@@ -517,6 +521,7 @@ async def _agent_delegation_service_scope() -> AsyncIterator[AgentDelegationServ
             observer=_agent_observer,
             cancellation_registry=_agent_run_cancellation_registry,
             tenant_policy_engine=_tenant_policy_engine,
+            retrieval_artifact=_rag_retrieval_artifact,
             lease_seconds=app_settings.agent_run_lease_duration_seconds,
         )
 
@@ -544,6 +549,7 @@ async def get_agent_run_application_service(
         observer=_agent_observer,
         cancellation_registry=_agent_run_cancellation_registry,
         tenant_policy_engine=_tenant_policy_engine,
+        retrieval_artifact=_rag_retrieval_artifact,
         lease_seconds=app_settings.agent_run_lease_duration_seconds,
     )
 

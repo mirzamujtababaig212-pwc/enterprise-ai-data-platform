@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, Mock
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -19,6 +19,7 @@ from app.control_plane.agent_run_steps.models import AgentRunStepStatus
 from app.control_plane.agent_runs.in_memory import InMemoryAgentRunRepository
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
 from app.control_plane.agent_runs.exceptions import AgentRunAlreadyExecutingError
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
 
 
 @dataclass
@@ -1141,3 +1142,68 @@ async def test_phase_3b_synchronous_delegation_e2e() -> None:
     assert tool_messages
     assert tool_messages[-1]["tool_name"] == "agent.delegate"
     assert "child execution result" in tool_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_delegation_inherits_parent_retrieval_artifact_over_child_spoofing(
+    registry,
+):
+    await registry.register(
+        FakeAgent(
+            AgentDefinition(
+                name="specialist-agent",
+                description="Specialist",
+                system_prompt="Analyze the supplied information.",
+            )
+        )
+    )
+
+    runs = InMemoryAgentRunRepository()
+    steps = InMemoryAgentRunStepsRepository()
+
+    parent_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="QdrantVectorStore",
+    )
+
+    parent = make_parent()
+    parent = parent.model_copy(
+        update={
+            "metadata": {
+                "rag_retriever_artifact": parent_artifact.as_dict(),
+            }
+        }
+    )
+    runs.create(parent)
+
+    request = make_request()
+    request = AgentDelegationRequest(
+        parent_run_id=request.parent_run_id,
+        child_agent_name=request.child_agent_name,
+        child_request=replace(
+            request.child_request,
+            metadata={
+                "rag_retriever_artifact": {
+                    "retriever_type": "SpoofedRetriever",
+                    "vector_store_type": "SpoofedVectorStore",
+                },
+            },
+        ),
+        idempotency_key=request.idempotency_key,
+    )
+
+    service = AgentDelegationService(
+        agent_registry=registry,
+        agent_run_repository=runs,
+        agent_run_steps_repository_factory=lambda: steps,
+    )
+
+    result = await service.delegate(request)
+
+    child_run = result.child_run
+
+    assert child_run.metadata["rag_retriever_artifact"] == parent_artifact.as_dict()
+    assert (
+        child_run.metadata["rag_retriever_artifact"]
+        != request.child_request.metadata["rag_retriever_artifact"]
+    )

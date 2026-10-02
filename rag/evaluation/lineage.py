@@ -112,6 +112,58 @@ class RetrievalEvaluationArtifact:
             ),
         }
 
+    @classmethod
+    def from_dict(cls, value: object) -> "RetrievalEvaluationArtifact":
+        """Reconstruct persisted retrieval provenance."""
+
+        if not isinstance(value, dict):
+            raise ValueError("retrieval artifact must be a dictionary.")
+
+        retriever_type = value.get("retriever_type")
+        vector_store_type = value.get("vector_store_type")
+
+        if not isinstance(retriever_type, str):
+            raise ValueError("retrieval artifact retriever_type must be a string.")
+
+        if not isinstance(vector_store_type, str):
+            raise ValueError("retrieval artifact vector_store_type must be a string.")
+
+        hybrid_data = value.get("hybrid_configuration")
+        hybrid_configuration = None
+
+        if hybrid_data is not None:
+            if not isinstance(hybrid_data, dict):
+                raise ValueError("hybrid_configuration must be a dictionary.")
+
+            hybrid_configuration = HybridRetrievalConfiguration(
+                candidate_k=hybrid_data["candidate_k"],
+                rrf_k=hybrid_data["rrf_k"],
+                semantic_weight=hybrid_data["semantic_weight"],
+                lexical_weight=hybrid_data["lexical_weight"],
+            )
+
+        reranker_data = value.get("reranker_configuration")
+        reranker_configuration = None
+
+        if reranker_data is not None:
+            if not isinstance(reranker_data, dict):
+                raise ValueError("reranker_configuration must be a dictionary.")
+
+            reranker_configuration = RerankerConfiguration(
+                type=reranker_data["type"],
+                model_id=reranker_data.get("model_id"),
+                onnx_filename=reranker_data.get("onnx_filename"),
+                max_length=reranker_data.get("max_length"),
+                candidate_k=reranker_data.get("candidate_k"),
+            )
+
+        return cls(
+            retriever_type=retriever_type,
+            vector_store_type=vector_store_type,
+            hybrid_configuration=hybrid_configuration,
+            reranker_configuration=reranker_configuration,
+        )
+
 
 @dataclass(frozen=True)
 class RetrievalEvaluationLineage:

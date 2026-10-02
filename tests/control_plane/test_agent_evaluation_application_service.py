@@ -21,6 +21,8 @@ from app.control_plane.agent_run_steps.models import (
     AgentRunStepStatus,
 )
 from app.control_plane.agent_runs.models import AgentRun, AgentRunStatus
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
+
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
@@ -1109,3 +1111,36 @@ def test_get_run_diagnostics_enforces_principal_authorization():
             tenant_id="tenant-1",
             principal="user-1",
         )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_reconstructs_retrieval_artifact_from_durable_run_metadata():
+    artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="QdrantVectorStore",
+    )
+
+    run = make_run()
+    run = run.model_copy(
+        update={
+            "metadata": {
+                **run.metadata,
+                "rag_retriever_artifact": artifact.as_dict(),
+            }
+        }
+    )
+
+    service, _, _, _, repository = make_service(run=run)
+
+    result = await service.evaluate_run_with_diagnostics(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=default_policy(),
+    )
+
+    assert result.evaluation_run.lineage.retrieval_artifact == artifact
+
+    persisted = repository.get(result.evaluation_run.evaluation_run_id)
+    assert persisted is not None
+    assert persisted.lineage.retrieval_artifact == artifact

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
+
 from ai_platform.agents.evaluation.answer_evaluation import AgentAnswerEvaluation
 from ai_platform.agents.evaluation.models import (
     AgentContextQualityAssessment,
@@ -28,6 +30,7 @@ class AgentEvaluationLineage:
     model_policy_id: str | None = None
     model_policy_version: str | None = None
     evidence_fingerprint: str | None = None
+    retrieval_artifact: RetrievalEvaluationArtifact | None = None
 
     def __post_init__(self) -> None:
         if not self.evaluated_run_id.strip():
@@ -47,6 +50,9 @@ class AgentEvaluationLineage:
             "model_policy_id": self.model_policy_id,
             "model_policy_version": self.model_policy_version,
             "evidence_fingerprint": self.evidence_fingerprint,
+            "retrieval_artifact": (
+                self.retrieval_artifact.as_dict() if self.retrieval_artifact is not None else None
+            ),
         }
 
 
