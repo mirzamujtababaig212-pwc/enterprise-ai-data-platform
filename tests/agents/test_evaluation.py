@@ -1021,6 +1021,7 @@ def test_evaluation_run_is_immutable_and_serializable():
             agent_name="test-agent",
             agent_version="v1",
             tenant_id="tenant-1",
+            evidence_fingerprint="a" * 64,
         ),
         metrics=metrics,
         policy=policy,
@@ -1031,6 +1032,7 @@ def test_evaluation_run_is_immutable_and_serializable():
     payload = evaluation.as_dict()
     assert payload["evaluation_run_id"] == "evaluation-1"
     assert payload["lineage"]["evaluated_run_id"] == "run-1"
+    assert payload["lineage"]["evidence_fingerprint"] == "a" * 64
     assert payload["metrics"]["steps_total"] == 3
 
     with pytest.raises(AttributeError):

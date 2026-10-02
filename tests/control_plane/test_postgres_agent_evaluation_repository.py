@@ -51,6 +51,7 @@ def _run(
             agent_name="vehicle-agent",
             agent_version="1.2.3",
             tenant_id="tenant-acme",
+            evidence_fingerprint="b" * 64,
         ),
         metrics=AgentEvaluationMetrics(
             execution_time_ms=125.5,
@@ -135,6 +136,35 @@ def _run(
     )
 
 
+def test_save_and_get_round_trip_preserves_evidence_fingerprint():
+    repository, engine = _repository()
+
+    try:
+        run = _run("evaluation-evidence-fingerprint")
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+        assert record is not None
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.lineage.evidence_fingerprint == "b" * 64
+        assert restored.lineage.evidence_fingerprint == run.lineage.evidence_fingerprint
+
+        assert record.lineage["evidence_fingerprint"] == "b" * 64
+    finally:
+        repository.close()
+        engine.dispose()
+
+
 def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
     repository, engine = _repository()
 
@@ -191,6 +221,40 @@ def test_save_and_get_round_trip_preserves_rag_score_diagnostics():
         assert restored.metrics.semantic_grounding_evaluator_provider == "openai"
         assert restored.policy.policy_id == run.policy.policy_id
         assert restored.policy.policy_version == run.policy.policy_version
+    finally:
+        repository.close()
+        engine.dispose()
+
+
+def test_get_legacy_run_without_evidence_fingerprint_preserves_compatibility():
+    repository, engine = _repository()
+
+    try:
+        run = _run("legacy-evidence-fingerprint")
+
+        repository.save(run)
+
+        record = repository._session.get(
+            AgentEvaluationRunRecord,
+            run.evaluation_run_id,
+        )
+
+        assert record is not None
+
+        legacy_lineage = dict(record.lineage)
+        legacy_lineage.pop("evidence_fingerprint", None)
+        record.lineage = legacy_lineage
+
+        record.created_at = run.created_at
+        repository._session.flush()
+
+        restored = repository.get(run.evaluation_run_id)
+
+        assert restored is not None
+        assert restored.lineage.evidence_fingerprint is None
+        assert restored.lineage.evaluated_run_id == run.lineage.evaluated_run_id
+        assert restored.lineage.agent_name == run.lineage.agent_name
+        assert restored.lineage.tenant_id == run.lineage.tenant_id
     finally:
         repository.close()
         engine.dispose()

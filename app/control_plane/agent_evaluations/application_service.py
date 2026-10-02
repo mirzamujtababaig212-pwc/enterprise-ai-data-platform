@@ -16,6 +16,7 @@ from ai_platform.agents.evaluation.semantic_grounding_evaluator import (
     SemanticGroundingEvaluator,
 )
 from ai_platform.agents.evaluation.evidence import (
+    compute_evidence_fingerprint,
     extract_evidence,
     extract_rag_evidence_sources,
 )
@@ -110,6 +111,12 @@ class AgentEvaluationApplicationService:
             limit=10_000,
         )
 
+        evidence_fingerprint = compute_evidence_fingerprint(
+            run,
+            steps,
+            events,
+        )
+
         evidence = extract_evidence(
             run,
             steps,
@@ -180,6 +187,7 @@ class AgentEvaluationApplicationService:
                 effective_provider=evidence.effective_provider,
                 model_policy_id=evidence.model_policy_id,
                 model_policy_version=evidence.model_policy_version,
+                evidence_fingerprint=evidence_fingerprint,
             ),
             metrics=metrics,
             policy=policy,

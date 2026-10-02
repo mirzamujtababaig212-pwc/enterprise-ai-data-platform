@@ -152,6 +152,7 @@ def make_evaluation(
             agent_name="vehicle-agent",
             agent_version="1.2.3",
             tenant_id=tenant_id,
+            evidence_fingerprint="c" * 64,
         ),
         metrics=AgentEvaluationMetrics(
             execution_time_ms=125.5,
@@ -288,6 +289,7 @@ def test_create_agent_run_evaluation_returns_evaluation_artifact() -> None:
         "effective_provider": None,
         "model_policy_id": None,
         "model_policy_version": None,
+        "evidence_fingerprint": "c" * 64,
     }
     assert body["metrics"]["steps_total"] == 3
     assert body["metrics"]["tool_calls_total"] == 2
@@ -663,6 +665,8 @@ def test_list_agent_run_evaluations_returns_evaluations() -> None:
     ]
 
     for evaluation in body["evaluations"]:
+        assert evaluation["lineage"]["evidence_fingerprint"] == "c" * 64
+        assert len(evaluation["lineage"]["evidence_fingerprint"]) == 64
         assert evaluation["policy"]["policy_id"] == "rag-quality"
         assert evaluation["policy"]["policy_version"] == "1.0"
         assert evaluation["policy"]["min_retrieval_score"] == 0.72

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from app.control_plane.agent_run_steps.models import (
@@ -21,6 +24,190 @@ _INVALID_TOOL_CALL_CATEGORIES = frozenset(
         ToolExecutionFailureCategory.INVALID_SCHEMA.value,
     }
 )
+
+
+def _canonicalize_evidence_value(value: Any) -> Any:
+    """Return a deterministic JSON-compatible representation of evidence."""
+    if isinstance(value, datetime):
+        normalized = (
+            value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        )
+        return normalized.isoformat()
+
+    if isinstance(value, dict):
+        return {
+            str(key): _canonicalize_evidence_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_evidence_value(item) for item in value]
+
+    if isinstance(value, set | frozenset):
+        canonical_items = [_canonicalize_evidence_value(item) for item in value]
+        return sorted(
+            canonical_items,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError("evidence fingerprint cannot encode non-finite floats")
+
+    return value
+
+
+def _canonical_rag_source(source: RagEvidenceSource) -> dict[str, Any]:
+    return {
+        "source_index": source.source_index,
+        "content": source.content,
+        "chunk_id": source.chunk_id,
+        "document_id": source.document_id,
+        "retrieval_score": source.retrieval_score,
+        "reranker_score": source.reranker_score,
+    }
+
+
+def _canonical_evidence_input(
+    run: AgentRun,
+    steps: list[AgentRunStep],
+    events: list[AgentExecutionEvent],
+) -> dict[str, Any]:
+    """Build a deterministic projection of durable evaluation source evidence."""
+
+    def step_payload(step: AgentRunStep) -> dict[str, Any]:
+        return {
+            "run_id": step.run_id,
+            "step_id": step.step_id,
+            "step_index": step.step_index,
+            "step_type": step.step_type,
+            "status": step.status.value,
+            "attempt": step.attempt,
+            "tool_name": step.tool_name,
+            "call_id": step.call_id,
+            "input": step.input,
+            "output": step.output,
+            "error": step.error,
+            "failure_category": step.failure_category,
+            "started_at": step.started_at,
+            "completed_at": step.completed_at,
+            "metadata": step.metadata,
+        }
+
+    def event_payload(event: AgentExecutionEvent) -> dict[str, Any]:
+        return {
+            "event_type": event.event_type.value,
+            "agent_name": event.agent_name,
+            "run_id": event.run_id,
+            "session_id": event.session_id,
+            "user_id": event.user_id,
+            "principal": event.principal,
+            "tool_round": event.tool_round,
+            "tool_name": event.tool_name,
+            "call_id": event.call_id,
+            "provider": event.provider,
+            "model": event.model,
+            "step_id": event.step_id,
+            "step_index": event.step_index,
+            "step_name": event.step_name,
+            "attempt": event.attempt,
+            "metadata": event.metadata,
+        }
+
+    def canonical_sort_key(payload: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            payload.get("step_index") if payload.get("step_index") is not None else -1,
+            payload.get("step_id") or "",
+            payload.get("attempt") if payload.get("attempt") is not None else 0,
+            payload.get("tool_round") if payload.get("tool_round") is not None else -1,
+            payload.get("call_id") or "",
+            payload.get("event_type") or "",
+            payload.get("provider") or "",
+            payload.get("model") or "",
+            payload.get("agent_name") or "",
+            json.dumps(
+                _canonicalize_evidence_value(payload),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
+    canonical_step_payloads = [step_payload(step) for step in steps]
+    canonical_steps = sorted(
+        canonical_step_payloads,
+        key=canonical_sort_key,
+    )
+
+    canonical_event_payloads = [event_payload(event) for event in events]
+    canonical_events = sorted(
+        canonical_event_payloads,
+        key=canonical_sort_key,
+    )
+
+    canonical_step_models = sorted(
+        steps,
+        key=lambda step: (
+            step.step_index,
+            step.step_id,
+            step.attempt,
+            json.dumps(
+                _canonicalize_evidence_value(step_payload(step)),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        ),
+    )
+
+    rag_sources = extract_rag_evidence_sources(canonical_step_models)
+
+    return _canonicalize_evidence_value(
+        {
+            "run": {
+                "run_id": run.run_id,
+                "agent_name": run.agent_name,
+                "tenant_id": run.tenant_id,
+                "status": run.status.value,
+                "started_at": run.started_at,
+                "completed_at": run.completed_at,
+                "output": run.output,
+                "metadata": run.metadata,
+                "request_snapshot": (
+                    run.request_snapshot.model_dump(mode="json")
+                    if run.request_snapshot is not None
+                    else None
+                ),
+                "error_type": run.error_type,
+                "error_message": run.error_message,
+            },
+            "steps": canonical_steps,
+            "events": canonical_events,
+            "rag_sources": [_canonical_rag_source(source) for source in rag_sources],
+        }
+    )
+
+
+def compute_evidence_fingerprint(
+    run: AgentRun,
+    steps: list[AgentRunStep],
+    events: list[AgentExecutionEvent],
+) -> str:
+    """Return a deterministic SHA-256 fingerprint of evaluation source evidence."""
+    canonical_input = _canonical_evidence_input(run, steps, events)
+    payload = json.dumps(
+        canonical_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _extract_answer_text(output: Any) -> str | None:

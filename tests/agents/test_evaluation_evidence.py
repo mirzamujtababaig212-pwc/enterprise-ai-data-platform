@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from ai_platform.agents.evaluation.evidence import (
     extract_evidence,
@@ -1392,3 +1392,159 @@ def test_extract_evidence_defaults_context_source_lineage_for_missing_metadata()
     evidence = extract_evidence(_run(), [], events)
 
     assert evidence.context_source_lineage == ()
+
+
+def test_compute_evidence_fingerprint_is_deterministic() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="search",
+            call_id="call-1",
+            input={"query": "vehicle", "filters": {"status": "active"}},
+            output={"count": 3},
+            metadata={"b": 2, "a": 1},
+        )
+    ]
+
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            tool_name="search",
+            call_id="call-1",
+            step_id="step-1",
+            step_index=0,
+            attempt=1,
+            metadata={"b": 2, "a": 1},
+        )
+    ]
+
+    assert compute_evidence_fingerprint(_run(), steps, events) == (
+        compute_evidence_fingerprint(_run(), steps, events)
+    )
+
+
+def test_compute_evidence_fingerprint_ignores_mapping_key_order() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    run_a = _run().model_copy(update={"metadata": {"a": 1, "nested": {"x": 1, "y": 2}}})
+    run_b = _run().model_copy(update={"metadata": {"nested": {"y": 2, "x": 1}, "a": 1}})
+
+    assert compute_evidence_fingerprint(run_a, [], []) == compute_evidence_fingerprint(
+        run_b, [], []
+    )
+
+
+def test_compute_evidence_fingerprint_ignores_step_and_event_input_order() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+        ),
+        _step(
+            step_id="step-2",
+            step_index=1,
+            status=AgentRunStepStatus.COMPLETED,
+        ),
+    ]
+
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            step_id="step-2",
+            step_index=1,
+            attempt=1,
+            call_id="call-2",
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+            agent_name="test-agent",
+            run_id="run-1",
+            step_id="step-1",
+            step_index=0,
+            attempt=1,
+            call_id="call-1",
+        ),
+    ]
+
+    assert compute_evidence_fingerprint(_run(), steps, events) == (
+        compute_evidence_fingerprint(_run(), list(reversed(steps)), list(reversed(events)))
+    )
+
+
+def test_compute_evidence_fingerprint_changes_for_material_evidence() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    base = compute_evidence_fingerprint(_run(), [], [])
+
+    changed_answer = _run().model_copy(update={"output": {"reply": "different answer"}})
+    changed_answer_fingerprint = compute_evidence_fingerprint(changed_answer, [], [])
+
+    changed_step = _step(
+        step_id="step-1",
+        step_index=0,
+        status=AgentRunStepStatus.COMPLETED,
+        input={"query": "different query"},
+    )
+    changed_step_fingerprint = compute_evidence_fingerprint(
+        _run(),
+        [changed_step],
+        [],
+    )
+
+    changed_event = AgentExecutionEvent(
+        event_type=AgentExecutionEventType.GOVERNANCE_DECISION,
+        agent_name="test-agent",
+        run_id="run-1",
+        attempt=2,
+        metadata={"decision": "deny"},
+    )
+    changed_event_fingerprint = compute_evidence_fingerprint(
+        _run(),
+        [],
+        [changed_event],
+    )
+
+    assert changed_answer_fingerprint != base
+    assert changed_step_fingerprint != base
+    assert changed_event_fingerprint != base
+
+
+def test_compute_evidence_fingerprint_normalizes_equivalent_timestamps() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    run_utc = _run()
+    ist = timezone(timedelta(hours=5, minutes=30))
+    run_offset = run_utc.model_copy(
+        update={
+            "started_at": datetime(2026, 1, 1, 17, 30, tzinfo=ist),
+            "completed_at": datetime(2026, 1, 1, 17, 30, 1, 250000, tzinfo=ist),
+        }
+    )
+
+    assert compute_evidence_fingerprint(run_utc, [], []) == compute_evidence_fingerprint(
+        run_offset, [], []
+    )
+
+
+def test_compute_evidence_fingerprint_rejects_non_finite_floats() -> None:
+    from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
+
+    run = _run().model_copy(update={"metadata": {"invalid": float("nan")}})
+
+    try:
+        compute_evidence_fingerprint(run, [], [])
+    except ValueError as exc:
+        assert str(exc) == "evidence fingerprint cannot encode non-finite floats"
+    else:
+        raise AssertionError("Expected non-finite evidence float to be rejected")

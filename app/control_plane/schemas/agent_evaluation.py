@@ -61,6 +61,7 @@ class AgentEvaluationLineageResponse(BaseModel):
     effective_provider: str | None = None
     model_policy_id: str | None = None
     model_policy_version: str | None = None
+    evidence_fingerprint: str | None = None
 
 
 class AgentEvaluationMetricsResponse(BaseModel):

@@ -27,6 +27,7 @@ class AgentEvaluationLineage:
     effective_provider: str | None = None
     model_policy_id: str | None = None
     model_policy_version: str | None = None
+    evidence_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not self.evaluated_run_id.strip():
@@ -45,6 +46,7 @@ class AgentEvaluationLineage:
             "effective_provider": self.effective_provider,
             "model_policy_id": self.model_policy_id,
             "model_policy_version": self.model_policy_version,
+            "evidence_fingerprint": self.evidence_fingerprint,
         }
 
 

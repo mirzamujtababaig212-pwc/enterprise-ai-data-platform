@@ -161,6 +161,10 @@ def test_production_control_plane_persists_governed_evaluation_lineage() -> None
 
         evaluation_payload = evaluation_response.json()
 
+        expected_lineage["evidence_fingerprint"] = evaluation_payload["lineage"][
+            "evidence_fingerprint"
+        ]
+
         assert evaluation_payload["lineage"] == expected_lineage
 
         evaluation_run_id = evaluation_payload["evaluation_run_id"]
@@ -293,6 +297,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             "effective_provider": None,
             "model_policy_id": None,
             "model_policy_version": None,
+            "evidence_fingerprint": evaluation_payload["lineage"]["evidence_fingerprint"],
         }
 
         metrics = evaluation_payload["metrics"]
@@ -365,6 +370,7 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
                 "effective_provider": None,
                 "model_policy_id": None,
                 "model_policy_version": None,
+                "evidence_fingerprint": evaluation_payload["lineage"]["evidence_fingerprint"],
             }
 
             assert evaluation_record.metrics["task_completed"] is True

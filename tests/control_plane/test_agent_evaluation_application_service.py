@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ai_platform.agents.evaluation.evidence import compute_evidence_fingerprint
 from ai_platform.agents.evaluation.policy import AgentEvaluationPolicy
 from ai_platform.agents.evaluation.semantic_answer_evaluator import (
     SemanticAnswerEvaluation,
@@ -879,7 +880,7 @@ async def test_evaluate_run_persists_context_quality_from_context_assembly_event
 
 @pytest.mark.asyncio
 async def test_evaluate_run_with_diagnostics_preserves_transient_grounding_attribution():
-    service, _, _, _, repository = make_service(
+    service, run_repository, steps_repository, events_repository, repository = make_service(
         run=make_run(
             output={
                 "answer": "Vehicle V001 traveled at 62 miles per hour.",
@@ -944,6 +945,18 @@ async def test_evaluate_run_with_diagnostics_preserves_transient_grounding_attri
 
     persisted = repository.get(result.evaluation_run.evaluation_run_id)
     assert persisted is not None
+
+    durable_run = run_repository.run
+    assert durable_run is not None
+
+    expected_fingerprint = compute_evidence_fingerprint(
+        durable_run,
+        steps_repository.steps,
+        events_repository.events,
+    )
+
+    assert persisted.lineage.evidence_fingerprint == expected_fingerprint
+    assert len(persisted.lineage.evidence_fingerprint) == 64
 
     assert persisted.metrics.grounding_evaluated is True
     assert persisted.metrics.grounding_supported is True
