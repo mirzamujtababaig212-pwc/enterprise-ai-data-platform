@@ -14,6 +14,11 @@ from rag.evaluation.external import (
     ExternalEvaluationReleasePolicy,
     ExternalEvaluationResult,
 )
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RerankerConfiguration,
+    RetrievalEvaluationArtifact,
+)
 from rag.evaluation.workflow import RetrievalEvaluationWorkflowResult
 
 
@@ -72,12 +77,17 @@ def _native_result() -> RetrievalEvaluationWorkflowResult:
     return asyncio.run(build())
 
 
-def _external_result(*, faithfulness: float = 1.0) -> ExternalEvaluationResult:
+def _external_result(
+    *,
+    faithfulness: float = 1.0,
+    retrieval_artifact: RetrievalEvaluationArtifact | None = None,
+) -> ExternalEvaluationResult:
     return ExternalEvaluationResult(
         provider="ragas",
         evaluator="faithfulness",
         metrics={"faithfulness": faithfulness},
         evaluated_samples=1,
+        retrieval_artifact=retrieval_artifact,
     )
 
 
@@ -117,6 +127,28 @@ def test_composite_workflow_builds_native_only_run() -> None:
 def test_composite_workflow_attaches_external_evidence_and_quality_gate() -> None:
     result = _native_result()
 
+    retrieval_artifact = RetrievalEvaluationArtifact(
+        retriever_type="HybridRetriever",
+        vector_store_type="InMemoryVectorStore",
+        hybrid_configuration=HybridRetrievalConfiguration(
+            candidate_k=5,
+            rrf_k=60,
+            semantic_weight=1.0,
+            lexical_weight=0.5,
+        ),
+        reranker_configuration=RerankerConfiguration(
+            type="cross_encoder",
+            model_id="test-reranker",
+            onnx_filename="test-reranker.onnx",
+            max_length=4096,
+            candidate_k=20,
+        ),
+    )
+
+    external_result = _external_result(
+        retrieval_artifact=retrieval_artifact,
+    )
+
     workflow_result = CompositeEvaluationWorkflow.run(
         result=result,
         run_id="test-external-pass",
@@ -125,11 +157,17 @@ def test_composite_workflow_attaches_external_evidence_and_quality_gate() -> Non
             name="required-external",
             required=True,
         ),
-        external_evaluations=(_external_result(),),
+        external_evaluations=(external_result,),
         external_policy=_external_policy(),
     )
 
     assert len(workflow_result.run.external_evaluations) == 1
+
+    persisted_external_result = workflow_result.run.external_evaluations[0]
+
+    assert persisted_external_result == external_result
+    assert persisted_external_result.retrieval_artifact == retrieval_artifact
+
     assert workflow_result.run.external_quality_gate is not None
     assert workflow_result.run.external_quality_gate.passed is True
     assert workflow_result.release_decision.passed is True

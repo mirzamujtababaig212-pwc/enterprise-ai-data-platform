@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Protocol
 
 from rag.contracts import Retriever
+
 from rag.evaluation.external.models import (
     ExternalEvaluationResult,
     ExternalEvaluationSample,
@@ -78,4 +80,15 @@ class RAGGenerationEvaluationWorkflow:
                 )
             )
 
-        return await self._evaluator.evaluate(samples)
+        evaluation = await self._evaluator.evaluate(samples)
+
+        from rag.retrieval.factory import RAGRetrieverFactory
+
+        retrieval_artifact = RAGRetrieverFactory.build_retrieval_artifact(
+            retriever,
+        )
+
+        return replace(
+            evaluation,
+            retrieval_artifact=retrieval_artifact,
+        )

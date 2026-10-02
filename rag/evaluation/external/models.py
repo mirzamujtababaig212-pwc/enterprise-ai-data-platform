@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from rag.evaluation.lineage import RetrievalEvaluationArtifact
+
 
 @dataclass(frozen=True)
 class ExternalEvaluationRequest:
@@ -51,6 +53,7 @@ class ExternalEvaluationResult:
     metrics: Mapping[str, float]
     evaluated_samples: int
     metadata: Mapping[str, object] | None = None
+    retrieval_artifact: RetrievalEvaluationArtifact | None = None
 
     def __post_init__(self) -> None:
         if not self.provider.strip():
@@ -70,10 +73,15 @@ class ExternalEvaluationResult:
                 raise TypeError(f"metric {name!r} must be numeric, got {type(value).__name__}")
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "provider": self.provider,
             "evaluator": self.evaluator,
             "metrics": dict(self.metrics),
             "evaluated_samples": self.evaluated_samples,
             "metadata": dict(self.metadata or {}),
         }
+
+        if self.retrieval_artifact is not None:
+            result["retrieval_artifact"] = self.retrieval_artifact.as_dict()
+
+        return result

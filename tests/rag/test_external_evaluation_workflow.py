@@ -5,13 +5,21 @@ import pytest
 from rag.evaluation.external.models import ExternalEvaluationResult
 from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
 from rag.evaluation.models import RetrievalEvaluationCase
+from rag.retrieval.retriever import SemanticRetriever
+from rag.stores.in_memory import InMemoryVectorStore
+
+
+def _semantic_retriever_with_in_memory_store() -> SemanticRetriever:
+    retriever = object.__new__(SemanticRetriever)
+    retriever.vector_store = InMemoryVectorStore()
+    return retriever
 
 
 @pytest.mark.asyncio
 async def test_generation_evaluation_workflow_maps_rag_results_to_external_samples(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    retriever = MagicMock()
+    retriever = _semantic_retriever_with_in_memory_store()
     chat_service = MagicMock()
 
     rag_query_service = MagicMock()
@@ -84,6 +92,14 @@ async def test_generation_evaluation_workflow_maps_rag_results_to_external_sampl
     assert result.metrics["faithfulness"] == 1.0
     assert result.evaluated_samples == 2
 
+    assert result.retrieval_artifact is not None
+    assert result.retrieval_artifact.as_dict() == {
+        "retriever_type": "SemanticRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+        "hybrid_configuration": None,
+        "reranker_configuration": None,
+    }
+
     evaluator.evaluate.assert_awaited_once()
 
     samples = evaluator.evaluate.await_args.args[0]
@@ -104,7 +120,7 @@ async def test_generation_evaluation_workflow_maps_rag_results_to_external_sampl
 async def test_generation_evaluation_workflow_reuses_evaluation_retriever(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    retriever = MagicMock()
+    retriever = _semantic_retriever_with_in_memory_store()
     chat_service = MagicMock()
 
     rag_query_service = MagicMock()

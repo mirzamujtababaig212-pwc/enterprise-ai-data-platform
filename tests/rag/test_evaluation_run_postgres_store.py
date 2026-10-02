@@ -254,6 +254,64 @@ def test_save_and_get_round_trip_preserves_release_evidence() -> None:
         engine.dispose()
 
 
+def test_external_evaluation_round_trip_preserves_retrieval_artifact() -> None:
+    repository, engine = _repository()
+
+    try:
+        from dataclasses import replace
+
+        from rag.evaluation.lineage import (
+            HybridRetrievalConfiguration,
+            RetrievalEvaluationArtifact,
+            RerankerConfiguration,
+        )
+
+        run = _run()
+
+        artifact = RetrievalEvaluationArtifact(
+            retriever_type="HybridRetriever",
+            vector_store_type="InMemoryVectorStore",
+            hybrid_configuration=HybridRetrievalConfiguration(
+                candidate_k=5,
+                rrf_k=60,
+                semantic_weight=1.0,
+                lexical_weight=0.5,
+            ),
+            reranker_configuration=RerankerConfiguration(
+                type="cross_encoder",
+                model_id="jinaai/jina-reranker-v1-tiny-en",
+                onnx_filename="onnx/model_int8.onnx",
+                max_length=8192,
+                candidate_k=20,
+            ),
+        )
+
+        external_evaluation = replace(
+            run.external_evaluations[0],
+            retrieval_artifact=artifact,
+        )
+
+        run = replace(
+            run,
+            external_evaluations=(external_evaluation,),
+        )
+
+        asyncio.run(repository.save(run))
+        restored = asyncio.run(repository.get(run.run_id))
+
+        assert restored is not None
+        assert len(restored.external_evaluations) == 1
+
+        restored_external_evaluation = restored.external_evaluations[0]
+
+        assert restored_external_evaluation == external_evaluation
+        assert restored_external_evaluation.retrieval_artifact == artifact
+
+    finally:
+        repository._session.close()
+        engine.dispose()
+
+
 def test_get_legacy_run_without_score_diagnostics_preserves_compatibility() -> None:
     repository, engine = _repository()
 

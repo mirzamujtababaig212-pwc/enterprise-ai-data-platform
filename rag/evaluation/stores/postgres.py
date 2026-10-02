@@ -313,6 +313,11 @@ def _deserialize_run(
             metrics=data["metrics"],
             evaluated_samples=data["evaluated_samples"],
             metadata=data.get("metadata"),
+            retrieval_artifact=(
+                RetrievalEvaluationArtifact.from_dict(data["retrieval_artifact"])
+                if data.get("retrieval_artifact") is not None
+                else None
+            ),
         )
         for data in (record.external_evaluations or [])
     )
