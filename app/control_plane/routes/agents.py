@@ -48,6 +48,9 @@ from app.control_plane.schemas.agents import (
     AgentRunResponse,
     AgentRunStepListResponse,
     AgentRunStepResponse,
+    AgentRunTimelineAttemptResponse,
+    AgentRunTimelineEntryResponse,
+    AgentRunTimelineResponse,
 )
 from app.control_plane.agent_runs.recovery_service import (
     AgentRunRecoveryService,
@@ -885,6 +888,88 @@ async def list_agent_run_evaluations(
             for evaluation in evaluations
         ],
         limit=limit,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/timeline",
+    response_model=AgentRunTimelineResponse,
+)
+async def get_agent_run_timeline(
+    request: Request,
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=100),
+    event_type: AgentExecutionEventType | None = None,
+    step_id: str | None = None,
+    attempt: int | None = Query(default=None, ge=1),
+    provider: str | None = None,
+    cursor: str | None = Query(default=None),
+    step_limit: int = Query(default=100, ge=1, le=100),
+    service: AgentRunApplicationService = Depends(
+        get_agent_run_application_service,
+    ),
+) -> AgentRunTimelineResponse:
+    try:
+        page = service.get_timeline(
+            run_id,
+            tenant_id=getattr(request.state, "tenant_id", None),
+            principal=getattr(request.state, "principal", None),
+            event_type=event_type,
+            step_id=step_id,
+            attempt=attempt,
+            provider=provider,
+            limit=limit,
+            cursor=cursor,
+            step_limit=step_limit,
+        )
+    except AgentRunAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    return AgentRunTimelineResponse(
+        run_id=page.timeline.run_id,
+        entries=[
+            AgentRunTimelineEntryResponse(
+                sequence=entry.sequence,
+                kind=entry.kind.value,
+                event_type=entry.event_type.value,
+                run_id=entry.run_id,
+                agent_name=entry.agent_name,
+                step_id=entry.step_id,
+                step_index=entry.step_index,
+                step_name=entry.step_name,
+                attempt=entry.attempt,
+                tool_name=entry.tool_name,
+                call_id=entry.call_id,
+                provider=entry.provider,
+                model=entry.model,
+                metadata=entry.metadata,
+            )
+            for entry in page.timeline.entries
+        ],
+        attempts=[
+            AgentRunTimelineAttemptResponse(
+                step_id=attempt.step_id,
+                attempt=attempt.attempt,
+                step_index=attempt.step_index,
+                step_name=attempt.step_name,
+                status=attempt.status.value,
+                event_count=attempt.event_count,
+                first_sequence=attempt.first_sequence,
+                last_sequence=attempt.last_sequence,
+                failure_category=attempt.failure_category,
+            )
+            for attempt in page.timeline.attempts
+        ],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
     )
 
 

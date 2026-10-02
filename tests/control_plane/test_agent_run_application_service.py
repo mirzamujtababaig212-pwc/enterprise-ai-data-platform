@@ -1713,6 +1713,268 @@ def test_list_events_delegates_to_event_repository() -> None:
     )
 
 
+def test_get_timeline_reconstructs_events_and_returns_pagination() -> None:
+    repository = _repository()
+    events_repository = Mock(spec=AgentRunEventsRepository)
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    run = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+    repository.get.return_value = run
+
+    events = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            agent_name="enterprise-analyst",
+            run_id="run-123",
+            step_id="step-1",
+            step_index=0,
+            attempt=1,
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+            agent_name="enterprise-analyst",
+            run_id="run-123",
+            step_id="step-1",
+            step_index=0,
+            attempt=1,
+        ),
+    ]
+
+    events_page = AgentRunEventsPage(
+        events=events,
+        next_cursor="next-cursor",
+        has_more=True,
+    )
+    events_repository.list_page.return_value = events_page
+
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+        ),
+    ]
+    steps_repository.list.return_value = steps
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    result = service.get_timeline(
+        "run-123",
+        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        step_id="step-1",
+        attempt=1,
+        provider="openai",
+        limit=25,
+        cursor="cursor-1",
+        step_limit=50,
+    )
+
+    assert result.timeline.run_id == "run-123"
+    assert len(result.timeline.entries) == 2
+    assert len(result.timeline.attempts) == 1
+
+    attempt = result.timeline.attempts[0]
+    assert attempt.step_id == "step-1"
+    assert attempt.attempt == 1
+    assert attempt.status == AgentRunStepStatus.COMPLETED
+    assert attempt.event_count == 2
+    assert attempt.first_sequence == 0
+    assert attempt.last_sequence == 1
+
+    assert result.next_cursor == "next-cursor"
+    assert result.has_more is True
+
+    repository.get.assert_called_once_with("run-123")
+    events_repository.list_page.assert_called_once_with(
+        "run-123",
+        event_type=AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        step_id="step-1",
+        attempt=1,
+        provider="openai",
+        limit=25,
+        cursor="cursor-1",
+    )
+    steps_repository.list.assert_called_once_with(
+        "run-123",
+        limit=50,
+    )
+
+
+def test_get_timeline_rejects_partial_identity_context() -> None:
+    repository = _repository()
+    events_repository = Mock(spec=AgentRunEventsRepository)
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    with pytest.raises(
+        AgentRunAccessDeniedError,
+        match="Both tenant_id and principal are required",
+    ):
+        service.get_timeline(
+            "run-123",
+            tenant_id="tenant-acme",
+        )
+
+    repository.get.assert_not_called()
+    repository.get_for_tenant.assert_not_called()
+    events_repository.list_page.assert_not_called()
+    steps_repository.list.assert_not_called()
+
+
+def test_get_timeline_raises_for_missing_run() -> None:
+    repository = _repository()
+    repository.get.return_value = None
+
+    events_repository = Mock(spec=AgentRunEventsRepository)
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    with pytest.raises(
+        LookupError,
+        match="Agent run 'missing-run' was not found.",
+    ):
+        service.get_timeline("missing-run")
+
+    repository.get.assert_called_once_with("missing-run")
+    events_repository.list_page.assert_not_called()
+    steps_repository.list.assert_not_called()
+
+
+def test_get_timeline_requires_event_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Agent run events repository is not configured.",
+    ):
+        service.get_timeline("run-123")
+
+    steps_repository.list.assert_not_called()
+
+
+def test_get_timeline_requires_step_repository() -> None:
+    repository = _repository()
+    repository.get.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    events_repository = Mock(spec=AgentRunEventsRepository)
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Agent run steps repository is not configured.",
+    ):
+        service.get_timeline("run-123")
+
+    events_repository.list_page.assert_not_called()
+
+
+def test_get_timeline_authorizes_tenant_access() -> None:
+    repository = _repository()
+    events_repository = Mock(spec=AgentRunEventsRepository)
+    steps_repository = Mock(spec=AgentRunStepsRepository)
+
+    repository.get_for_tenant.return_value = AgentRun(
+        run_id="run-123",
+        agent_name="enterprise-analyst",
+        principal="api_key:test-owner",
+        tenant_id="tenant-acme",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    events_repository.list_page.return_value = AgentRunEventsPage(
+        events=[
+            AgentExecutionEvent(
+                event_type=AgentExecutionEventType.AGENT_STARTED,
+                agent_name="enterprise-analyst",
+                run_id="run-123",
+            ),
+        ],
+        next_cursor=None,
+        has_more=False,
+    )
+    steps_repository.list.return_value = []
+
+    service = AgentRunApplicationService(
+        runtime=Mock(),
+        repository=repository,
+        events_repository=events_repository,
+        agent_run_steps_repository=steps_repository,
+    )
+
+    result = service.get_timeline(
+        "run-123",
+        tenant_id="tenant-acme",
+        principal="api_key:test-owner",
+    )
+
+    assert result.timeline.run_id == "run-123"
+    assert len(result.timeline.entries) == 1
+    assert result.timeline.entries[0].event_type == (AgentExecutionEventType.AGENT_STARTED)
+    assert result.timeline.attempts == ()
+
+    repository.get.assert_not_called()
+    repository.get_for_tenant.assert_called_once_with(
+        "run-123",
+        "tenant-acme",
+    )
+    events_repository.list_page.assert_called_once_with(
+        "run-123",
+        event_type=None,
+        step_id=None,
+        attempt=None,
+        provider=None,
+        limit=100,
+        cursor=None,
+    )
+    steps_repository.list.assert_called_once_with(
+        "run-123",
+        limit=100,
+    )
+
+
 def test_list_events_raises_for_missing_run() -> None:
     repository = _repository()
     repository.get.return_value = None

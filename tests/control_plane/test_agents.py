@@ -21,6 +21,14 @@ from app.control_plane.agent_runs.models import (
 )
 
 from app.control_plane.agent_run_events.models import AgentRunEventsPage
+from app.control_plane.agent_run_steps.models import AgentRunStepStatus
+from app.control_plane.agent_run_timeline.models import (
+    AgentRunTimeline,
+    AgentRunTimelineEntryKind,
+    AgentRunTimelinePage,
+    AttemptSummary,
+    TimelineEntry,
+)
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.routes.agents import router
 
@@ -32,6 +40,8 @@ class FakeAgentRunApplicationService:
         self.list_calls = []
         self.events = {}
         self.event_list_calls = []
+        self.timeline_pages = {}
+        self.timeline_calls = []
 
     def get_run(
         self,
@@ -128,6 +138,53 @@ class FakeAgentRunApplicationService:
             )
 
         raise ValueError(f"Unknown cursor: {cursor}")
+
+    def get_timeline(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        event_type: AgentExecutionEventType | None = None,
+        step_id: str | None = None,
+        attempt: int | None = None,
+        provider: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        step_limit: int = 100,
+    ):
+        del tenant_id, principal
+
+        if run_id not in self.runs:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        self.timeline_calls.append(
+            {
+                "run_id": run_id,
+                "event_type": event_type,
+                "step_id": step_id,
+                "attempt": attempt,
+                "provider": provider,
+                "limit": limit,
+                "cursor": cursor,
+                "step_limit": step_limit,
+            }
+        )
+
+        return self.timeline_pages.get(
+            run_id,
+            AgentRunTimelinePage(
+                timeline=AgentRunTimeline(
+                    run_id=run_id,
+                    entries=(),
+                    attempts=(),
+                ),
+                next_cursor=None,
+                has_more=False,
+            ),
+        )
 
     async def execute(
         self,
@@ -617,6 +674,189 @@ def test_get_agent_run_returns_404_when_missing() -> None:
     assert response.json() == {
         "detail": "Agent run 'missing-run' was not found.",
     }
+
+
+def test_get_agent_run_timeline_returns_reconstructed_timeline() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-timeline-123"] = AgentRun(
+        run_id="run-timeline-123",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    service.timeline_pages["run-timeline-123"] = AgentRunTimelinePage(
+        timeline=AgentRunTimeline(
+            run_id="run-timeline-123",
+            entries=(
+                TimelineEntry(
+                    sequence=0,
+                    kind=AgentRunTimelineEntryKind.EVENT,
+                    event_type=AgentExecutionEventType.AGENT_STARTED,
+                    run_id="run-timeline-123",
+                    agent_name="enterprise-analyst",
+                    step_id=None,
+                    step_index=None,
+                    step_name=None,
+                    attempt=None,
+                    tool_name=None,
+                    call_id=None,
+                    provider=None,
+                    model=None,
+                    metadata={"source": "test"},
+                ),
+                TimelineEntry(
+                    sequence=1,
+                    kind=AgentRunTimelineEntryKind.STEP_ATTEMPT,
+                    event_type=AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+                    run_id="run-timeline-123",
+                    agent_name="enterprise-analyst",
+                    step_id="step-1",
+                    step_index=0,
+                    step_name="retrieve",
+                    attempt=1,
+                    tool_name=None,
+                    call_id=None,
+                    provider="openai",
+                    model="gpt-5",
+                    metadata={"failure_category": "provider_timeout"},
+                ),
+            ),
+            attempts=(
+                AttemptSummary(
+                    step_id="step-1",
+                    attempt=1,
+                    step_index=0,
+                    step_name="retrieve",
+                    status=AgentRunStepStatus.FAILED,
+                    event_count=2,
+                    first_sequence=1,
+                    last_sequence=2,
+                    failure_category="provider_timeout",
+                ),
+            ),
+        ),
+        next_cursor="timeline-cursor-2",
+        has_more=True,
+    )
+
+    response = client.get(
+        "/api/v1/agents/runs/run-timeline-123/timeline",
+        params={
+            "event_type": "orchestration.step.failed",
+            "step_id": "step-1",
+            "attempt": 1,
+            "provider": "openai",
+            "limit": 25,
+            "cursor": "timeline-cursor-1",
+            "step_limit": 50,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "run_id": "run-timeline-123",
+        "entries": [
+            {
+                "sequence": 0,
+                "kind": "event",
+                "event_type": "agent.started",
+                "run_id": "run-timeline-123",
+                "agent_name": "enterprise-analyst",
+                "step_id": None,
+                "step_index": None,
+                "step_name": None,
+                "attempt": None,
+                "tool_name": None,
+                "call_id": None,
+                "provider": None,
+                "model": None,
+                "metadata": {"source": "test"},
+            },
+            {
+                "sequence": 1,
+                "kind": "step_attempt",
+                "event_type": "orchestration.step.failed",
+                "run_id": "run-timeline-123",
+                "agent_name": "enterprise-analyst",
+                "step_id": "step-1",
+                "step_index": 0,
+                "step_name": "retrieve",
+                "attempt": 1,
+                "tool_name": None,
+                "call_id": None,
+                "provider": "openai",
+                "model": "gpt-5",
+                "metadata": {"failure_category": "provider_timeout"},
+            },
+        ],
+        "attempts": [
+            {
+                "step_id": "step-1",
+                "attempt": 1,
+                "step_index": 0,
+                "step_name": "retrieve",
+                "status": "failed",
+                "event_count": 2,
+                "first_sequence": 1,
+                "last_sequence": 2,
+                "failure_category": "provider_timeout",
+            }
+        ],
+        "next_cursor": "timeline-cursor-2",
+        "has_more": True,
+    }
+
+    assert service.timeline_calls == [
+        {
+            "run_id": "run-timeline-123",
+            "event_type": AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            "step_id": "step-1",
+            "attempt": 1,
+            "provider": "openai",
+            "limit": 25,
+            "cursor": "timeline-cursor-1",
+            "step_limit": 50,
+        }
+    ]
+
+
+def test_get_agent_run_timeline_returns_404_when_run_missing() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/missing-run/timeline",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Agent run 'missing-run' was not found.",
+    }
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"limit": 0},
+        {"limit": 101},
+        {"step_limit": 0},
+        {"step_limit": 101},
+        {"attempt": 0},
+    ],
+)
+def test_get_agent_run_timeline_rejects_invalid_pagination(params) -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    response = client.get(
+        "/api/v1/agents/runs/run-123/timeline",
+        params=params,
+    )
+
+    assert response.status_code == 422
+    assert service.timeline_calls == []
 
 
 def test_list_agent_run_events_returns_events() -> None:

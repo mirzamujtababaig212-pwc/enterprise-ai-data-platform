@@ -50,6 +50,12 @@ from app.control_plane.agent_run_steps.models import (
 from app.control_plane.agent_run_steps.repository import (
     AgentRunStepsRepository,
 )
+from app.control_plane.agent_run_timeline.models import (
+    AgentRunTimelinePage,
+)
+from app.control_plane.agent_run_timeline.reconstruction import (
+    reconstruct_timeline,
+)
 from app.control_plane.agent_runs.repository import AgentRunRepository
 from app.control_plane.agent_runs.lease import (
     create_lease,
@@ -892,6 +898,78 @@ class AgentRunApplicationService:
             provider=provider,
             limit=limit,
             cursor=cursor,
+        )
+
+    def get_timeline(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+        principal: str | None = None,
+        event_type: AgentExecutionEventType | None = None,
+        step_id: str | None = None,
+        attempt: int | None = None,
+        provider: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        step_limit: int = 100,
+    ) -> AgentRunTimelinePage:
+        self._validate_identity_context(
+            tenant_id=tenant_id,
+            principal=principal,
+        )
+
+        if tenant_id is None and principal is None:
+            run = self._repository.get(run_id)
+        else:
+            run = self._repository.get_for_tenant(run_id, tenant_id)
+
+            if run is not None:
+                self._authorize_run_access(
+                    run,
+                    tenant_id=tenant_id,
+                    principal=principal,
+                )
+
+        if run is None:
+            raise LookupError(
+                f"Agent run '{run_id}' was not found.",
+            )
+
+        if self._events_repository is None:
+            raise RuntimeError(
+                "Agent run events repository is not configured.",
+            )
+
+        if self._agent_run_steps_repository is None:
+            raise RuntimeError(
+                "Agent run steps repository is not configured.",
+            )
+
+        events_page = self._events_repository.list_page(
+            run_id,
+            event_type=event_type,
+            step_id=step_id,
+            attempt=attempt,
+            provider=provider,
+            limit=limit,
+            cursor=cursor,
+        )
+
+        step_snapshots = self._agent_run_steps_repository.list(
+            run_id,
+            limit=step_limit,
+        )
+
+        timeline = reconstruct_timeline(
+            events_page.events,
+            step_snapshots,
+        )
+
+        return AgentRunTimelinePage(
+            timeline=timeline,
+            next_cursor=events_page.next_cursor,
+            has_more=events_page.has_more,
         )
 
     @staticmethod

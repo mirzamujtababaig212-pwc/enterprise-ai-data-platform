@@ -90,6 +90,43 @@ class AgentRunEventListResponse(BaseModel):
     has_more: bool = False
 
 
+class AgentRunTimelineEntryResponse(BaseModel):
+    sequence: int
+    kind: str
+    event_type: str
+    run_id: str | None = None
+    agent_name: str
+    step_id: str | None = None
+    step_index: int | None = None
+    step_name: str | None = None
+    attempt: int | None = None
+    tool_name: str | None = None
+    call_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRunTimelineAttemptResponse(BaseModel):
+    step_id: str
+    attempt: int
+    step_index: int | None = None
+    step_name: str | None = None
+    status: str
+    event_count: int
+    first_sequence: int
+    last_sequence: int
+    failure_category: str | None = None
+
+
+class AgentRunTimelineResponse(BaseModel):
+    run_id: str
+    entries: list[AgentRunTimelineEntryResponse]
+    attempts: list[AgentRunTimelineAttemptResponse]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class AgentRunStepResponse(BaseModel):
     run_id: str
     step_id: str
