@@ -855,6 +855,7 @@ class AgentRunApplicationService:
         attempt: int | None = None,
         provider: str | None = None,
         limit: int = 100,
+        cursor: str | None = None,
     ) -> AgentRunEventsPage:
         self._validate_identity_context(
             tenant_id=tenant_id,
@@ -883,13 +884,14 @@ class AgentRunApplicationService:
                 "Agent run events repository is not configured.",
             )
 
-        return self._events_repository.list(
+        return self._events_repository.list_page(
             run_id,
             event_type=event_type,
             step_id=step_id,
             attempt=attempt,
             provider=provider,
             limit=limit,
+            cursor=cursor,
         )
 
     @staticmethod

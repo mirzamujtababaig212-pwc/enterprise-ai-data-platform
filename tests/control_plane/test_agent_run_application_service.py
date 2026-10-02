@@ -23,6 +23,7 @@ from ai_platform.agents.observability import (
     AgentExecutionEventType,
 )
 
+from app.control_plane.agent_run_events.models import AgentRunEventsPage
 from app.control_plane.agent_run_events.repository import (
     AgentRunEventsRepository,
 )
@@ -1675,7 +1676,12 @@ def test_list_events_delegates_to_event_repository() -> None:
             run_id="run-123",
         ),
     ]
-    events_repository.list.return_value = events
+    events_page = AgentRunEventsPage(
+        events=events,
+        next_cursor="next-cursor",
+        has_more=True,
+    )
+    events_repository.list_page.return_value = events_page
 
     runtime = Mock()
 
@@ -1688,17 +1694,22 @@ def test_list_events_delegates_to_event_repository() -> None:
     result = service.list_events(
         "run-123",
         limit=25,
+        cursor="cursor-1",
     )
 
-    assert result == events
+    assert result is events_page
+    assert result.events == events
+    assert result.next_cursor == "next-cursor"
+    assert result.has_more is True
     repository.get.assert_called_once_with("run-123")
-    events_repository.list.assert_called_once_with(
+    events_repository.list_page.assert_called_once_with(
         "run-123",
         event_type=None,
         step_id=None,
         attempt=None,
         provider=None,
         limit=25,
+        cursor="cursor-1",
     )
 
 

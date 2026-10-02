@@ -20,6 +20,7 @@ from app.control_plane.agent_runs.models import (
     AgentRunStatus,
 )
 
+from app.control_plane.agent_run_events.models import AgentRunEventsPage
 from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.routes.agents import router
 
@@ -75,6 +76,7 @@ class FakeAgentRunApplicationService:
         attempt: int | None = None,
         provider: str | None = None,
         limit=100,
+        cursor: str | None = None,
     ):
         del tenant_id, principal
 
@@ -91,6 +93,7 @@ class FakeAgentRunApplicationService:
                 "attempt": attempt,
                 "provider": provider,
                 "limit": limit,
+                "cursor": cursor,
             }
         )
 
@@ -108,7 +111,23 @@ class FakeAgentRunApplicationService:
         if provider is not None:
             events = [event for event in events if event.provider == provider]
 
-        return events[:limit]
+        if cursor is None:
+            page_events = events[:limit]
+            return AgentRunEventsPage(
+                events=page_events,
+                next_cursor="cursor-page-2" if len(events) > limit else None,
+                has_more=len(events) > limit,
+            )
+
+        if cursor == "cursor-page-2":
+            page_events = events[limit : limit * 2]
+            return AgentRunEventsPage(
+                events=page_events,
+                next_cursor=None,
+                has_more=False,
+            )
+
+        raise ValueError(f"Unknown cursor: {cursor}")
 
     async def execute(
         self,
@@ -682,6 +701,8 @@ def test_list_agent_run_events_returns_events() -> None:
                 },
             },
         ],
+        "next_cursor": None,
+        "has_more": False,
     }
 
     assert service.event_list_calls == [
@@ -692,7 +713,91 @@ def test_list_agent_run_events_returns_events() -> None:
             "attempt": None,
             "provider": None,
             "limit": 25,
+            "cursor": None,
         }
+    ]
+
+
+def test_list_agent_run_events_supports_cursor_pagination() -> None:
+    service = FakeAgentRunApplicationService()
+    client = build_client(service)
+
+    service.runs["run-events-pagination"] = AgentRun(
+        run_id="run-events-pagination",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.COMPLETED,
+    )
+
+    service.events["run-events-pagination"] = [
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.AGENT_STARTED,
+            agent_name="enterprise-analyst",
+            run_id="run-events-pagination",
+            metadata={"sequence": 0},
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.LLM_REQUESTED,
+            agent_name="enterprise-analyst",
+            run_id="run-events-pagination",
+            metadata={"sequence": 1},
+        ),
+        AgentExecutionEvent(
+            event_type=AgentExecutionEventType.LLM_COMPLETED,
+            agent_name="enterprise-analyst",
+            run_id="run-events-pagination",
+            metadata={"sequence": 2},
+        ),
+    ]
+
+    first_response = client.get(
+        "/api/v1/agents/runs/run-events-pagination/events",
+        params={"limit": 2},
+    )
+
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+
+    assert len(first_payload["events"]) == 2
+    assert first_payload["events"][0]["metadata"]["sequence"] == 0
+    assert first_payload["events"][1]["metadata"]["sequence"] == 1
+    assert first_payload["has_more"] is True
+    assert first_payload["next_cursor"] == "cursor-page-2"
+
+    second_response = client.get(
+        "/api/v1/agents/runs/run-events-pagination/events",
+        params={
+            "limit": 2,
+            "cursor": first_payload["next_cursor"],
+        },
+    )
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+
+    assert len(second_payload["events"]) == 1
+    assert second_payload["events"][0]["metadata"]["sequence"] == 2
+    assert second_payload["has_more"] is False
+    assert second_payload["next_cursor"] is None
+
+    assert service.event_list_calls == [
+        {
+            "run_id": "run-events-pagination",
+            "event_type": None,
+            "step_id": None,
+            "attempt": None,
+            "provider": None,
+            "limit": 2,
+            "cursor": None,
+        },
+        {
+            "run_id": "run-events-pagination",
+            "event_type": None,
+            "step_id": None,
+            "attempt": None,
+            "provider": None,
+            "limit": 2,
+            "cursor": "cursor-page-2",
+        },
     ]
 
 
@@ -711,7 +816,11 @@ def test_list_agent_run_events_returns_empty_for_known_run_without_events() -> N
     )
 
     assert response.status_code == 200
-    assert response.json() == {"events": []}
+    assert response.json() == {
+        "events": [],
+        "next_cursor": None,
+        "has_more": False,
+    }
 
     assert service.event_list_calls == [
         {
@@ -721,6 +830,7 @@ def test_list_agent_run_events_returns_empty_for_known_run_without_events() -> N
             "attempt": None,
             "provider": None,
             "limit": 100,
+            "cursor": None,
         }
     ]
 

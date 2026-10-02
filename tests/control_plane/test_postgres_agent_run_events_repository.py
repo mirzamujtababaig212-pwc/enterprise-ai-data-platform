@@ -1,4 +1,6 @@
-from sqlalchemy import create_engine, inspect
+from datetime import datetime, timedelta
+
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from ai_platform.agents.observability import (
@@ -8,7 +10,10 @@ from ai_platform.agents.observability import (
 from app.control_plane.agent_run_events.postgres_repository import (
     PostgreSQLAgentRunEventsRepository,
 )
-from app.control_plane.persistence.models import Base
+from app.control_plane.persistence.models import (
+    AgentRunEventRecord,
+    Base,
+)
 
 
 def make_event(
@@ -62,6 +67,30 @@ def make_repository():
     session = session_factory()
 
     return engine, session, PostgreSQLAgentRunEventsRepository(session)
+
+
+def set_event_created_at(
+    session,
+    *,
+    sequence: int,
+    created_at: datetime,
+) -> None:
+    record = session.scalar(
+        select(AgentRunEventRecord)
+        .where(
+            AgentRunEventRecord.run_id == "run-1",
+            AgentRunEventRecord.event_metadata["sequence"].as_integer() == sequence,
+        )
+        .order_by(AgentRunEventRecord.id.desc())
+    )
+
+    if record is None:
+        raise AssertionError(
+            f"Event record for sequence {sequence} was not found.",
+        )
+
+    record.created_at = created_at
+    session.commit()
 
 
 def test_schema_contains_agent_run_events_table() -> None:
@@ -339,6 +368,128 @@ def test_list_respects_limit() -> None:
 
         assert len(restored) == 2
         assert [event.metadata["sequence"] for event in restored] == [0, 1]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_list_page_returns_cursor_and_has_more() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        base = datetime(2026, 10, 2, 3, 3, 53)
+
+        for index in range(3):
+            repository.record(
+                make_event(
+                    metadata={"sequence": index},
+                )
+            )
+            set_event_created_at(
+                session,
+                sequence=index,
+                created_at=base + timedelta(seconds=index),
+            )
+
+        page = repository.list_page("run-1", limit=2)
+
+        assert len(page.events) == 2
+        assert [event.metadata["sequence"] for event in page.events] == [0, 1]
+        assert page.has_more is True
+        assert page.next_cursor is not None
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_list_page_cursor_continues_without_duplicates() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        base = datetime(2026, 10, 2, 3, 3, 53)
+
+        for index in range(5):
+            repository.record(
+                make_event(
+                    metadata={"sequence": index},
+                )
+            )
+            set_event_created_at(
+                session,
+                sequence=index,
+                created_at=base + timedelta(seconds=index),
+            )
+
+        first_page = repository.list_page("run-1", limit=2)
+
+        second_page = repository.list_page(
+            "run-1",
+            limit=2,
+            cursor=first_page.next_cursor,
+        )
+
+        assert [event.metadata["sequence"] for event in first_page.events] == [0, 1]
+        assert [event.metadata["sequence"] for event in second_page.events] == [2, 3]
+        assert first_page.next_cursor != second_page.next_cursor
+        assert second_page.has_more is True
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_list_page_final_page_has_no_cursor() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        base = datetime(2026, 10, 2, 3, 3, 53)
+
+        for index in range(3):
+            repository.record(
+                make_event(
+                    metadata={"sequence": index},
+                )
+            )
+            set_event_created_at(
+                session,
+                sequence=index,
+                created_at=base + timedelta(seconds=index),
+            )
+
+        first_page = repository.list_page("run-1", limit=2)
+        final_page = repository.list_page(
+            "run-1",
+            limit=2,
+            cursor=first_page.next_cursor,
+        )
+
+        assert [event.metadata["sequence"] for event in final_page.events] == [2]
+        assert final_page.has_more is False
+        assert final_page.next_cursor is None
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_list_page_filters_attempt_before_pagination() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        repository.record(make_event(attempt=1, metadata={"sequence": 1}))
+        repository.record(make_event(attempt=2, metadata={"sequence": 2}))
+        repository.record(make_event(attempt=1, metadata={"sequence": 3}))
+        repository.record(make_event(attempt=2, metadata={"sequence": 4}))
+
+        page = repository.list_page(
+            "run-1",
+            attempt=2,
+            limit=1,
+        )
+
+        assert len(page.events) == 1
+        assert page.events[0].attempt == 2
+        assert page.events[0].metadata["sequence"] == 2
+        assert page.has_more is True
+        assert page.next_cursor is not None
     finally:
         session.close()
         engine.dispose()

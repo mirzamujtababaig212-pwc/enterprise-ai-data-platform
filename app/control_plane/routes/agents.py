@@ -900,12 +900,13 @@ async def list_agent_run_events(
     step_id: str | None = None,
     attempt: int | None = Query(default=None, ge=1),
     provider: str | None = None,
+    cursor: str | None = Query(default=None),
     service: AgentRunApplicationService = Depends(
         get_agent_run_application_service,
     ),
 ) -> AgentRunEventListResponse:
     try:
-        events = service.list_events(
+        page = service.list_events(
             run_id,
             tenant_id=getattr(request.state, "tenant_id", None),
             principal=getattr(request.state, "principal", None),
@@ -914,6 +915,7 @@ async def list_agent_run_events(
             attempt=attempt,
             provider=provider,
             limit=limit,
+            cursor=cursor,
         )
     except AgentRunAccessDeniedError as exc:
         raise HTTPException(
@@ -945,6 +947,8 @@ async def list_agent_run_events(
                 model=event.model,
                 metadata=event.metadata,
             )
-            for event in events
-        ]
+            for event in page.events
+        ],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
     )

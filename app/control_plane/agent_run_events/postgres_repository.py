@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
 )
+from app.control_plane.agent_run_events.models import AgentRunEventsPage
 from app.control_plane.persistence.models import AgentRunEventRecord
 
 
@@ -77,7 +78,7 @@ class PostgreSQLAgentRunEventsRepository:
         provider: str | None = None,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> list[AgentExecutionEvent]:
+    ) -> AgentRunEventsPage:
         statement = select(AgentRunEventRecord).where(
             AgentRunEventRecord.run_id == run_id,
         )
@@ -90,13 +91,10 @@ class PostgreSQLAgentRunEventsRepository:
             cursor_created_at, cursor_id = decode_cursor(cursor)
 
             statement = statement.where(
-                (
-                    AgentRunEventRecord.created_at,
-                    AgentRunEventRecord.id,
-                )
-                < (
-                    cursor_created_at,
-                    cursor_id,
+                (AgentRunEventRecord.created_at > cursor_created_at)
+                | (
+                    (AgentRunEventRecord.created_at == cursor_created_at)
+                    & (AgentRunEventRecord.id > cursor_id)
                 )
             )
 
@@ -115,9 +113,19 @@ class PostgreSQLAgentRunEventsRepository:
                 AgentRunEventRecord.provider == provider,
             )
 
+        if attempt is not None:
+            statement = statement.where(
+                cast(
+                    AgentRunEventRecord.event_metadata["_event_attempt"],
+                    Integer,
+                )
+                == attempt,
+            )
+
         statement = statement.order_by(
+            AgentRunEventRecord.created_at.asc(),
             AgentRunEventRecord.id.asc(),
-        ).limit(limit + 1 if cursor is not None else limit)
+        ).limit(limit + 1)
 
         records = self._session.scalars(statement).all()
 
@@ -126,9 +134,6 @@ class PostgreSQLAgentRunEventsRepository:
         records = records[:limit]
 
         events = [self._to_domain(record) for record in records]
-
-        if attempt is not None:
-            events = [event for event in events if event.attempt == attempt]
 
         next_cursor = None
 
@@ -143,10 +148,6 @@ class PostgreSQLAgentRunEventsRepository:
                 created_at=last_record.created_at,
                 event_id=last_record.id,
             )
-
-        from app.control_plane.agent_run_events.models import (
-            AgentRunEventsPage,
-        )
 
         return AgentRunEventsPage(
             events=events,

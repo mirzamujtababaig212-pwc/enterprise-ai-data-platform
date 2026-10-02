@@ -86,6 +86,8 @@ class AgentRunEventResponse(BaseModel):
 
 class AgentRunEventListResponse(BaseModel):
     events: list[AgentRunEventResponse]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class AgentRunStepResponse(BaseModel):
