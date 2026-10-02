@@ -171,3 +171,131 @@ def test_rejects_invalid_reranker_configuration(field, value):
 
     with pytest.raises(ValueError, match=field):
         RAGRetrieverFactory.create(**kwargs)
+
+
+def _semantic_with_vector_store():
+    from rag.retrieval.retriever import SemanticRetriever
+    from rag.stores.in_memory import InMemoryVectorStore
+
+    semantic = object.__new__(SemanticRetriever)
+    semantic.vector_store = InMemoryVectorStore()
+    return semantic
+
+
+def test_build_retrieval_artifact_extracts_semantic_runtime_state():
+    semantic = _semantic_with_vector_store()
+
+    artifact = RAGRetrieverFactory.build_retrieval_artifact(semantic)
+
+    assert artifact.as_dict() == {
+        "retriever_type": "SemanticRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+        "hybrid_configuration": None,
+        "reranker_configuration": None,
+    }
+
+
+def test_build_retrieval_artifact_extracts_hybrid_runtime_state():
+    semantic = _semantic_with_vector_store()
+    lexical = _lexical_retriever()
+
+    retriever = HybridRetriever(
+        semantic_retriever=semantic,
+        lexical_retriever=lexical,
+        candidate_k=11,
+        rrf_k=73,
+        semantic_weight=1.25,
+        lexical_weight=0.35,
+    )
+
+    artifact = RAGRetrieverFactory.build_retrieval_artifact(retriever)
+
+    assert artifact.as_dict() == {
+        "retriever_type": "HybridRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+        "hybrid_configuration": {
+            "candidate_k": 11,
+            "rrf_k": 73,
+            "semantic_weight": 1.25,
+            "lexical_weight": 0.35,
+        },
+        "reranker_configuration": None,
+    }
+
+
+def test_build_retrieval_artifact_extracts_cross_encoder_runtime_state():
+    from rag.retrieval.reranker import CrossEncoderReranker
+
+    semantic = _semantic_with_vector_store()
+    hybrid = HybridRetriever(
+        semantic_retriever=semantic,
+        lexical_retriever=_lexical_retriever(),
+        candidate_k=27,
+        rrf_k=60,
+        semantic_weight=1.0,
+        lexical_weight=0.5,
+    )
+
+    reranker = object.__new__(CrossEncoderReranker)
+    reranker.model_id = "custom-model"
+    reranker.onnx_filename = "custom.onnx"
+    reranker.max_length = 4096
+
+    retriever = RerankingRetriever(
+        hybrid,
+        reranker,
+        candidate_k=27,
+    )
+
+    artifact = RAGRetrieverFactory.build_retrieval_artifact(retriever)
+
+    assert artifact.as_dict() == {
+        "retriever_type": "RerankingRetriever",
+        "vector_store_type": "InMemoryVectorStore",
+        "hybrid_configuration": {
+            "candidate_k": 27,
+            "rrf_k": 60,
+            "semantic_weight": 1.0,
+            "lexical_weight": 0.5,
+        },
+        "reranker_configuration": {
+            "type": "CrossEncoderReranker",
+            "model_id": "custom-model",
+            "onnx_filename": "custom.onnx",
+            "max_length": 4096,
+            "candidate_k": 27,
+        },
+    }
+
+
+def test_build_retrieval_artifact_preserves_distinct_outer_and_inner_candidate_k():
+    from rag.retrieval.reranker import CrossEncoderReranker
+
+    semantic = _semantic_with_vector_store()
+    hybrid = HybridRetriever(
+        semantic_retriever=semantic,
+        lexical_retriever=_lexical_retriever(),
+        candidate_k=13,
+        rrf_k=61,
+        semantic_weight=1.1,
+        lexical_weight=0.4,
+    )
+
+    reranker = object.__new__(CrossEncoderReranker)
+    reranker.model_id = "model"
+    reranker.onnx_filename = "model.onnx"
+    reranker.max_length = 2048
+
+    retriever = RerankingRetriever(
+        hybrid,
+        reranker,
+        candidate_k=31,
+    )
+
+    artifact = RAGRetrieverFactory.build_retrieval_artifact(retriever)
+
+    assert artifact.hybrid_configuration is not None
+    assert artifact.hybrid_configuration.candidate_k == 13
+
+    assert artifact.reranker_configuration is not None
+    assert artifact.reranker_configuration.candidate_k == 31

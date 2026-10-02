@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from rag.contracts import Retriever
+from rag.evaluation.lineage import (
+    HybridRetrievalConfiguration,
+    RerankerConfiguration,
+    RetrievalEvaluationArtifact,
+)
 from rag.retrieval.hybrid import HybridRetriever
 from rag.retrieval.lexical import PostgreSQLLexicalRetriever
 from rag.retrieval.reranker import CrossEncoderReranker, RerankingRetriever
@@ -8,6 +13,71 @@ from rag.retrieval.retriever import SemanticRetriever
 
 
 class RAGRetrieverFactory:
+    @staticmethod
+    def build_retrieval_artifact(
+        retriever: Retriever,
+    ) -> RetrievalEvaluationArtifact:
+        """Build immutable provenance from the instantiated retriever graph."""
+
+        if isinstance(retriever, RerankingRetriever):
+            underlying_artifact = RAGRetrieverFactory.build_retrieval_artifact(
+                retriever.retriever,
+            )
+
+            reranker = retriever.reranker
+
+            if isinstance(reranker, CrossEncoderReranker):
+                reranker_configuration = RerankerConfiguration(
+                    type=type(reranker).__name__,
+                    model_id=reranker.model_id,
+                    onnx_filename=reranker.onnx_filename,
+                    max_length=reranker.max_length,
+                    candidate_k=retriever.candidate_k,
+                )
+            else:
+                reranker_configuration = RerankerConfiguration(
+                    type=type(reranker).__name__,
+                    candidate_k=retriever.candidate_k,
+                )
+
+            return RetrievalEvaluationArtifact(
+                retriever_type=type(retriever).__name__,
+                vector_store_type=underlying_artifact.vector_store_type,
+                hybrid_configuration=underlying_artifact.hybrid_configuration,
+                reranker_configuration=reranker_configuration,
+            )
+
+        if isinstance(retriever, HybridRetriever):
+            semantic_retriever = retriever.semantic_retriever
+
+            if not isinstance(semantic_retriever, SemanticRetriever):
+                raise ValueError(
+                    "HybridRetriever provenance requires a SemanticRetriever "
+                    "as its semantic component."
+                )
+
+            return RetrievalEvaluationArtifact(
+                retriever_type=type(retriever).__name__,
+                vector_store_type=type(semantic_retriever.vector_store).__name__,
+                hybrid_configuration=HybridRetrievalConfiguration(
+                    candidate_k=retriever.candidate_k,
+                    rrf_k=retriever.rrf_k,
+                    semantic_weight=retriever.semantic_weight,
+                    lexical_weight=retriever.lexical_weight,
+                ),
+            )
+
+        if isinstance(retriever, SemanticRetriever):
+            return RetrievalEvaluationArtifact(
+                retriever_type=type(retriever).__name__,
+                vector_store_type=type(retriever.vector_store).__name__,
+            )
+
+        raise ValueError(
+            "Unsupported retriever type for runtime provenance extraction: "
+            f"{type(retriever).__name__!r}."
+        )
+
     @staticmethod
     def create(
         *,
