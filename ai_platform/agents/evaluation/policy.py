@@ -140,7 +140,13 @@ class AgentQualityGateEvaluator:
             )
 
         if policy.min_retrieval_score is not None:
-            if metrics.retrieval_score_avg is None:
+            if (
+                policy.require_rag_provenance
+                and metrics.has_rag_provenance
+                and not metrics.has_rag_sources_available
+            ):
+                violations.append("INSUFFICIENT_RETRIEVAL_EVIDENCE")
+            elif metrics.retrieval_score_avg is None:
                 violations.append(
                     "Average retrieval score was unavailable but minimum threshold "
                     f"({policy.min_retrieval_score:.2f}) is required."

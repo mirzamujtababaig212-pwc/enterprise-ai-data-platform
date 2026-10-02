@@ -499,6 +499,58 @@ async def test_evaluate_run_applies_rag_score_thresholds_to_durable_evidence():
 
 
 @pytest.mark.asyncio
+async def test_evaluate_run_classifies_insufficient_retrieval_evidence_from_durable_evidence():
+    service, _, _, _, repository = make_service(
+        steps=[
+            AgentRunStep(
+                run_id="run-1",
+                step_id="step-rag",
+                step_index=0,
+                step_type="tool",
+                status=AgentRunStepStatus.COMPLETED,
+                tool_name="rag.search",
+                call_id="call-rag-1",
+                metadata={
+                    "rag_provenance": {
+                        "retrieved_count": 0,
+                        "sources": [],
+                    }
+                },
+            ),
+        ]
+    )
+
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        require_rag_provenance=True,
+        name="rag-quality-v1",
+    )
+
+    result = await service.evaluate_run(
+        "run-1",
+        tenant_id="tenant-1",
+        principal="user-1",
+        policy=policy,
+    )
+
+    assert result.metrics.has_rag_provenance is True
+    assert result.metrics.has_rag_sources_available is False
+    assert result.metrics.rag_sources_available_count == 0
+    assert result.metrics.rag_unique_chunks_count == 0
+    assert result.metrics.retrieval_score_avg is None
+    assert result.passed is False
+    assert result.quality_gate.violations == ("INSUFFICIENT_RETRIEVAL_EVIDENCE",)
+
+    persisted = repository.get(result.evaluation_run_id)
+    assert persisted == result
+    assert persisted is not None
+    assert persisted.quality_gate.violations == ("INSUFFICIENT_RETRIEVAL_EVIDENCE",)
+    assert persisted.metrics.has_rag_provenance is True
+    assert persisted.metrics.has_rag_sources_available is False
+    assert persisted.metrics.rag_sources_available_count == 0
+
+
+@pytest.mark.asyncio
 async def test_evaluate_run_rejects_rag_score_thresholds_from_durable_evidence():
     service, _, _, _, repository = make_service(
         steps=[

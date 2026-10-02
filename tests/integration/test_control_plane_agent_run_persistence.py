@@ -209,6 +209,180 @@ def test_production_control_plane_persists_governed_evaluation_lineage() -> None
                 session.commit()
 
 
+def test_production_control_plane_persists_insufficient_retrieval_evidence() -> None:
+    """Verify insufficient RAG evidence survives production PostgreSQL evaluation."""
+
+    client = TestClient(app)
+    session_id = "production-insufficient-rag-evidence-integration-session"
+
+    run_id: str | None = None
+
+    try:
+        with patch(
+            "app.control_plane.dependencies._llm_router.route_chat",
+            new=AsyncMock(return_value=_deterministic_chat_response()),
+        ) as mock_route_chat:
+            response = client.post(
+                "/api/v1/agents/enterprise-analyst/run",
+                headers={"x-api-key": API_KEY},
+                json={
+                    "input": "Evaluate insufficient retrieval evidence.",
+                    "session_id": session_id,
+                    "user_id": "integration-insufficient-rag-user",
+                    "metadata": {
+                        "test": "production-insufficient-rag-evidence",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert mock_route_chat.await_count == 1
+
+        run_payload = response.json()
+        run_id = run_payload["run_id"]
+
+        with SessionLocal() as session:
+            run_record = session.get(AgentRunRecord, run_id)
+
+            assert run_record is not None
+            assert run_record.status == "completed"
+
+            session.add(
+                AgentRunStepRecord(
+                    run_id=run_id,
+                    step_id="step-insufficient-rag",
+                    step_index=0,
+                    step_type="tool",
+                    status="completed",
+                    attempt=1,
+                    tool_name="rag.search",
+                    call_id="call-insufficient-rag",
+                    input={
+                        "query": "query with no retrievable evidence",
+                    },
+                    output={
+                        "results": [],
+                    },
+                    step_metadata={
+                        "rag_provenance": {
+                            "retrieved_count": 0,
+                            "sources": [],
+                        }
+                    },
+                )
+            )
+            session.commit()
+
+        with patch.object(
+            SemanticAnswerEvaluator,
+            "evaluate",
+            new=AsyncMock(
+                return_value=SemanticAnswerEvaluation(
+                    score=1.0,
+                    passed=True,
+                    method="llm_judge_v1",
+                    evaluator_model="integration-test-model",
+                    evaluator_provider="integration-test",
+                )
+            ),
+        ) as mock_semantic_evaluate:
+            evaluation_response = client.post(
+                f"/api/v1/agents/runs/{run_id}/evaluations",
+                headers={"x-api-key": API_KEY},
+                json={
+                    "expected_answer": "Deterministic integration-test response.",
+                    "max_execution_time_ms": 60_000,
+                    "max_steps_per_run": 10,
+                    "max_invalid_tool_calls": 0,
+                    "min_retrieval_score": 0.70,
+                    "require_rag_provenance": True,
+                    "allow_governance_denials": False,
+                    "require_task_completed": True,
+                    "require_answer_match": True,
+                    "name": "production-insufficient-rag-quality-gate",
+                },
+            )
+
+        assert mock_semantic_evaluate.await_count == 1
+        assert evaluation_response.status_code == 200, evaluation_response.text
+
+        evaluation_payload = evaluation_response.json()
+
+        assert evaluation_payload["passed"] is False
+        assert evaluation_payload["quality_gate"]["violations"] == [
+            "INSUFFICIENT_RETRIEVAL_EVIDENCE",
+        ]
+
+        metrics = evaluation_payload["metrics"]
+
+        assert metrics["has_rag_provenance"] is True
+        assert metrics["has_rag_sources_available"] is False
+        assert metrics["rag_sources_available_count"] == 0
+        assert metrics["rag_unique_chunks_count"] == 0
+        assert metrics["retrieval_score_avg"] is None
+        assert metrics["reranker_score_avg"] is None
+
+        evaluation_run_id = evaluation_payload["evaluation_run_id"]
+
+        with SessionLocal() as session:
+            evaluation_record = session.get(
+                AgentEvaluationRunRecord,
+                evaluation_run_id,
+            )
+
+            assert evaluation_record is not None
+            assert evaluation_record.quality_gate == {
+                "passed": False,
+                "violations": [
+                    "INSUFFICIENT_RETRIEVAL_EVIDENCE",
+                ],
+            }
+
+            assert evaluation_record.metrics["has_rag_provenance"] is True
+            assert evaluation_record.metrics["has_rag_sources_available"] is False
+            assert evaluation_record.metrics["rag_sources_available_count"] == 0
+            assert evaluation_record.metrics["rag_unique_chunks_count"] == 0
+            assert evaluation_record.metrics["retrieval_score_avg"] is None
+
+        from app.control_plane.agent_evaluations.postgres_repository import (
+            PostgreSQLAgentEvaluationRunsRepository,
+        )
+
+        with SessionLocal() as session:
+            repository = PostgreSQLAgentEvaluationRunsRepository(session)
+            restored = repository.get(evaluation_run_id)
+
+            assert restored is not None
+            assert restored.passed is False
+            assert restored.quality_gate.violations == ("INSUFFICIENT_RETRIEVAL_EVIDENCE",)
+            assert restored.metrics.has_rag_provenance is True
+            assert restored.metrics.has_rag_sources_available is False
+            assert restored.metrics.rag_sources_available_count == 0
+            assert restored.metrics.rag_unique_chunks_count == 0
+            assert restored.metrics.retrieval_score_avg is None
+
+    finally:
+        if run_id is not None:
+            with SessionLocal() as session:
+                session.query(AgentEvaluationRunRecord).filter(
+                    AgentEvaluationRunRecord.evaluated_run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunStepRecord).filter(
+                    AgentRunStepRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunEventRecord).filter(
+                    AgentRunEventRecord.run_id == run_id
+                ).delete(synchronize_session=False)
+
+                session.query(AgentRunRecord).filter(AgentRunRecord.run_id == run_id).delete(
+                    synchronize_session=False
+                )
+
+                session.commit()
+
+
 def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
     """Exercise production agent execution and evaluation through PostgreSQL."""
 

@@ -950,6 +950,95 @@ def test_quality_gate_rejects_missing_rag_scores_when_threshold_required():
     )
 
 
+def test_quality_gate_classifies_insufficient_retrieval_evidence():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        require_rag_provenance=True,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            has_rag_provenance=True,
+            has_rag_sources_available=False,
+            rag_sources_available_count=0,
+            rag_unique_chunks_count=0,
+            retrieval_score_avg=None,
+        ),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == ("INSUFFICIENT_RETRIEVAL_EVIDENCE",)
+
+
+def test_quality_gate_distinguishes_low_retrieval_score_from_insufficient_evidence():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        require_rag_provenance=True,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            has_rag_provenance=True,
+            has_rag_sources_available=True,
+            rag_sources_available_count=3,
+            rag_unique_chunks_count=3,
+            retrieval_score_avg=0.61,
+        ),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Average retrieval score (0.61) was below minimum threshold (0.70).",
+    )
+
+
+def test_quality_gate_does_not_classify_missing_rag_provenance_as_insufficient_evidence():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        require_rag_provenance=True,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            has_rag_provenance=False,
+            has_rag_sources_available=False,
+            rag_sources_available_count=0,
+            rag_unique_chunks_count=0,
+            retrieval_score_avg=None,
+        ),
+        policy,
+    )
+
+    assert gate.passed is False
+    assert gate.violations == (
+        "Average retrieval score was unavailable but minimum threshold (0.70) is required.",
+        "RAG provenance was required but was not captured.",
+    )
+
+
+def test_quality_gate_passes_available_retrieval_evidence_above_threshold():
+    policy = AgentEvaluationPolicy(
+        min_retrieval_score=0.70,
+        require_rag_provenance=True,
+    )
+
+    _, gate = AgentEvaluator.evaluate_run(
+        _evidence(
+            has_rag_provenance=True,
+            has_rag_sources_available=True,
+            rag_sources_available_count=3,
+            rag_unique_chunks_count=3,
+            retrieval_score_avg=0.72,
+        ),
+        policy,
+    )
+
+    assert gate.passed is True
+    assert gate.violations == ()
+
+
 def test_quality_gate_ignores_rag_scores_without_thresholds():
     policy = AgentEvaluationPolicy()
 

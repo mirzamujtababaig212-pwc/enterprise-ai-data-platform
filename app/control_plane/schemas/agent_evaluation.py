@@ -80,6 +80,12 @@ class AgentEvaluationMetricsResponse(BaseModel):
     has_rag_sources_available: bool
     rag_sources_available_count: int
     rag_unique_chunks_count: int
+    retrieval_score_min: float | None = None
+    retrieval_score_max: float | None = None
+    retrieval_score_avg: float | None = None
+    reranker_score_min: float | None = None
+    reranker_score_max: float | None = None
+    reranker_score_avg: float | None = None
     grounding_evaluated: bool
     grounding_supported: bool | None
     grounding_support_ratio: float | None

@@ -623,6 +623,34 @@ def test_extract_evidence_falls_back_to_raw_results_when_provenance_sources_are_
     assert evidence.retrieval_score_avg == 0.86
 
 
+def test_extract_evidence_classifies_zero_source_rag_provenance() -> None:
+    steps = [
+        _step(
+            step_id="step-1",
+            step_index=0,
+            status=AgentRunStepStatus.COMPLETED,
+            tool_name="rag.search",
+            call_id="call-1",
+            metadata={
+                "rag_provenance": {
+                    "retrieved_count": 0,
+                    "sources": [],
+                }
+            },
+        )
+    ]
+
+    evidence = extract_evidence(_run(), steps, [])
+
+    assert evidence.has_rag_provenance is True
+    assert evidence.has_rag_sources_available is False
+    assert evidence.rag_sources_available_count == 0
+    assert evidence.rag_unique_chunks_count == 0
+    assert evidence.rag_sources_retrieved_total == 0
+    assert evidence.retrieval_score_avg is None
+    assert evidence.reranker_score_avg is None
+
+
 def test_extract_evidence_defaults_rag_metrics_for_non_rag_runs() -> None:
     steps = [
         _step(
