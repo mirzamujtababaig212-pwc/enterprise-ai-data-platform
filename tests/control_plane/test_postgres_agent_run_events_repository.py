@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 
@@ -490,6 +491,114 @@ def test_list_page_filters_attempt_before_pagination() -> None:
         assert page.events[0].metadata["sequence"] == 2
         assert page.has_more is True
         assert page.next_cursor is not None
+    finally:
+        session.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("filter_name", "filter_value"),
+    [
+        (
+            "event_type",
+            AgentExecutionEventType.LLM_COMPLETED,
+        ),
+        ("step_id", "step-1"),
+        ("provider", "openai"),
+    ],
+)
+def test_list_page_filtered_cursor_continues_within_filtered_results(
+    filter_name: str,
+    filter_value,
+) -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        common = {
+            "event_type": AgentExecutionEventType.LLM_COMPLETED,
+            "step_id": "step-1",
+            "provider": "openai",
+        }
+
+        first_matching = make_event(
+            **common,
+            metadata={"sequence": 1},
+        )
+
+        second_matching = make_event(
+            **common,
+            metadata={"sequence": 3},
+        )
+
+        if filter_name == "event_type":
+            non_matching = make_event(
+                event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+                step_id="step-1",
+                provider="openai",
+                metadata={"sequence": 2},
+            )
+        elif filter_name == "step_id":
+            non_matching = make_event(
+                event_type=AgentExecutionEventType.LLM_COMPLETED,
+                step_id="step-2",
+                provider="openai",
+                metadata={"sequence": 2},
+            )
+        else:
+            non_matching = make_event(
+                event_type=AgentExecutionEventType.LLM_COMPLETED,
+                step_id="step-1",
+                provider="anthropic",
+                metadata={"sequence": 2},
+            )
+
+        repository.record(first_matching)
+        repository.record(non_matching)
+        repository.record(second_matching)
+
+        base_time = datetime(2025, 1, 1, tzinfo=UTC)
+        set_event_created_at(
+            session,
+            sequence=1,
+            created_at=base_time + timedelta(seconds=1),
+        )
+        set_event_created_at(
+            session,
+            sequence=2,
+            created_at=base_time + timedelta(seconds=2),
+        )
+        set_event_created_at(
+            session,
+            sequence=3,
+            created_at=base_time + timedelta(seconds=3),
+        )
+
+        first_page = repository.list_page(
+            "run-1",
+            **{filter_name: filter_value},
+            limit=1,
+        )
+
+        assert [event.metadata["sequence"] for event in first_page.events] == [1]
+        assert first_page.has_more is True
+        assert first_page.next_cursor is not None
+
+        second_page = repository.list_page(
+            "run-1",
+            **{
+                filter_name: filter_value,
+                "cursor": first_page.next_cursor,
+            },
+            limit=1,
+        )
+
+        assert [event.metadata["sequence"] for event in second_page.events] == [3]
+        assert second_page.has_more is False
+        assert second_page.next_cursor is None
+        assert all(
+            getattr(event, filter_name) == filter_value
+            for event in (*first_page.events, *second_page.events)
+        )
     finally:
         session.close()
         engine.dispose()
