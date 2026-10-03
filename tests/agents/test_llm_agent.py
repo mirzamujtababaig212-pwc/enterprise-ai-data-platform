@@ -41,6 +41,7 @@ from ai_platform.agents.execution import AgentExecutionContext
 from ai_platform.agents.orchestration import AgentRuntimeDecision, AgentRuntimePhase
 from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
 from ai_platform.agents.llm_context import AgentLLMContext
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 from ai_platform.agents.policy import (
     ModelGovernanceDecision,
     OutputGovernanceDecision,
@@ -96,6 +97,14 @@ from ai_platform.agents.observability import (
 class FakeLLMGateway:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(
         self,
@@ -1530,6 +1539,14 @@ class FakeToolCallingLLMGateway:
         self.requests: list[dict[str, Any]] = []
         self.tool_name = tool_name
 
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
+
     async def route_chat(
         self,
         request: dict[str, Any],
@@ -1994,6 +2011,14 @@ class FakeMultiRoundToolCallingLLMGateway:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
 
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
+
     async def route_chat(
         self,
         request: dict[str, Any],
@@ -2038,6 +2063,14 @@ class FakeMultiRoundToolCallingLLMGateway:
 class FakeResumeContinuationLLMGateway:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(
         self,
@@ -3657,6 +3690,136 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
         },
         "error_type": "TimeoutError",
     }
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_reuses_selected_context_projection_across_durable_retry() -> None:
+    class RetryGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            self.requests.append(request)
+
+            if self.generate_count == 1:
+                raise TimeoutError("provider timeout")
+
+            return {
+                "provider": "fake",
+                "model": request["model"],
+                "reply": "Recovered with stable context.",
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "tool_calls": [],
+            }
+
+    definition = AgentDefinition(
+        name="context-retry-invariance-agent",
+        description="Test stable context projection across durable retry.",
+        system_prompt="You are a context selection test agent.",
+        model="mock-gpt",
+    )
+
+    gateway = RetryGateway()
+    repository = InMemoryAgentRunStepsRepository()
+    run_id = "run-context-retry-invariance"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Answer using the current request.",
+            session_id="session-context-retry-invariance",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=OrchestrationPlan(
+            steps=(
+                OrchestrationStep(
+                    step_id="answer",
+                    step_index=0,
+                    name="Produce answer",
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+                ),
+            )
+        ),
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = context.orchestration_plan.materialize_state()
+
+    canonical_messages = (
+        system_message("You are a context selection test agent."),
+        user_message("Oldest conversation item " + ("x" * 4000)),
+        assistant_message("Older assistant response " + ("y" * 4000)),
+        user_message("Recent conversation item " + ("z" * 4000)),
+        assistant_message("Recent assistant response " + ("a" * 4000)),
+        user_message("Answer using the current request."),
+    )
+
+    with patch.object(
+        context.llm,
+        "get_context_capabilities",
+        return_value=ContextCapabilityEnvelope(
+            minimum_known_context_window=4_096,
+            eligible_route_count=2,
+            known_route_count=2,
+            unknown_route_count=0,
+        ),
+    ):
+        agent = LLMAgent(
+            definition,
+            retry_policy=RetryPolicy(
+                max_attempts=3,
+                initial_backoff_seconds=0,
+                jitter=0,
+            ),
+        )
+
+        with patch.object(
+            context,
+            "build_llm_messages",
+            return_value=canonical_messages,
+        ):
+            response = await agent.run(context)
+
+    assert response.output == "Recovered with stable context."
+    assert gateway.generate_count == 2
+    assert len(gateway.requests) == 2
+
+    first_messages = gateway.requests[0]["messages"]
+    second_messages = gateway.requests[1]["messages"]
+
+    assert first_messages == second_messages
+
+    # The selected projection must be smaller than the canonical message set.
+    assert len(first_messages) < len(canonical_messages)
+
+    # The mandatory system instruction and current request must survive selection.
+    assert first_messages[0] == {
+        "role": "system",
+        "content": "You are a context selection test agent.",
+    }
+    assert first_messages[-1] == {
+        "role": "user",
+        "content": "Answer using the current request.",
+    }
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.attempt == 2
 
 
 @pytest.mark.asyncio
@@ -5680,6 +5843,14 @@ async def test_llm_agent_emits_agent_failed_on_llm_failure() -> None:
     )
 
     class FailingLLMGateway:
+        def get_context_capabilities(
+            self,
+            *,
+            model: str | None = None,
+            provider: str | None = None,
+        ) -> ContextCapabilityEnvelope:
+            return ContextCapabilityEnvelope()
+
         async def route_chat(
             self,
             request: dict[str, Any],

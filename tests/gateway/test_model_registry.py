@@ -1,5 +1,6 @@
 import pytest
 
+from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
 from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
 
 
@@ -454,3 +455,88 @@ def test_logical_model_requires_model_capability_support():
             provider="openai",
             model="gpt-4o",
         )
+
+
+def test_get_model_capabilities_returns_none_for_legacy_provider():
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        FakeProvider(),
+    )
+
+    assert (
+        registry.get_model_capabilities(
+            "openai",
+            "gpt-4.1",
+        )
+        is None
+    )
+
+
+def test_register_provider_discovers_optional_model_capabilities():
+    class ProviderWithCapabilities(FakeProvider):
+        def model_capabilities(self):
+            return {
+                "gpt-4.1": ModelCapabilities(
+                    context_window_tokens=128000,
+                    max_output_tokens=16384,
+                    supports_tools=True,
+                    supports_vision=True,
+                )
+            }
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        ProviderWithCapabilities(),
+    )
+
+    capabilities = registry.get_model_capabilities(
+        "openai",
+        "gpt-4.1",
+    )
+
+    assert capabilities is not None
+    assert capabilities.context_window_tokens == 128000
+    assert capabilities.max_output_tokens == 16384
+    assert capabilities.supports_tools is True
+    assert capabilities.supports_vision is True
+
+
+def test_get_model_capabilities_returns_none_for_unknown_provider():
+    registry = ModelRegistry()
+
+    assert (
+        registry.get_model_capabilities(
+            "unknown-provider",
+            "unknown-model",
+        )
+        is None
+    )
+
+
+def test_get_model_capabilities_returns_none_for_unknown_model():
+    class ProviderWithCapabilities(FakeProvider):
+        def model_capabilities(self):
+            return {
+                "gpt-4.1": ModelCapabilities(
+                    context_window_tokens=128000,
+                )
+            }
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        ProviderWithCapabilities(),
+    )
+
+    assert (
+        registry.get_model_capabilities(
+            "openai",
+            "unknown-model",
+        )
+        is None
+    )

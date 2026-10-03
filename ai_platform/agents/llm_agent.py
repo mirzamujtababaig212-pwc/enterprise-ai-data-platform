@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from dataclasses import dataclass, replace
 
 from ai_platform.agents.budget import ExecutionBudgetState
+from ai_platform.agents.context.selection import ContextSelectionPolicy, ContextSelector
 from ai_platform.agents.context.assembly import AgentContextAssembly
 from ai_platform.agents.observer import AgentExecutionObserver
 from app.control_plane.agent_run_steps.models import AgentRunStep, AgentRunStepStatus
@@ -2014,9 +2015,33 @@ class LLMAgent:
                     model_override = context.request.model_governance.effective_model
                     provider_override = context.request.model_governance.effective_provider
 
+                context_capabilities = context.llm.get_context_capabilities(
+                    model=model_override,
+                    provider=provider_override,
+                )
+
+                selected_messages = messages
+
+                if (
+                    context_capabilities.minimum_known_context_window is not None
+                    and context_capabilities.unknown_route_count == 0
+                    and context_capabilities.eligible_route_count > 0
+                ):
+                    reserved_output_tokens = (
+                        max_tokens if max_tokens is not None else context.llm.max_tokens
+                    )
+
+                    selection_policy = ContextSelectionPolicy(
+                        context_window_tokens=(context_capabilities.minimum_known_context_window),
+                        reserved_output_tokens=reserved_output_tokens,
+                    )
+
+                    selection = ContextSelector(selection_policy).select(messages)
+                    selected_messages = list(selection.messages)
+
                 result = await self._generate_with_durable_retry(
                     context,
-                    messages=messages,
+                    messages=selected_messages,
                     tools=tuple(tools),
                     model_override=model_override,
                     provider_override=provider_override,

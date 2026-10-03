@@ -25,6 +25,7 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderTimeoutError,
 )
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -554,6 +555,40 @@ class OpenAIProvider(BaseProvider):
             *sorted(SUPPORTED_CHAT_MODELS),
             *sorted(SUPPORTED_EMBEDDING_MODELS),
         ]
+
+    def model_capabilities(self) -> dict[str, ModelCapabilities]:
+        return {
+            "gpt-4.1": ModelCapabilities(
+                context_window_tokens=1_047_576,
+                max_output_tokens=32_768,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            "gpt-4.1-mini": ModelCapabilities(
+                context_window_tokens=1_047_576,
+                max_output_tokens=32_768,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            "gpt-4o": ModelCapabilities(
+                context_window_tokens=128_000,
+                max_output_tokens=16_384,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            "gpt-4o-mini": ModelCapabilities(
+                context_window_tokens=128_000,
+                max_output_tokens=16_384,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            "o4-mini": ModelCapabilities(
+                context_window_tokens=200_000,
+                max_output_tokens=100_000,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+        }
 
     def supported_chat_models(
         self,

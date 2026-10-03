@@ -33,6 +33,13 @@ class FakeModelRegistry:
     ) -> list:
         return []
 
+    def get_model_capabilities(
+        self,
+        provider: str,
+        model: str,
+    ):
+        return None
+
     def get_providers_for_model(
         self,
         capability: str,
@@ -393,3 +400,43 @@ def test_resolve_routes_preserves_candidate_models() -> None:
         ("provider:azure_openai", "azure-openai-chat"),
         ("provider:openai", "gpt-4.1-mini"),
     ]
+
+
+def test_resolve_routes_attaches_model_capabilities() -> None:
+    from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
+
+    class ProviderWithCapabilities(FakeProvider):
+        def model_capabilities(self):
+            return {
+                "gpt-4.1": ModelCapabilities(
+                    context_window_tokens=128000,
+                    max_output_tokens=16384,
+                    supports_tools=True,
+                    supports_vision=True,
+                )
+            }
+
+    registry = ModelRegistry()
+
+    registry.register_provider(
+        "openai",
+        ProviderWithCapabilities(),
+    )
+
+    resolver = RoutingResolver(
+        model_registry=registry,
+    )
+
+    routes = resolver.resolve_routes(
+        capability="chat",
+        model="gpt-4.1",
+        requested_provider="openai",
+    )
+
+    assert len(routes) == 1
+    assert routes[0].model == "gpt-4.1"
+    assert routes[0].capabilities is not None
+    assert routes[0].capabilities.context_window_tokens == 128000
+    assert routes[0].capabilities.max_output_tokens == 16384
+    assert routes[0].capabilities.supports_tools is True
+    assert routes[0].capabilities.supports_vision is True

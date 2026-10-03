@@ -8,6 +8,9 @@ from opentelemetry import trace
 from ai_platform.llm_gateway.exceptions.gateway_exceptions import (
     ProviderNotFound,
 )
+from ai_platform.llm_gateway.models.capabilities import (
+    ContextCapabilityEnvelope,
+)
 from ai_platform.llm_gateway.metrics.prometheus import (
     PROVIDER_ERRORS_TOTAL,
     PROVIDER_LATENCY_SECONDS,
@@ -45,6 +48,45 @@ class Router:
     ):
         self.routing_resolver = routing_resolver or RoutingResolver()
         self.fallback_executor = fallback_executor or FallbackExecutor()
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        """
+        Return the context-window envelope for all eligible chat routes.
+
+        Context selection is only bounded when every eligible route has
+        a known context window. This prevents an unknown fallback route
+        from being accidentally truncated against an incomplete capability
+        snapshot.
+        """
+        if model is None or not model.strip():
+            return ContextCapabilityEnvelope()
+
+        routes = self.routing_resolver.resolve_routes(
+            capability="chat",
+            model=model,
+            requested_provider=provider,
+        )
+
+        known_windows = [
+            route.capabilities.context_window_tokens
+            for route in routes
+            if (
+                route.capabilities is not None
+                and route.capabilities.context_window_tokens is not None
+            )
+        ]
+
+        return ContextCapabilityEnvelope(
+            minimum_known_context_window=(min(known_windows) if known_windows else None),
+            eligible_route_count=len(routes),
+            known_route_count=len(known_windows),
+            unknown_route_count=len(routes) - len(known_windows),
+        )
 
     async def route_chat(
         self,

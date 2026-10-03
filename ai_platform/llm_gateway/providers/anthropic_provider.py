@@ -10,6 +10,7 @@ from anthropic import RateLimitError
 
 from ai_platform.agents.tool_calls import AgentToolCall
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
 
 SUPPORTED_CHAT_MODELS = {
     "anthropic-chat",
@@ -332,6 +333,16 @@ class AnthropicProvider(BaseProvider):
 
     async def list_models(self) -> list[str]:
         return list(SUPPORTED_CHAT_MODELS)
+
+    def model_capabilities(self) -> dict[str, ModelCapabilities]:
+        return {
+            "anthropic-chat": ModelCapabilities(
+                context_window_tokens=1_000_000,
+                max_output_tokens=128_000,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+        }
 
     def supported_chat_models(self) -> list[str]:
         return list(SUPPORTED_CHAT_MODELS)

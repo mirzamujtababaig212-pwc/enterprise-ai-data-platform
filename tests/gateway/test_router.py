@@ -756,3 +756,90 @@ async def test_route_stream_with_bedrock_provider():
         "Hello ",
         "from Bedrock.",
     ]
+
+
+def test_get_context_capabilities_uses_minimum_context_window_across_routes(
+    router,
+    routing_resolver,
+    fake_provider,
+):
+    from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    provider_a = MagicMock()
+    provider_a.name = "provider-a"
+
+    provider_b = MagicMock()
+    provider_b.name = "provider-b"
+
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=provider_a,
+            model="model-a",
+            capabilities=ModelCapabilities(
+                context_window_tokens=128_000,
+                max_output_tokens=16_384,
+            ),
+        ),
+        ResolvedRoute(
+            provider=provider_b,
+            model="model-b",
+            capabilities=ModelCapabilities(
+                context_window_tokens=32_000,
+                max_output_tokens=8_192,
+            ),
+        ),
+    ]
+
+    envelope = router.get_context_capabilities(
+        model="enterprise-chat",
+    )
+
+    assert envelope.minimum_known_context_window == 32_000
+    assert envelope.eligible_route_count == 2
+    assert envelope.known_route_count == 2
+    assert envelope.unknown_route_count == 0
+
+    routing_resolver.resolve_routes.assert_called_once_with(
+        capability="chat",
+        model="enterprise-chat",
+        requested_provider=None,
+    )
+
+
+def test_get_context_capabilities_does_not_bound_when_route_capability_is_unknown(
+    router,
+    routing_resolver,
+):
+    from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
+    from ai_platform.llm_gateway.routing.resolver import ResolvedRoute
+
+    provider_a = MagicMock()
+    provider_a.name = "provider-a"
+
+    provider_b = MagicMock()
+    provider_b.name = "provider-b"
+
+    routing_resolver.resolve_routes.return_value = [
+        ResolvedRoute(
+            provider=provider_a,
+            model="model-a",
+            capabilities=ModelCapabilities(
+                context_window_tokens=128_000,
+            ),
+        ),
+        ResolvedRoute(
+            provider=provider_b,
+            model="model-b",
+            capabilities=None,
+        ),
+    ]
+
+    envelope = router.get_context_capabilities(
+        model="enterprise-chat",
+    )
+
+    assert envelope.minimum_known_context_window == 128_000
+    assert envelope.eligible_route_count == 2
+    assert envelope.known_route_count == 1
+    assert envelope.unknown_route_count == 1

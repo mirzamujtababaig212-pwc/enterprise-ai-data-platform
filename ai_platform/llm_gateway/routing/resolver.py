@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_platform.llm_gateway.providers.resolver import ProviderResolver
+from ai_platform.llm_gateway.models.capabilities import (
+    ModelCapabilities,
+)
+
 from ai_platform.llm_gateway.registry.model_registry import ModelRegistry
 from ai_platform.llm_gateway.registry.model_registry import (
     model_registry as default_model_registry,
@@ -22,6 +26,7 @@ class ResolvedRoute:
 
     provider: Any
     model: str
+    capabilities: ModelCapabilities | None = None
 
 
 class RoutingResolver:
@@ -101,6 +106,10 @@ class RoutingResolver:
             ResolvedRoute(
                 provider=provider,
                 model=candidate.model,
+                capabilities=self.model_registry.get_model_capabilities(
+                    candidate.provider,
+                    candidate.model,
+                ),
             )
             for provider, candidate in zip(
                 providers,

@@ -518,3 +518,12 @@ async def test_chat_extracts_multiple_function_calls(provider, client):
     assert second.call_id.startswith("gemini-")
 
     assert first.call_id != second.call_id
+
+
+def test_model_capabilities(provider):
+    capabilities = provider.model_capabilities()
+
+    assert capabilities["gemini-chat"].context_window_tokens == 1_048_576
+    assert capabilities["gemini-chat"].max_output_tokens == 65_536
+    assert capabilities["gemini-chat"].supports_tools is True
+    assert capabilities["gemini-chat"].supports_vision is True

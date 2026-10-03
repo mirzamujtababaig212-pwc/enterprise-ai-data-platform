@@ -324,3 +324,12 @@ def test_supported_embedding_models(provider):
 
 def test_supported_stream_models(provider):
     assert set(provider.supported_stream_models()) == SUPPORTED_CHAT_MODELS
+
+
+def test_model_capabilities(provider):
+    capabilities = provider.model_capabilities()
+
+    assert capabilities["anthropic-chat"].context_window_tokens == 1_000_000
+    assert capabilities["anthropic-chat"].max_output_tokens == 128_000
+    assert capabilities["anthropic-chat"].supports_tools is True
+    assert capabilities["anthropic-chat"].supports_vision is True

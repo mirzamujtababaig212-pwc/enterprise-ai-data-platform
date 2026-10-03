@@ -1093,3 +1093,26 @@ async def test_chat_passes_empty_tools_list() -> None:
     )
 
     assert provider.client.responses.create.call_args.kwargs["tools"] == []
+
+
+def test_model_capabilities():
+    provider = OpenAIProvider()
+
+    capabilities = provider.model_capabilities()
+
+    assert capabilities["gpt-4.1"].context_window_tokens == 1_047_576
+    assert capabilities["gpt-4.1"].max_output_tokens == 32_768
+    assert capabilities["gpt-4.1"].supports_tools is True
+    assert capabilities["gpt-4.1"].supports_vision is True
+
+    assert capabilities["gpt-4.1-mini"].context_window_tokens == 1_047_576
+    assert capabilities["gpt-4.1-mini"].max_output_tokens == 32_768
+
+    assert capabilities["gpt-4o"].context_window_tokens == 128_000
+    assert capabilities["gpt-4o"].max_output_tokens == 16_384
+
+    assert capabilities["gpt-4o-mini"].context_window_tokens == 128_000
+    assert capabilities["gpt-4o-mini"].max_output_tokens == 16_384
+
+    assert capabilities["o4-mini"].context_window_tokens == 200_000
+    assert capabilities["o4-mini"].max_output_tokens == 100_000

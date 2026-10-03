@@ -4,6 +4,7 @@ import json
 from typing import Any, Protocol
 
 from ai_platform.agents.llm_config import AgentLLMConfig
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 from ai_platform.agents.llm_result import (
     AgentLLMResult,
     AgentLLMUsage,
@@ -33,6 +34,13 @@ class LLMGateway(Protocol):
         request: dict[str, Any],
     ) -> dict[str, Any]: ...
 
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope: ...
+
 
 class UnavailableLLMGateway:
     """
@@ -45,6 +53,14 @@ class UnavailableLLMGateway:
         request: dict[str, Any],
     ) -> dict[str, Any]:
         raise RuntimeError("LLM Gateway is not configured for AgentRuntime.")
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
 
 class AgentLLMContext:
@@ -62,6 +78,19 @@ class AgentLLMContext:
     ) -> None:
         self._gateway = gateway
         self._config = config
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        resolved_model = model if model is not None else self._config.model
+
+        return self._gateway.get_context_capabilities(
+            model=resolved_model,
+            provider=provider,
+        )
 
     @property
     def model(self) -> str | None:

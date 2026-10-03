@@ -20,6 +20,7 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderTimeoutError,
 )
 from ai_platform.llm_gateway.providers.base_provider import BaseProvider
+from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -554,6 +555,16 @@ class GeminiProvider(BaseProvider):
             *sorted(SUPPORTED_CHAT_MODELS),
             *sorted(SUPPORTED_EMBEDDING_MODELS),
         ]
+
+    def model_capabilities(self) -> dict[str, ModelCapabilities]:
+        return {
+            "gemini-chat": ModelCapabilities(
+                context_window_tokens=1_048_576,
+                max_output_tokens=65_536,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+        }
 
     def supported_chat_models(self) -> list[str]:
         return sorted(SUPPORTED_CHAT_MODELS)

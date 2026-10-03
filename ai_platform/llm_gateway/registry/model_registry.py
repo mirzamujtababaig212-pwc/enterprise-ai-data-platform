@@ -1,7 +1,9 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
+from types import MappingProxyType
 
 from ai_platform.llm_gateway.models.capabilities import (
+    ModelCapabilities,
     ProviderCapabilities,
     RegistrySnapshot,
 )
@@ -102,6 +104,22 @@ class ModelRegistry:
         return self._snapshot.model_supported(
             provider_name,
             capability,
+            model,
+        )
+
+    def get_model_capabilities(
+        self,
+        provider_name: str,
+        model: str,
+    ) -> ModelCapabilities | None:
+        capabilities = self._snapshot.providers.get(
+            provider_name,
+        )
+
+        if capabilities is None:
+            return None
+
+        return capabilities.get_model_capabilities(
             model,
         )
 
@@ -299,11 +317,36 @@ class ModelRegistry:
         if not stream and hasattr(provider, "stream"):
             stream = list(chat)
 
+        model_capabilities = cls._get_model_capabilities(
+            provider,
+        )
+
         return ProviderCapabilities(
             chat=tuple(sorted(set(chat))),
             embeddings=tuple(sorted(set(embeddings))),
             stream=tuple(sorted(set(stream))),
+            model_capabilities=model_capabilities,
         )
+
+    @staticmethod
+    def _get_model_capabilities(
+        provider: Any,
+    ) -> Mapping[str, ModelCapabilities]:
+        method = getattr(
+            provider,
+            "model_capabilities",
+            None,
+        )
+
+        if method is None:
+            return MappingProxyType({})
+
+        capabilities = method()
+
+        if capabilities is None:
+            return MappingProxyType({})
+
+        return MappingProxyType(dict(capabilities))
 
     @staticmethod
     def _get_supported_models(
