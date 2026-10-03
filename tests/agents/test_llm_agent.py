@@ -991,11 +991,11 @@ async def test_llm_agent_keeps_durable_steps_consistent_across_runtime_replannin
 
     first_step = repository.get(
         "run-runtime-replanning-steps",
-        "answer-1",
+        "iteration-1:answer-1",
     )
     second_step = repository.get(
         "run-runtime-replanning-steps",
-        "answer-2",
+        "iteration-2:answer-2",
     )
 
     assert first_step is not None
@@ -1032,11 +1032,11 @@ async def test_llm_agent_keeps_durable_steps_consistent_across_runtime_replannin
     ]
 
     assert [(event.event_type, event.step_id) for event in orchestration_events] == [
-        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "answer-1"),
-        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "answer-1"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "iteration-1:answer-1"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "iteration-1:answer-1"),
         (AgentExecutionEventType.RUNTIME_DECISION, None),
-        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "answer-2"),
-        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "answer-2"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, "iteration-2:answer-2"),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, "iteration-2:answer-2"),
         (AgentExecutionEventType.RUNTIME_DECISION, None),
     ]
 
@@ -1155,7 +1155,7 @@ async def test_llm_agent_cancellation_stops_before_runtime_replanned_step() -> N
 
     first_step = repository.get(
         "run-runtime-replanning-cancellation",
-        "answer-1",
+        "iteration-1:answer-1",
     )
 
     assert first_step is not None
@@ -1165,7 +1165,7 @@ async def test_llm_agent_cancellation_stops_before_runtime_replanned_step() -> N
     assert decision_provider.results == [AgentRuntimeDecision.CONTINUE]
     assert len(gateway.requests) == 1
 
-    assert context.orchestration_state.steps[0].step_id == "answer-1"
+    assert context.orchestration_state.steps[0].step_id == "iteration-1:answer-1"
     assert context.orchestration_state.steps[0].status is OrchestrationStepStatus.COMPLETED
 
 
@@ -2177,7 +2177,14 @@ async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
     assert before_checkpoint.user_id == "user-123"
     assert before_checkpoint.tool_round == 1
     assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
-    assert before_checkpoint.metadata == {"request_id": "request-789"}
+    assert before_checkpoint.metadata["request_id"] == "request-789"
+    assert before_checkpoint.metadata["runtime"] == {
+        "phase": AgentRuntimePhase.ACT.value,
+        "decision": None,
+        "decision_reason": None,
+        "current_step_index": None,
+        "iteration": 1,
+    }
     assert before_checkpoint.messages[-1].role is AgentMessageRole.ASSISTANT
     assert "call-123" in before_checkpoint.messages[-1].content
     assert len(before_checkpoint.messages) == 3
@@ -2190,7 +2197,14 @@ async def test_llm_agent_captures_checkpoint_after_tool_execution() -> None:
     assert after_checkpoint.user_id == "user-123"
     assert after_checkpoint.tool_round == 1
     assert after_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
-    assert after_checkpoint.metadata == {"request_id": "request-789"}
+    assert after_checkpoint.metadata["request_id"] == "request-789"
+    assert after_checkpoint.metadata["runtime"] == {
+        "phase": AgentRuntimePhase.ACT.value,
+        "decision": None,
+        "decision_reason": None,
+        "current_step_index": None,
+        "iteration": 1,
+    }
 
     assert after_checkpoint.messages[-1].role is AgentMessageRole.TOOL
     assert "call-123" in after_checkpoint.messages[-1].content
@@ -2975,7 +2989,7 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
     await tool_registry.register(FakeRAGTool())
 
     plan = build_enterprise_rag_analyst_plan()
-    state = plan.materialize_state()
+    state = plan.materialize_state(iteration=1)
     repository = InMemoryAgentRunStepsRepository()
 
     context = AgentExecutionContext(
@@ -3006,11 +3020,11 @@ async def test_llm_agent_persists_rag_tool_execution_binding() -> None:
 
     step = repository.get(
         "run-rag-binding",
-        "retrieve_evidence",
+        "iteration-1:retrieve_evidence",
     )
 
     assert step is not None
-    assert step.step_id == "retrieve_evidence"
+    assert step.step_id == "iteration-1:retrieve_evidence"
     assert step.step_id != "call-123"
     assert step.step_type == "tool"
     assert step.status is AgentRunStepStatus.COMPLETED
@@ -3107,7 +3121,7 @@ async def test_llm_agent_pauses_durable_tool_step_for_pending_approval() -> None
 
     step = repository.get(
         "run-approval",
-        "retrieve_evidence",
+        "iteration-1:retrieve_evidence",
     )
 
     assert step is not None
@@ -3126,7 +3140,7 @@ async def test_llm_agent_pauses_durable_tool_step_for_pending_approval() -> None
 
     assert approval.status is ApprovalStatus.PENDING
     assert approval.run_id == "run-approval"
-    assert approval.step_id == "retrieve_evidence"
+    assert approval.step_id == "iteration-1:retrieve_evidence"
     assert approval.call_id == "call-123"
     assert approval.tool_name == "rag.search"
     assert approval.risk_tier == "high"
@@ -3226,7 +3240,7 @@ async def test_llm_agent_propagates_execution_provenance_to_event_and_durable_st
 
     step = repository.get(
         "run-provenance",
-        "retrieve_evidence",
+        "iteration-1:retrieve_evidence",
     )
 
     assert step is not None
@@ -4114,7 +4128,7 @@ async def test_llm_agent_persists_failed_durable_tool_step() -> None:
     with pytest.raises(Exception):
         await agent.run(context)
 
-    step = repository.get(run_id, "execute_tool")
+    step = repository.get(run_id, "iteration-1:execute_tool")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
@@ -4212,7 +4226,7 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
         retryable_failure_categories=frozenset({ToolExecutionFailureCategory.EXECUTION_ERROR}),
     )
 
-    step = repository.get(run_id, "execute_tool")
+    step = repository.get(run_id, "iteration-1:execute_tool")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
@@ -4316,7 +4330,7 @@ async def test_llm_agent_classifies_timeout_using_execution_policy() -> None:
         retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
     )
 
-    step = repository.get(run_id, "execute_tool")
+    step = repository.get(run_id, "iteration-1:execute_tool")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
@@ -4386,7 +4400,7 @@ async def test_llm_agent_persists_duration_limit_failure_for_running_durable_ste
     ):
         await agent.run(context)
 
-    step = repository.get(run_id, "generate_answer")
+    step = repository.get(run_id, "iteration-1:generate_answer")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
@@ -4471,7 +4485,7 @@ async def test_llm_agent_persists_ambiguous_durable_tool_step() -> None:
         tool_round=1,
     )
 
-    step = repository.get(run_id, "retrieve_evidence")
+    step = repository.get(run_id, "iteration-1:retrieve_evidence")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.AMBIGUOUS
@@ -4551,7 +4565,7 @@ async def test_llm_agent_keeps_durable_tool_step_running_when_execution_is_in_pr
         tool_round=1,
     )
 
-    step = repository.get(run_id, "retrieve_evidence")
+    step = repository.get(run_id, "iteration-1:retrieve_evidence")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.RUNNING
@@ -4628,7 +4642,7 @@ async def test_llm_agent_marks_durable_tool_step_ambiguous_on_ownership_loss() -
             tool_round=1,
         )
 
-    step = repository.get(run_id, "execute_tool")
+    step = repository.get(run_id, "iteration-1:execute_tool")
 
     assert step is not None
     assert step.status is AgentRunStepStatus.AMBIGUOUS
@@ -4683,13 +4697,13 @@ async def test_llm_agent_stops_at_rag_orchestration_boundary_before_next_llm_cal
     state = context.orchestration_state
 
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
 
     assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
 
     assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
 
     assert tool.execute_count == 1
 
@@ -4754,13 +4768,13 @@ async def test_llm_agent_cancellation_stops_before_next_rag_orchestration_step()
     state = context.orchestration_state
 
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
 
     assert state.steps[1].status is OrchestrationStepStatus.PENDING
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
 
     assert state.steps[2].status is OrchestrationStepStatus.PENDING
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
 
     assert state.current_step_index == 0
     assert len(gateway.requests) == 1
@@ -5717,11 +5731,11 @@ async def test_llm_agent_resume_cancellation_cancels_orchestration_step() -> Non
     state = context.orchestration_state
     assert state.current_step is not None
     assert state.current_step.status is OrchestrationStepStatus.CANCELLED
-    assert state.current_step.step_id == "retrieve_evidence"
+    assert state.current_step.step_id == "iteration-1:retrieve_evidence"
 
     durable_step = repository.get(
         context.run_id,
-        "retrieve_evidence",
+        "iteration-1:retrieve_evidence",
     )
     assert durable_step is not None
     assert durable_step.status is AgentRunStepStatus.CANCELLED
@@ -5733,7 +5747,7 @@ async def test_llm_agent_resume_cancellation_cancels_orchestration_step() -> Non
     ]
 
     assert len(cancelled_events) == 1
-    assert cancelled_events[0].step_id == "retrieve_evidence"
+    assert cancelled_events[0].step_id == "iteration-1:retrieve_evidence"
     assert cancelled_events[0].step_index == 0
 
     assert not any(
@@ -5840,16 +5854,16 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_after_
 
     assert state.current_step is None
 
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
     assert state.steps[0].tool_round == 1
     assert state.get_step_result("retrieve_evidence") is not None
 
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
     assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
     assert state.get_step_result("analyze_evidence") is not None
 
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
     assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
     assert state.get_step_result("produce_answer") is not None
 
@@ -5961,13 +5975,13 @@ async def test_llm_agent_resume_cancellation_stops_before_recovery_next_step() -
 
     state = context.orchestration_state
 
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
 
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
     assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
 
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
     assert state.steps[2].status is OrchestrationStepStatus.PENDING
 
     assert state.current_step_index == 1
@@ -6157,10 +6171,10 @@ async def test_llm_agent_resume_cancellation_stops_before_runtime_replanned_step
 
     state = context.orchestration_state
 
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
 
-    assert state.steps[1].step_id == "produce_answer"
+    assert state.steps[1].step_id == "iteration-1:produce_answer"
     assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
 
     assert state.current_step is None
@@ -6267,13 +6281,13 @@ async def test_llm_agent_resume_cancellation_stops_before_next_orchestration_ste
 
     state = context.orchestration_state
 
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
 
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
     assert state.steps[1].status is OrchestrationStepStatus.PENDING
 
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
     assert state.steps[2].status is OrchestrationStepStatus.PENDING
 
     assert state.current_step_index == 0
@@ -6377,16 +6391,16 @@ async def test_llm_agent_resume_completes_current_orchestration_step_from_before
 
     assert state.current_step is None
 
-    assert state.steps[0].step_id == "retrieve_evidence"
+    assert state.steps[0].step_id == "iteration-1:retrieve_evidence"
     assert state.steps[0].status is OrchestrationStepStatus.COMPLETED
     assert state.steps[0].tool_round == 1
     assert state.get_step_result("retrieve_evidence") is not None
 
-    assert state.steps[1].step_id == "analyze_evidence"
+    assert state.steps[1].step_id == "iteration-1:analyze_evidence"
     assert state.steps[1].status is OrchestrationStepStatus.COMPLETED
     assert state.get_step_result("analyze_evidence") is not None
 
-    assert state.steps[2].step_id == "produce_answer"
+    assert state.steps[2].step_id == "iteration-1:produce_answer"
     assert state.steps[2].status is OrchestrationStepStatus.COMPLETED
     assert state.get_step_result("produce_answer") is not None
 
@@ -7021,7 +7035,8 @@ async def test_llm_agent_resume_continues_with_new_tool_call_and_checkpoint() ->
     assert before_checkpoint.agent_name == original_checkpoint.agent_name
     assert before_checkpoint.tool_round == 2
     assert before_checkpoint.position is AgentCheckpointPosition.BEFORE_TOOL_EXECUTION
-    assert before_checkpoint.metadata == original_checkpoint.metadata
+    assert before_checkpoint.metadata["request_id"] == "request-789"
+    assert before_checkpoint.metadata["runtime"]["iteration"] == 1
     assert len(before_checkpoint.messages) == 5
     assert before_checkpoint.messages[:4] == original_checkpoint.messages
     assert before_checkpoint.messages[4] == assistant_tool_call_message(
@@ -7041,7 +7056,8 @@ async def test_llm_agent_resume_continues_with_new_tool_call_and_checkpoint() ->
     assert new_checkpoint.agent_name == original_checkpoint.agent_name
     assert new_checkpoint.tool_round == 2
     assert new_checkpoint.position is AgentCheckpointPosition.AFTER_TOOL_EXECUTION
-    assert new_checkpoint.metadata == original_checkpoint.metadata
+    assert new_checkpoint.metadata["request_id"] == "request-789"
+    assert new_checkpoint.metadata["runtime"]["iteration"] == 1
     assert len(new_checkpoint.messages) == 6
 
     assert new_checkpoint.messages[:4] == original_checkpoint.messages

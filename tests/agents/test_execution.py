@@ -173,9 +173,9 @@ def test_execution_context_materializes_supplied_orchestration_plan() -> None:
 
     assert context.orchestration_plan is plan
     assert [step.step_id for step in context.orchestration_state.steps] == [
-        "retrieve_evidence",
-        "analyze_evidence",
-        "produce_answer",
+        "iteration-1:retrieve_evidence",
+        "iteration-1:analyze_evidence",
+        "iteration-1:produce_answer",
     ]
     assert all(
         step.status is OrchestrationStepStatus.PENDING for step in context.orchestration_state.steps
@@ -1242,3 +1242,40 @@ def test_execution_context_budget_state_is_per_context() -> None:
 
     assert context_one.execution_budget_state.llm_calls == 1
     assert context_two.execution_budget_state.llm_calls == 0
+
+
+def test_execution_context_restores_runtime_iteration_before_materialization() -> None:
+    from ai_platform.agents.orchestration import AgentRuntimeState
+    from ai_platform.agents.plans import build_enterprise_rag_analyst_plan
+
+    definition = make_definition(
+        tool_names=("rag.search",),
+    )
+
+    tools = AgentToolContext(
+        InMemoryToolRegistry(),
+        definition,
+    )
+
+    llm = AgentLLMContext(
+        FakeGateway(),
+        definition.llm_config,
+    )
+
+    runtime_state = AgentRuntimeState(iteration=2)
+    plan = build_enterprise_rag_analyst_plan()
+
+    context = AgentExecutionContext(
+        AgentRequest(input="Hello."),
+        tools=tools,
+        llm=llm,
+        orchestration_plan=plan,
+        runtime_state=runtime_state,
+    )
+
+    assert context.runtime_state.iteration == 2
+    assert [step.step_id for step in context.orchestration_state.steps] == [
+        "iteration-2:retrieve_evidence",
+        "iteration-2:analyze_evidence",
+        "iteration-2:produce_answer",
+    ]

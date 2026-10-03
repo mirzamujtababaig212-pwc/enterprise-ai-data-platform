@@ -241,7 +241,7 @@ async def test_agent_llm_tool_call_enforces_tenant_policy_and_persists_step() ->
     assert response.agent_name == "enterprise-rag-analyst"
     assert response.output == "RAG retrieves relevant enterprise context."
     assert response.metadata["provider"] == "fake"
-    assert response.metadata["tool_rounds"] == 0
+    assert response.metadata["tool_rounds"] == 1
 
     # The tenant identity must travel from AgentRequest all the way to
     # ToolExecutionService/TenantPolicyEngine.
@@ -250,7 +250,7 @@ async def test_agent_llm_tool_call_enforces_tenant_policy_and_persists_step() ->
     # The underlying tool must execute exactly once after policy approval.
     assert tool.execution_count == 1
 
-    step = repository.get(run_id, "retrieve_evidence")
+    step = repository.get(run_id, "iteration-1:retrieve_evidence")
 
     assert step is not None
     assert step.status.value == "completed"

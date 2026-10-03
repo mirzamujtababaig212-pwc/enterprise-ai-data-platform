@@ -1268,3 +1268,107 @@ def test_orchestration_state_cannot_cancel_non_running_step() -> None:
 
     with pytest.raises(ValueError, match="must be RUNNING before cancellation"):
         state.cancel_step()
+
+
+def test_materialize_state_qualifies_durable_step_ids_by_iteration() -> None:
+    plan = OrchestrationPlan(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+            OrchestrationStep(
+                step_id="produce_answer",
+                step_index=1,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    state = plan.materialize_state(iteration=2)
+
+    assert [step.step_id for step in state.steps] == [
+        "iteration-2:retrieve_evidence",
+        "iteration-2:produce_answer",
+    ]
+    assert state.steps[0].metadata["logical_step_id"] == "retrieve_evidence"
+    assert state.steps[0].metadata["runtime_iteration"] == 2
+
+
+def test_materialize_state_preserves_legacy_ids_without_iteration() -> None:
+    plan = OrchestrationPlan(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    state = plan.materialize_state()
+
+    assert state.steps[0].step_id == "retrieve_evidence"
+    assert "logical_step_id" not in state.steps[0].metadata
+    assert "runtime_iteration" not in state.steps[0].metadata
+
+
+def test_materialize_state_separates_same_logical_steps_across_iterations() -> None:
+    plan = OrchestrationPlan(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    first = plan.materialize_state(iteration=1)
+    second = plan.materialize_state(iteration=2)
+
+    assert first.steps[0].step_id == "iteration-1:retrieve_evidence"
+    assert second.steps[0].step_id == "iteration-2:retrieve_evidence"
+    assert first.steps[0].step_id != second.steps[0].step_id
+
+
+def test_materialize_state_rejects_invalid_iteration() -> None:
+    plan = OrchestrationPlan(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        plan.materialize_state(iteration=0)
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        plan.materialize_state(iteration=-1)
+
+
+def test_resolve_step_id_accepts_durable_and_logical_ids() -> None:
+    plan = OrchestrationPlan(
+        steps=[
+            OrchestrationStep(
+                step_id="retrieve_evidence",
+                step_index=0,
+                name="Retrieve evidence",
+                status=OrchestrationStepStatus.PENDING,
+            ),
+        ]
+    )
+
+    state = plan.materialize_state(iteration=2)
+
+    assert state._resolve_step_id("iteration-2:retrieve_evidence") == 0
+    assert state._resolve_step_id("retrieve_evidence") == 0

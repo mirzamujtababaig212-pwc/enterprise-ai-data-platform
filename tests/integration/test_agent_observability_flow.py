@@ -224,11 +224,13 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
 
         assert [event.event_type for event in observer.events] == [
             AgentExecutionEventType.AGENT_STARTED,
+            AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.TOOL_CALL_REQUESTED,
             AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION,
             AgentExecutionEventType.TOOL_CALL_COMPLETED,
+            AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.RUNTIME_DECISION,
@@ -236,20 +238,33 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         ]
 
         started = observer.events[0]
-        first_llm = observer.events[2]
-        tool_requested = observer.events[3]
-        authorization = observer.events[4]
-        tool_completed = observer.events[5]
-        final_llm = observer.events[7]
-        completed = observer.events[9]
+        first_llm_requested = observer.events[2]
+        first_llm_completed = observer.events[3]
+        tool_requested = observer.events[4]
+        authorization = observer.events[5]
+        tool_completed = observer.events[6]
+        final_llm_requested = observer.events[8]
+        final_llm_completed = observer.events[9]
+        completed = observer.events[11]
 
         assert started.agent_name == "observable-mcp-agent"
         assert started.session_id == "session-observe-123"
 
-        assert first_llm.tool_round == 0
-        assert first_llm.provider == "fake"
-        assert first_llm.model == "mock-gpt"
-        assert first_llm.metadata == {
+        assert first_llm_requested.event_type is AgentExecutionEventType.LLM_REQUESTED
+        assert first_llm_requested.agent_name == "observable-mcp-agent"
+        assert first_llm_requested.session_id == "session-observe-123"
+        assert first_llm_requested.tool_round == 0
+        assert first_llm_requested.provider is None
+        assert first_llm_requested.model is None
+        assert first_llm_requested.metadata == {}
+
+        assert first_llm_completed.event_type is AgentExecutionEventType.LLM_COMPLETED
+        assert first_llm_completed.agent_name == "observable-mcp-agent"
+        assert first_llm_completed.session_id == "session-observe-123"
+        assert first_llm_completed.tool_round == 0
+        assert first_llm_completed.provider == "fake"
+        assert first_llm_completed.model == "mock-gpt"
+        assert first_llm_completed.metadata == {
             "prompt_tokens": 10,
             "completion_tokens": 5,
             "total_tokens": 15,
@@ -302,10 +317,21 @@ async def test_agent_mcp_execution_emits_complete_observability_lifecycle() -> N
         assert "principal" not in provenance
         assert "sensitive" not in provenance
 
-        assert final_llm.tool_round == 1
-        assert final_llm.provider == "fake"
-        assert final_llm.model == "mock-gpt"
-        assert final_llm.metadata == {
+        assert final_llm_requested.event_type is AgentExecutionEventType.LLM_REQUESTED
+        assert final_llm_requested.agent_name == "observable-mcp-agent"
+        assert final_llm_requested.session_id == "session-observe-123"
+        assert final_llm_requested.tool_round == 1
+        assert final_llm_requested.provider is None
+        assert final_llm_requested.model is None
+        assert final_llm_requested.metadata == {}
+
+        assert final_llm_completed.event_type is AgentExecutionEventType.LLM_COMPLETED
+        assert final_llm_completed.agent_name == "observable-mcp-agent"
+        assert final_llm_completed.session_id == "session-observe-123"
+        assert final_llm_completed.tool_round == 1
+        assert final_llm_completed.provider == "fake"
+        assert final_llm_completed.model == "mock-gpt"
+        assert final_llm_completed.metadata == {
             "prompt_tokens": 25,
             "completion_tokens": 10,
             "total_tokens": 35,
@@ -787,11 +813,13 @@ async def test_agent_mcp_authorization_denial_emits_tool_failure_event() -> None
 
         assert [event.event_type for event in observer.events] == [
             AgentExecutionEventType.AGENT_STARTED,
+            AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.TOOL_CALL_REQUESTED,
             AgentExecutionEventType.TOOL_AUTHORIZATION_DECISION,
             AgentExecutionEventType.TOOL_CALL_FAILED,
+            AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
             AgentExecutionEventType.LLM_REQUESTED,
             AgentExecutionEventType.LLM_COMPLETED,
             AgentExecutionEventType.RUNTIME_DECISION,

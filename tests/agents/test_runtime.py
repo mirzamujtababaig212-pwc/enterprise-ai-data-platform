@@ -550,11 +550,21 @@ async def test_runtime_injects_orchestration_plan_for_known_agent() -> None:
 
     assert agent.last_context is not None
     assert agent.last_context.orchestration_plan is not None
-    assert [step.step_id for step in agent.last_context.orchestration_state.steps] == [
+    steps = agent.last_context.orchestration_state.steps
+
+    assert [step.step_id for step in steps] == [
+        "iteration-1:retrieve_evidence",
+        "iteration-1:analyze_evidence",
+        "iteration-1:produce_answer",
+    ]
+
+    assert [step.metadata["logical_step_id"] for step in steps] == [
         "retrieve_evidence",
         "analyze_evidence",
         "produce_answer",
     ]
+
+    assert all(step.metadata["runtime_iteration"] == 1 for step in steps)
 
 
 @pytest.mark.asyncio
@@ -2027,3 +2037,127 @@ async def test_runtime_resume_rejects_non_recoverable_agent():
             checkpoint,
             run_id="run-123",
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_resume_restores_iteration_before_materializing_plan() -> None:
+    from ai_platform.agents.checkpoint import (
+        AgentCheckpointPosition,
+        AgentExecutionCheckpoint,
+    )
+    from ai_platform.agents.orchestration import AgentRuntimeState
+    from ai_platform.agents.llm_messages import user_message
+
+    registry = InMemoryAgentRegistry()
+
+    class RecoverableIterationAgent:
+        def __init__(self) -> None:
+            self._definition = AgentDefinition(
+                name="recoverable-iteration-agent",
+                description="Recoverable agent used to test iteration-aware recovery.",
+                system_prompt="You are a recoverable test agent.",
+                model="test-model",
+            )
+            self.last_context: AgentExecutionContext | None = None
+            self.last_checkpoint: AgentExecutionCheckpoint | None = None
+
+        @property
+        def definition(self) -> AgentDefinition:
+            return self._definition
+
+        async def run(self, context: AgentExecutionContext) -> AgentResponse:
+            raise AssertionError("run() must not be called during recovery")
+
+        async def resume(
+            self,
+            context: AgentExecutionContext,
+            checkpoint: AgentExecutionCheckpoint,
+        ) -> AgentResponse:
+            self.last_context = context
+            self.last_checkpoint = checkpoint
+
+            return AgentResponse(
+                agent_name=self.definition.name,
+                output="recovered",
+                session_id=context.session_id,
+            )
+
+    class StaticPlanProvider:
+        def build_plan(
+            self,
+            context: AgentExecutionContext,
+        ) -> OrchestrationPlan:
+            return OrchestrationPlan(
+                steps=(
+                    OrchestrationStep(
+                        step_id="retrieve_evidence",
+                        step_index=0,
+                        name="Retrieve evidence",
+                        status=OrchestrationStepStatus.PENDING,
+                    ),
+                    OrchestrationStep(
+                        step_id="produce_answer",
+                        step_index=1,
+                        name="Produce answer",
+                        status=OrchestrationStepStatus.PENDING,
+                    ),
+                )
+            )
+
+    agent = RecoverableIterationAgent()
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+        plan_provider=StaticPlanProvider(),
+    )
+
+    checkpoint_runtime_state = AgentRuntimeState(iteration=2)
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-iteration-2",
+        agent_name="recoverable-iteration-agent",
+        session_id="session-123",
+        user_id="user-123",
+        messages=(user_message("Continue the execution"),),
+        tool_round=1,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata=checkpoint_runtime_state.to_metadata(),
+    )
+
+    response = await runtime.resume(
+        "recoverable-iteration-agent",
+        AgentRequest(
+            input="Continue the execution",
+            session_id="session-123",
+            user_id="user-123",
+        ),
+        checkpoint,
+        run_id="run-iteration-2",
+    )
+
+    assert response.output == "recovered"
+    assert agent.last_context is not None
+
+    context = agent.last_context
+
+    assert context.runtime_state.iteration == 2
+
+    assert [step.step_id for step in context.orchestration_state.steps] == [
+        "iteration-2:retrieve_evidence",
+        "iteration-2:produce_answer",
+    ]
+
+    assert [step.metadata["logical_step_id"] for step in context.orchestration_state.steps] == [
+        "retrieve_evidence",
+        "produce_answer",
+    ]
+
+    assert all(
+        step.metadata["runtime_iteration"] == 2 for step in context.orchestration_state.steps
+    )
+
+    assert context.orchestration_state._resolve_step_id("iteration-2:retrieve_evidence") == 0
+
+    assert context.orchestration_state._resolve_step_id("retrieve_evidence") == 0

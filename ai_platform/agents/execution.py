@@ -74,6 +74,7 @@ class AgentExecutionContext:
         orchestration_plan: OrchestrationPlan | None = None,
         plan_provider: AgentPlanProvider | None = None,
         decision_provider: AgentRuntimeDecisionProvider | None = None,
+        runtime_state: AgentRuntimeState | None = None,
         agent_run_steps_repository_factory=None,
         lifecycle_state: AgentExecutionLifecycleState | None = None,
     ) -> None:
@@ -94,13 +95,18 @@ class AgentExecutionContext:
         self.execution_budget = request.execution_budget or ExecutionBudget()
         self.execution_budget_state = ExecutionBudgetState()
         self.lifecycle_state = lifecycle_state or AgentExecutionLifecycleState()
+
+        # Runtime state must exist before orchestration state is materialized
+        # because durable orchestration step identity is scoped to the
+        # semantic runtime iteration.
+        self.runtime_state = runtime_state or AgentRuntimeState()
+
         self.orchestration_plan = orchestration_plan
         self.orchestration_state = (
-            orchestration_plan.materialize_state()
+            orchestration_plan.materialize_state(iteration=self.runtime_state.iteration)
             if orchestration_plan is not None
             else OrchestrationState()
         )
-        self.runtime_state = AgentRuntimeState()
 
         if self.run_id is not None:
             if not isinstance(self.run_id, str):
@@ -129,7 +135,9 @@ class AgentExecutionContext:
 
         self.orchestration_plan = plan
         self.orchestration_state = (
-            plan.materialize_state() if plan is not None else OrchestrationState()
+            plan.materialize_state(iteration=self.runtime_state.iteration)
+            if plan is not None
+            else OrchestrationState()
         )
 
     def get_agent_run_steps_repository(self) -> AgentRunStepsRepository | None:

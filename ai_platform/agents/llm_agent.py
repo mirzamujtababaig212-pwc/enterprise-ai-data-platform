@@ -549,6 +549,7 @@ class LLMAgent:
         lifecycle state so recovery can resume the correct orchestration step.
         """
         metadata = dict(context.metadata)
+        metadata.update(context.runtime_state.to_metadata())
 
         if context.orchestration_plan is None:
             return metadata

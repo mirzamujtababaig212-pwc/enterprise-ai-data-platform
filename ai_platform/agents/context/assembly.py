@@ -11,6 +11,7 @@ from ai_platform.agents.llm_messages import AgentMessage, AgentMessageRole
 from ai_platform.agents.models import AgentRequest
 from ai_platform.agents.plan_provider import AgentPlanProvider
 from ai_platform.agents.decision_provider import AgentRuntimeDecisionProvider
+from ai_platform.agents.orchestration import AgentRuntimeState
 from ai_platform.agents.policy import OutputGovernanceDecision
 from ai_platform.agents.tool_context import AgentToolContext
 from memory.context.builder import MemoryContext
@@ -61,6 +62,7 @@ class AgentContextAssembly:
         lifecycle_state: AgentExecutionLifecycleState | None = None,
         plan_provider: AgentPlanProvider | None = None,
         decision_provider: AgentRuntimeDecisionProvider | None = None,
+        runtime_state: AgentRuntimeState | None = None,
     ) -> AgentExecutionContext:
         """Build an AgentExecutionContext without changing its semantics."""
 
@@ -79,6 +81,7 @@ class AgentContextAssembly:
             lifecycle_state=lifecycle_state,
             plan_provider=plan_provider,
             decision_provider=decision_provider,
+            runtime_state=runtime_state,
         )
 
     @staticmethod

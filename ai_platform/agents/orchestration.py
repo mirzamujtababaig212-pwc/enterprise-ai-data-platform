@@ -383,23 +383,51 @@ class OrchestrationPlan:
 
             step_ids.add(step.step_id)
 
-    def materialize_state(self) -> OrchestrationState:
+    def materialize_state(
+        self,
+        *,
+        iteration: int | None = None,
+    ) -> OrchestrationState:
         """
         Create a fresh mutable execution state from this immutable plan.
-        """
-        steps = tuple(
-            OrchestrationStep(
-                step_id=step.step_id,
-                step_index=step.step_index,
-                name=step.name,
-                status=OrchestrationStepStatus.PENDING,
-                completion_policy=step.completion_policy,
-                metadata=step.metadata,
-            )
-            for step in self.steps
-        )
 
-        return OrchestrationState(steps=list(steps))
+        When a runtime iteration is supplied, durable step identity is scoped
+        to that semantic iteration while the original logical step identity is
+        preserved in metadata.
+
+        ``iteration=None`` intentionally preserves the legacy logical step IDs
+        for callers that materialize plans outside a durable runtime context.
+        """
+        if iteration is not None:
+            if not isinstance(iteration, int) or isinstance(iteration, bool):
+                raise TypeError("Orchestration iteration must be an integer.")
+            if iteration <= 0:
+                raise ValueError("Orchestration iteration must be greater than zero.")
+
+        steps = []
+        for step in self.steps:
+            logical_step_id = step.step_id
+            metadata = dict(step.metadata)
+
+            if iteration is None:
+                durable_step_id = logical_step_id
+            else:
+                durable_step_id = f"iteration-{iteration}:{logical_step_id}"
+                metadata["logical_step_id"] = logical_step_id
+                metadata["runtime_iteration"] = iteration
+
+            steps.append(
+                OrchestrationStep(
+                    step_id=durable_step_id,
+                    step_index=step.step_index,
+                    name=step.name,
+                    status=OrchestrationStepStatus.PENDING,
+                    completion_policy=step.completion_policy,
+                    metadata=metadata,
+                )
+            )
+
+        return OrchestrationState(steps=steps)
 
 
 @dataclass(frozen=True)
@@ -714,12 +742,19 @@ class OrchestrationState:
         return self.start_step(next_index)
 
     def _resolve_step_id(self, step_id: str) -> int:
-        """Resolve a logical step ID to its state index."""
+        """
+        Resolve either a durable step ID or its logical step ID.
+
+        Durable runtime IDs are scoped to a semantic iteration, for example
+        ``iteration-2:retrieve_evidence``. Checkpoint and compatibility
+        callers may still provide the logical ID, so both representations
+        must resolve to the same materialized state entry.
+        """
         if not isinstance(step_id, str) or not step_id.strip():
             raise ValueError("Orchestration step_id must not be empty.")
 
         for index, step in enumerate(self.steps):
-            if step.step_id == step_id:
+            if step.step_id == step_id or step.metadata.get("logical_step_id") == step_id:
                 return index
 
         raise ValueError(f"Unknown orchestration step {step_id!r}")

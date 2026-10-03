@@ -29,6 +29,7 @@ from ai_platform.agents.lifecycle import (
     AgentExecutionLifecycleState,
 )
 from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
+from ai_platform.agents.orchestration import AgentRuntimeState
 from ai_platform.agents.policy import TenantPolicyEngine
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
@@ -214,6 +215,8 @@ class AgentRuntime:
 
             output_evaluator = evaluate_output
 
+        runtime_state = AgentRuntimeState.from_metadata(checkpoint.metadata)
+
         context = AgentContextAssembly.assemble(
             request,
             output_evaluator=output_evaluator,
@@ -228,6 +231,7 @@ class AgentRuntime:
             agent_run_steps_repository_factory=(self._agent_run_steps_repository_factory),
             plan_provider=self._plan_provider,
             decision_provider=self._decision_provider,
+            runtime_state=runtime_state,
         )
 
         try:
