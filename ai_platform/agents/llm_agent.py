@@ -424,7 +424,123 @@ class LLMAgent:
                                 error=(tool_result.error or "Tool execution outcome is ambiguous."),
                                 failure_category=failure_category,
                             )
-                        elif runtime_failure is not RuntimeFailureCategory.IN_PROGRESS:
+                        elif runtime_failure is RuntimeFailureCategory.IN_PROGRESS:
+                            pass
+                        elif runtime_failure is RuntimeFailureCategory.RETRYABLE:
+                            if len(tool_calls) != 1:
+                                await self._persist_orchestration_step_failed(
+                                    context,
+                                    step,
+                                    error=(tool_result.error or "Tool execution failed."),
+                                    failure_category=failure_category,
+                                )
+                                continue
+
+                            repository = context.get_agent_run_steps_repository()
+
+                            if repository is None:
+                                raise RuntimeError(
+                                    "agent run steps repository is required for durable tool retry"
+                                )
+
+                            try:
+                                durable_step = repository.get(
+                                    context.run_id,
+                                    step.step_id,
+                                )
+
+                                if durable_step is None:
+                                    raise RuntimeError(
+                                        "cannot retry missing durable orchestration step: "
+                                        f"{context.run_id}/{step.step_id}"
+                                    )
+
+                                decision = self._retry_policy.evaluate(
+                                    category=failure_category,
+                                    disposition=FailureDisposition.RETRYABLE,
+                                    attempt=durable_step.attempt,
+                                )
+
+                                now = datetime.now(UTC)
+
+                                failed_step = repository.transition(
+                                    context.run_id,
+                                    step.step_id,
+                                    status=AgentRunStepStatus.FAILED,
+                                    updated_at=now,
+                                    completed_at=now,
+                                    error=(tool_result.error or "Tool execution failed."),
+                                    failure_category=failure_category,
+                                    metadata={
+                                        **durable_step.metadata,
+                                        "retry": {
+                                            "category": failure_category,
+                                            "disposition": FailureDisposition.RETRYABLE.value,
+                                            "attempt": durable_step.attempt,
+                                            "max_attempts": decision.max_attempts,
+                                            "retry_allowed": decision.allowed,
+                                            "retry_reason": decision.reason,
+                                            "backoff_seconds": decision.delay_seconds,
+                                        },
+                                    },
+                                    commit=not decision.allowed,
+                                )
+
+                                if failed_step is None:
+                                    raise RuntimeError(
+                                        "agent run step disappeared while persisting "
+                                        f"tool failure: {context.run_id}/{step.step_id}"
+                                    )
+
+                                await self._emit_orchestration_step_failed(
+                                    context,
+                                    step.step_index,
+                                    attempt=durable_step.attempt,
+                                    error_type="ToolExecutionError",
+                                    metadata={
+                                        "retry": dict(failed_step.metadata.get("retry", {})),
+                                    },
+                                )
+
+                                if not decision.allowed:
+                                    continue
+
+                                retried_step = repository.retry(
+                                    context.run_id,
+                                    step.step_id,
+                                    updated_at=datetime.now(UTC),
+                                    started_at=datetime.now(UTC),
+                                    commit=True,
+                                )
+
+                                if retried_step is None:
+                                    raise RuntimeError(
+                                        "agent run step disappeared while starting "
+                                        f"tool retry: {context.run_id}/{step.step_id}"
+                                    )
+
+                                durable_step = retried_step
+
+                                await self._emit_orchestration_step_started(
+                                    context,
+                                    step.step_index,
+                                    attempt=durable_step.attempt,
+                                    metadata=dict(durable_step.metadata),
+                                )
+                            finally:
+                                repository.close()
+
+                            if decision.delay_seconds > 0.0:
+                                await asyncio.sleep(decision.delay_seconds)
+
+                            await self._execute_tool_calls_and_append_results(
+                                messages,
+                                context,
+                                (tool_call,),
+                                tool_round=tool_round,
+                            )
+                            return
+                        else:
                             await self._persist_orchestration_step_failed(
                                 context,
                                 step,

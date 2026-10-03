@@ -4128,7 +4128,8 @@ async def test_llm_agent_persists_failed_durable_tool_step() -> None:
     with pytest.raises(Exception):
         await agent.run(context)
 
-    step = repository.get(run_id, "iteration-1:execute_tool")
+    step_id = context.orchestration_state.steps[0].step_id
+    step = repository.get(run_id, step_id)
 
     assert step is not None
     assert step.status is AgentRunStepStatus.FAILED
@@ -4239,6 +4240,162 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_durable_retries_after_tool_local_retries_are_exhausted() -> None:
+    class DurableRetryTool:
+        def __init__(self) -> None:
+            self._definition = ToolDefinition(
+                name="durable_retry_tool",
+                description="A tool that fails twice before succeeding.",
+                execution_policy=ToolExecutionPolicy(
+                    max_retries=1,
+                    retryable_failure_categories=frozenset(
+                        {ToolExecutionFailureCategory.EXECUTION_ERROR}
+                    ),
+                ),
+            )
+            self.execution_count = 0
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments):
+            self.execution_count += 1
+
+            if self.execution_count <= 2:
+                raise RuntimeError(f"simulated retry failure {self.execution_count}")
+
+            return "tool recovered"
+
+    definition = AgentDefinition(
+        name="durable-tool-retry-agent",
+        description="Test durable retry after tool-local retries.",
+        system_prompt="You are a durable retry test agent.",
+        model="gpt-test",
+        tool_names=("durable_retry_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(
+        tool_name="durable_retry_tool",
+    )
+    tool_registry = InMemoryToolRegistry()
+    tool = DurableRetryTool()
+    await tool_registry.register(tool)
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute durable retry tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "durable_retry_tool"},
+            ),
+            OrchestrationStep(
+                step_id="final_response",
+                step_index=1,
+                name="Generate final response",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    repository = InMemoryAgentRunStepsRepository()
+    observer = FakeAgentExecutionObserver()
+    run_id = "run-durable-tool-retry"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the durable retry tool.",
+            session_id="session-durable-tool-retry",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+        retry_policy=RetryPolicy(
+            max_attempts=2,
+            retryable_categories={"execution_error"},
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    response = await agent.run(context)
+
+    assert response.output
+    assert tool.execution_count == 3
+
+    step_id = context.orchestration_state.steps[0].step_id
+    step = repository.get(run_id, step_id)
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.COMPLETED
+    assert step.attempt == 2
+    assert step.failure_category is None
+
+    retry_metadata = step.metadata["retry"]
+
+    assert retry_metadata["category"] == "execution_error"
+    assert retry_metadata["attempt"] == 1
+    assert retry_metadata["max_attempts"] == 2
+    assert retry_metadata["retry_allowed"] is True
+    assert retry_metadata["backoff_seconds"] == 0.0
+
+    tool_step_id = context.orchestration_state.steps[0].step_id
+
+    orchestration_events = [
+        event
+        for event in observer.events
+        if event.step_id == tool_step_id
+        and event.event_type
+        in {
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        }
+    ]
+
+    assert [(event.event_type, event.attempt) for event in orchestration_events] == [
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_FAILED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 2),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED, 2),
+    ]
+
+    failed_event = orchestration_events[1]
+
+    assert failed_event.metadata == {
+        "retry": {
+            "category": "execution_error",
+            "disposition": "retryable",
+            "attempt": 1,
+            "max_attempts": 2,
+            "retry_allowed": True,
+            "retry_reason": "Category 'execution_error' is retryable on attempt 1/2",
+            "backoff_seconds": 0.0,
+        },
+        "error_type": "ToolExecutionError",
+    }
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_classifies_timeout_using_execution_policy() -> None:
     class TimeoutTool:
         def __init__(self) -> None:
@@ -4325,7 +4482,7 @@ async def test_llm_agent_classifies_timeout_using_execution_policy() -> None:
         with pytest.raises(Exception):
             await agent.run(context)
 
-    classifier.assert_called_once_with(
+    classifier.assert_any_call(
         ToolExecutionFailureCategory.TIMEOUT,
         retryable_failure_categories=frozenset({ToolExecutionFailureCategory.TIMEOUT}),
     )
