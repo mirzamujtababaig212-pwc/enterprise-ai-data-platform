@@ -33,7 +33,7 @@ resource "aws_iam_role_policy" "glue_data_access" {
 
     Statement = [
       {
-        Sid    = "S3BucketRead"
+        Sid    = "S3BucketAccess"
         Effect = "Allow"
         Action = [
           "s3:ListBucket"
@@ -41,12 +41,24 @@ resource "aws_iam_role_policy" "glue_data_access" {
         Resource = var.s3_bucket_arn
       },
       {
-        Sid    = "S3ObjectRead"
+        Sid    = "S3ObjectAccess"
         Effect = "Allow"
         Action = [
-          "s3:GetObject"
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
         ]
         Resource = "${var.s3_bucket_arn}/*"
+      },
+      {
+        Sid    = "GlueCatalogTableAccess"
+        Effect = "Allow"
+        Action = [
+          "glue:GetTable",
+          "glue:CreateTable",
+          "glue:UpdateTable"
+        ]
+        Resource = "*"
       }
     ]
   })
