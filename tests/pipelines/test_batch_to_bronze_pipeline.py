@@ -9,6 +9,7 @@ from spark.schemas.bronze_schema import bronze_schema
 
 def test_batch_to_bronze_uses_canonical_raw_csv_reader():
     spark = Mock()
+    glue_synchronizer = Mock()
 
     with (
         patch("spark.batch.ingest.batch_to_bronze.CSVReader") as mock_reader,
@@ -16,8 +17,11 @@ def test_batch_to_bronze_uses_canonical_raw_csv_reader():
         patch("spark.batch.ingest.batch_to_bronze.CompositeValidator") as mock_validator,
         patch("spark.batch.ingest.batch_to_bronze.DuplicateValidator"),
         patch("spark.batch.ingest.batch_to_bronze.BusinessRuleValidator"),
+        patch("spark.batch.ingest.batch_to_bronze.build_aws_glue_synchronizer") as mock_glue,
         patch("spark.batch.ingest.batch_to_bronze.DeltaWriter") as mock_writer,
     ):
+        mock_glue.return_value = glue_synchronizer
+
         pipeline = BatchToBronzePipeline(spark)
 
     mock_reader.assert_called_once_with(
@@ -26,10 +30,15 @@ def test_batch_to_bronze_uses_canonical_raw_csv_reader():
     )
     mock_transformer.assert_called_once_with()
     mock_validator.assert_called_once()
+    mock_glue.assert_called_once_with()
+
     mock_writer.assert_called_once_with(
         table=Settings.storage.BRONZE_TABLE,
         path=Settings.storage.BRONZE_PATH,
         mode="append",
+        glue_synchronizer=glue_synchronizer,
+        glue_database_name="enterprise_ai_platform",
+        glue_table_name="vehicle_events",
     )
 
     assert pipeline.spark is spark
