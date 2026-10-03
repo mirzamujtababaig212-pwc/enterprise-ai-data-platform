@@ -94,7 +94,11 @@ async def test_rag_search_returns_structured_results() -> None:
             "score": 0.95,
             "retrieval_score": 0.95,
             "reranker_score": None,
+            "retrieval_rank": 1,
+            "retrieval_method": None,
             "metadata": {"source": "test"},
+            "source_ref": None,
+            "locator": None,
         },
         {
             "chunk_id": "chunk-2",
@@ -103,7 +107,11 @@ async def test_rag_search_returns_structured_results() -> None:
             "score": 0.85,
             "retrieval_score": 0.85,
             "reranker_score": None,
+            "retrieval_rank": 2,
+            "retrieval_method": None,
             "metadata": {"source": "test"},
+            "source_ref": None,
+            "locator": None,
         },
     ]
 

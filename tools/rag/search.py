@@ -153,9 +153,25 @@ class RAGSearchTool:
                         else result.score
                     ),
                     "reranker_score": result.reranker_score,
+                    "retrieval_rank": index,
+                    "retrieval_method": (
+                        result.chunk.metadata.get("retrieval_method")
+                        if isinstance(result.chunk.metadata.get("retrieval_method"), str)
+                        else None
+                    ),
                     "metadata": result.chunk.metadata,
+                    "source_ref": (
+                        dict(result.chunk.metadata["source_ref"])
+                        if isinstance(result.chunk.metadata.get("source_ref"), dict)
+                        else None
+                    ),
+                    "locator": (
+                        dict(result.chunk.metadata["locator"])
+                        if isinstance(result.chunk.metadata.get("locator"), dict)
+                        else None
+                    ),
                 }
-                for result in results
+                for index, result in enumerate(results, start=1)
             ],
             "retrieved_count": len(results),
         }

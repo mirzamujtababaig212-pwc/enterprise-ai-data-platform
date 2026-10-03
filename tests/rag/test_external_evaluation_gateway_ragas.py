@@ -217,6 +217,7 @@ async def test_rag_generation_workflow_uses_gateway_backed_ragas_faithfulness(
     from rag.evaluation.external.ragas.adapter import RagasFaithfulnessAdapter
     from rag.evaluation.external.ragas.gateway_llm import GatewayRagasLLM
     from rag.evaluation.external.workflow import RAGGenerationEvaluationWorkflow
+    from rag.evaluation.lineage import RetrievalEvaluationArtifact
     from rag.evaluation.models import RetrievalEvaluationCase
 
     gateway = FaithfulnessGateway()
@@ -242,6 +243,16 @@ async def test_rag_generation_workflow_uses_gateway_backed_ragas_faithfulness(
     monkeypatch.setattr(
         "rag.evaluation.external.workflow.RAGQueryService",
         MagicMock(return_value=rag_query_service),
+    )
+
+    monkeypatch.setattr(
+        "rag.retrieval.factory.RAGRetrieverFactory.build_retrieval_artifact",
+        MagicMock(
+            return_value=RetrievalEvaluationArtifact(
+                retriever_type="TestRetriever",
+                vector_store_type="TestVectorStore",
+            )
+        ),
     )
 
     workflow = RAGGenerationEvaluationWorkflow(

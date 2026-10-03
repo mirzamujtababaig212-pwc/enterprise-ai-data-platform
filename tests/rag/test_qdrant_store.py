@@ -75,6 +75,61 @@ async def test_upsert_and_search_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upsert_and_search_round_trip_preserves_provenance() -> None:
+    client = AsyncQdrantClient(location=":memory:")
+
+    try:
+        store = QdrantVectorStore(
+            client=client,
+            collection_name="test_provenance",
+        )
+
+        source_ref = {
+            "platform": "snowflake",
+            "object_type": "table",
+            "object_name": "ANALYTICS.CUSTOMERS",
+            "namespace": "ANALYTICS",
+            "environment": "prod",
+        }
+        locator = {
+            "type": "document_section",
+            "value": "customer_overview",
+        }
+
+        chunk = DocumentChunk(
+            id="provenance-chunk-1",
+            document_id="provenance-document-1",
+            content="Customer data is stored in the analytics platform.",
+            metadata={
+                "source": "test",
+                "source_ref": source_ref,
+                "locator": locator,
+            },
+            chunk_index=0,
+        )
+
+        await store.upsert(
+            [
+                EmbeddedChunk(
+                    chunk=chunk,
+                    embedding=(1.0, 0.0, 0.0),
+                )
+            ]
+        )
+
+        results = await store.search(
+            embedding=(1.0, 0.0, 0.0),
+            top_k=1,
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.metadata["source_ref"] == source_ref
+        assert results[0].chunk.metadata["locator"] == locator
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_upsert_is_idempotent_for_same_chunk_id() -> None:
     client = AsyncQdrantClient(location=":memory:")
 

@@ -70,6 +70,10 @@ def _canonical_rag_source(source: RagEvidenceSource) -> dict[str, Any]:
         "document_id": source.document_id,
         "retrieval_score": source.retrieval_score,
         "reranker_score": source.reranker_score,
+        "retrieval_rank": source.retrieval_rank,
+        "retrieval_method": source.retrieval_method,
+        "source_ref": source.source_ref,
+        "locator": source.locator,
     }
 
 
@@ -354,9 +358,10 @@ def _extract_context_diagnostics(
 class RagEvidenceSource:
     """Transient RAG source evidence used by evaluation.
 
-    Raw source content remains in-memory only. Identity and retrieval metadata
-    are retained so downstream evaluation can attribute answer claims to the
-    exact retrieved source without expanding the persisted evaluation schema.
+    Raw source content remains in-memory only. Identity, retrieval metadata,
+    and enterprise source provenance are retained so downstream evaluation
+    can attribute answer claims to the exact retrieved source without
+    expanding the persisted evaluation schema.
     """
 
     source_index: int
@@ -365,37 +370,68 @@ class RagEvidenceSource:
     document_id: str | None = None
     retrieval_score: float | None = None
     reranker_score: float | None = None
+    retrieval_rank: int | None = None
+    retrieval_method: str | None = None
+    source_ref: dict[str, Any] | None = None
+    locator: dict[str, Any] | None = None
+
+    @property
+    def evidence_id(self) -> str | None:
+        if self.chunk_id is None:
+            return None
+        return f"evidence:{self.chunk_id}"
 
 
 def _extract_rag_source(
-    result: dict[str, Any],
+    payload: dict[str, Any],
+    *,
     source_index: int,
 ) -> RagEvidenceSource | None:
-    content = result.get("content")
+    content = payload.get("content")
     if not isinstance(content, str) or not content.strip():
         return None
 
-    chunk_id = result.get("chunk_id")
-    if not isinstance(chunk_id, str) or not chunk_id:
+    chunk_id = payload.get("chunk_id")
+    if not isinstance(chunk_id, str):
         chunk_id = None
 
-    document_id = result.get("document_id")
-    if not isinstance(document_id, str) or not document_id:
+    document_id = payload.get("document_id")
+    if not isinstance(document_id, str):
         document_id = None
 
-    retrieval_score = result.get("retrieval_score")
-    if not isinstance(retrieval_score, (int, float)) or isinstance(retrieval_score, bool):
-        retrieval_score = result.get("score")
+    retrieval_score = payload.get("retrieval_score")
+    if retrieval_score is None:
+        retrieval_score = payload.get("score")
     if not isinstance(retrieval_score, (int, float)) or isinstance(retrieval_score, bool):
         retrieval_score = None
     else:
         retrieval_score = float(retrieval_score)
 
-    reranker_score = result.get("reranker_score")
+    reranker_score = payload.get("reranker_score")
     if not isinstance(reranker_score, (int, float)) or isinstance(reranker_score, bool):
         reranker_score = None
     else:
         reranker_score = float(reranker_score)
+
+    retrieval_rank = payload.get("retrieval_rank")
+    if not isinstance(retrieval_rank, int):
+        retrieval_rank = source_index + 1
+
+    retrieval_method = payload.get("retrieval_method")
+    if not isinstance(retrieval_method, str):
+        retrieval_method = None
+
+    source_ref = payload.get("source_ref")
+    if not isinstance(source_ref, dict):
+        source_ref = None
+    else:
+        source_ref = dict(source_ref)
+
+    locator = payload.get("locator")
+    if not isinstance(locator, dict):
+        locator = None
+    else:
+        locator = dict(locator)
 
     return RagEvidenceSource(
         source_index=source_index,
@@ -404,6 +440,10 @@ def _extract_rag_source(
         document_id=document_id,
         retrieval_score=retrieval_score,
         reranker_score=reranker_score,
+        retrieval_rank=retrieval_rank,
+        retrieval_method=retrieval_method,
+        source_ref=source_ref,
+        locator=locator,
     )
 
 

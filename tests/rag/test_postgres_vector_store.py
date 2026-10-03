@@ -111,6 +111,66 @@ def _ensure_document(engine: object, document_id: str) -> None:
         session.close()
 
 
+def test_postgresql_vector_store_round_trip_preserves_provenance() -> None:
+    store, engine = _postgres_store()
+
+    if store is None:
+        pytest.skip("Set RUN_POSTGRES_INTEGRATION=1 to run the PostgreSQL integration test")
+
+    document_id = "postgres-provenance-round-trip"
+
+    source_ref = {
+        "platform": "snowflake",
+        "object_type": "table",
+        "object_name": "ANALYTICS.CUSTOMERS",
+        "namespace": "ANALYTICS",
+        "environment": "prod",
+    }
+    locator = {
+        "type": "document_section",
+        "value": "customer_overview",
+    }
+
+    chunks = [
+        _embedded_chunk(
+            chunk_id=f"{document_id}:chunk:0",
+            document_id=document_id,
+            content="Customer data is stored in the analytics platform.",
+            embedding=(1.0, 0.0, 0.0, 0.0),
+            metadata={
+                "source": "test",
+                "source_ref": source_ref,
+                "locator": locator,
+            },
+            chunk_index=0,
+        )
+    ]
+
+    try:
+        assert inspect(engine).has_table("rag_chunks")
+        assert inspect(engine).has_table("rag_documents")
+
+        _ensure_document(engine, document_id)
+
+        import asyncio
+
+        asyncio.run(store.upsert(chunks))
+
+        results = asyncio.run(
+            store.search(
+                embedding=(1.0, 0.0, 0.0, 0.0),
+                top_k=1,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk.metadata["source_ref"] == source_ref
+        assert results[0].chunk.metadata["locator"] == locator
+    finally:
+        _cleanup(engine, document_id)
+        engine.dispose()
+
+
 def test_postgresql_vector_store_upsert_search_and_delete() -> None:
     store, engine = _postgres_store()
 

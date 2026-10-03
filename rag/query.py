@@ -33,6 +33,9 @@ class RAGSource:
     retrieval_rank: int
     content: str
     metadata: dict[str, Any]
+    retrieval_score: float | None = None
+    reranker_score: float | None = None
+    retrieval_method: str | None = None
     source_ref: dict[str, Any] | None = None
     locator: dict[str, Any] | None = None
 
@@ -280,6 +283,10 @@ class RAGQueryService:
         if not isinstance(locator, dict):
             locator = None
 
+        retrieval_method = metadata.get("retrieval_method")
+        if not isinstance(retrieval_method, str) or not retrieval_method.strip():
+            retrieval_method = None
+
         return RAGSource(
             evidence_id=f"evidence:{result.chunk.id}",
             chunk_id=result.chunk.id,
@@ -288,6 +295,9 @@ class RAGQueryService:
             retrieval_rank=retrieval_rank,
             content=result.chunk.content,
             metadata=metadata,
+            retrieval_score=result.retrieval_score,
+            reranker_score=result.reranker_score,
+            retrieval_method=retrieval_method,
             source_ref=dict(source_ref) if source_ref is not None else None,
             locator=dict(locator) if locator is not None else None,
         )
