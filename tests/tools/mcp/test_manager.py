@@ -873,6 +873,45 @@ async def test_check_all_health_checks_every_registered_server():
 
 
 @pytest.mark.asyncio
+async def test_check_health_does_not_disable_discovered_tools():
+    registry = InMemoryToolRegistry()
+    manager = MCPServerManager(registry)
+
+    await manager.register_server(make_stdio_config("server-a"))
+
+    client = await manager.get_client("server-a")
+    client.connect = AsyncMock()
+    client.send_ping = AsyncMock(
+        side_effect=RuntimeError("MCP server unavailable"),
+    )
+    client.list_tools = AsyncMock(
+        return_value=[
+            make_mcp_tool(name="search"),
+        ]
+    )
+
+    await manager.connect_and_discover("server-a")
+
+    before = await registry.list_tools()
+
+    assert [definition.name for definition in before] == ["search"]
+    assert before[0].enabled is True
+
+    first = await manager.check_health("server-a")
+    second = await manager.check_health("server-a")
+
+    assert first.status.value == "degraded"
+    assert second.status.value == "unhealthy"
+
+    after = await registry.list_tools()
+
+    assert [definition.name for definition in after] == ["search"]
+    assert after[0].enabled is True
+
+    client.list_tools.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_recover_server_reconnects_verifies_and_discovers():
     registry = InMemoryToolRegistry()
     manager = MCPServerManager(registry)
