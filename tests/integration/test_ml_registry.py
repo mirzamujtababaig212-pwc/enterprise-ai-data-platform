@@ -5,6 +5,7 @@ import pytest
 import os
 from ml.registry import ModelRegistryManager
 from unittest.mock import MagicMock
+from mlflow.exceptions import RestException
 
 MODEL_NAME = "VehicleRiskModel"
 
@@ -132,19 +133,6 @@ def test_exactly_one_champion(
     assert str(active_champion.version) == str(champions[0].version)
 
 
-def test_candidate_exists(
-    registry: ModelRegistryManager,
-) -> None:
-
-    candidate = registry.get_candidate(MODEL_NAME)
-
-    assert candidate.name == MODEL_NAME
-
-    assert candidate.version is not None
-
-    assert candidate.tags.get("validation_status") == "PASSED"
-
-
 def test_champion_model_uri_loads() -> None:
 
     mlflow.set_tracking_uri(
@@ -237,6 +225,9 @@ def test_customer_churn_model_registration_and_promotion() -> None:
     assert str(champion.version) == registered.version
     assert champion.tags.get("validation_status") == "PASSED"
     assert champion.tags.get("deployment_status") == "CHAMPION"
+
+    with pytest.raises(RestException, match="candidate"):
+        registry.get_candidate(CUSTOMER_CHURN_MODEL_NAME)
 
 
 def test_promotion_rejected_when_model_version_lineage_is_incomplete(

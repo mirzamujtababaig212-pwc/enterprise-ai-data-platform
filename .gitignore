@@ -238,3 +238,7 @@ backups/
 *.bk
 *.bk.*
 *.sql.bak
+
+# Local MLflow development server state
+mlflow.db
+mlartifacts/

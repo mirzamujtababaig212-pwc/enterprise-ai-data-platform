@@ -6,6 +6,7 @@ from typing import Any
 import os
 import mlflow
 from mlflow import MlflowClient
+from mlflow.exceptions import RestException
 from ml.platform import ModelRegistry
 from ml.evaluation import get_evaluation_policy_for_model
 from ml.registry.lineage import ModelVersionLineage
@@ -422,11 +423,22 @@ class ModelRegistryManager(ModelRegistry[RegisteredModelResult]):
             version=str(version),
         )
 
-        # Candidate and champion may temporarily refer
-        # to the same version. This is intentional.
-        #
-        # Candidate means "latest evaluated candidate".
-        # Champion means "currently deployed logical version".
+        # A promoted version leaves the candidate lifecycle state.
+        # Remove the candidate alias only when it points to this
+        # promoted version, preserving a newer candidate if one exists.
+        try:
+            candidate = self.client.get_model_version_by_alias(
+                name=model_name,
+                alias="candidate",
+            )
+        except RestException:
+            candidate = None
+
+        if candidate is not None and str(candidate.version) == str(version):
+            self.client.delete_registered_model_alias(
+                name=model_name,
+                alias="candidate",
+            )
 
     def rollback_to_version(
         self,
