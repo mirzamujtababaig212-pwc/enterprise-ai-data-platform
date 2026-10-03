@@ -85,6 +85,12 @@ def test_production_control_plane_persists_governed_evaluation_lineage() -> None
         "effective_provider": None,
         "model_policy_id": "tenant-a-model-governance",
         "model_policy_version": "v1",
+        "retrieval_artifact": {
+            "retriever_type": "SemanticRetriever",
+            "vector_store_type": "InMemoryVectorStore",
+            "hybrid_configuration": None,
+            "reranker_configuration": None,
+        },
     }
 
     try:
@@ -125,6 +131,17 @@ def test_production_control_plane_persists_governed_evaluation_lineage() -> None
                 "effective_provider": None,
                 "policy_id": "tenant-a-model-governance",
                 "policy_version": "v1",
+            }
+
+            effective_governance = run_record.request_snapshot["effective_governance"]
+
+            assert effective_governance == {
+                "tenant_id": "tenant-a",
+                "policy_id": "tenant-a-model-governance",
+                "policy_version": "v1",
+                "effective_model": "gpt-4.1-mini",
+                "effective_provider": None,
+                "max_tokens_per_run": None,
             }
 
         expected_lineage["evaluated_run_id"] = run_id

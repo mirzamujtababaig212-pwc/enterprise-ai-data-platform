@@ -5,7 +5,10 @@ from typing import Any
 
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.llm_config import AgentLLMConfig
-from ai_platform.agents.policy import ModelGovernanceDecision
+from ai_platform.agents.policy import (
+    EffectiveAgentGovernance,
+    ModelGovernanceDecision,
+)
 from rag.governance import GovernancePolicy
 
 
@@ -103,6 +106,7 @@ class AgentRequest:
     governance_policy: GovernancePolicy | None = None
     model_governance: ModelGovernanceDecision | None = None
     execution_budget: ExecutionBudget | None = None
+    effective_governance: EffectiveAgentGovernance | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)
 

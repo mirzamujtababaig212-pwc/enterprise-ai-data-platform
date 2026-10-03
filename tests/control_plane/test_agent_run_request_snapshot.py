@@ -159,3 +159,60 @@ def test_snapshot_without_model_governance_remains_backward_compatible() -> None
     )
 
     assert recovered.model_governance is None
+
+
+def test_snapshot_round_trip_preserves_effective_agent_governance() -> None:
+    from ai_platform.agents.policy import EffectiveAgentGovernance
+
+    governance = EffectiveAgentGovernance(
+        tenant_id="tenant-acme",
+        policy_id="enterprise-ai-policy",
+        policy_version="v3",
+        effective_model="gpt-4.1-mini",
+        effective_provider="openai",
+        max_tokens_per_run=10_000,
+    )
+
+    request = AgentRequest(
+        input="Run governed analysis.",
+        session_id="session-governance",
+        user_id="user-governance",
+        principal="principal-governance",
+        tenant_id="tenant-acme",
+        effective_governance=governance,
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.effective_governance == {
+        "tenant_id": "tenant-acme",
+        "policy_id": "enterprise-ai-policy",
+        "policy_version": "v3",
+        "effective_model": "gpt-4.1-mini",
+        "effective_provider": "openai",
+        "max_tokens_per_run": 10_000,
+    }
+
+    recovered = snapshot.to_request(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        principal=request.principal,
+    )
+
+    assert recovered.effective_governance == governance
+
+
+def test_snapshot_without_effective_governance_remains_backward_compatible() -> None:
+    snapshot = AgentRunRequestSnapshot(
+        input="historical request",
+        principal="historical-principal",
+        tenant_id="tenant-acme",
+    )
+
+    recovered = snapshot.to_request(
+        session_id="historical-session",
+        user_id="historical-user",
+        principal="historical-principal",
+    )
+
+    assert recovered.effective_governance is None

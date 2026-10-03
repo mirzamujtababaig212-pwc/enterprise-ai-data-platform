@@ -6,7 +6,10 @@ from pydantic import BaseModel, Field
 
 from ai_platform.agents.budget import ExecutionBudget
 from ai_platform.agents.models import AgentRequest
-from ai_platform.agents.policy import ModelGovernanceDecision
+from ai_platform.agents.policy import (
+    EffectiveAgentGovernance,
+    ModelGovernanceDecision,
+)
 from rag.governance.policy import GovernancePolicy
 
 
@@ -26,6 +29,7 @@ class AgentRunRequestSnapshot(BaseModel):
     memory_namespace: str | None = None
     governance_policy: dict[str, Any] | None = None
     model_governance: dict[str, Any] | None = None
+    effective_governance: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     execution_budget: dict[str, int | float | None] | None = None
 
@@ -48,6 +52,11 @@ class AgentRunRequestSnapshot(BaseModel):
             ),
             model_governance=(
                 request.model_governance.to_dict() if request.model_governance is not None else None
+            ),
+            effective_governance=(
+                request.effective_governance.to_dict()
+                if request.effective_governance is not None
+                else None
             ),
             metadata=dict(request.metadata),
             execution_budget=(
@@ -91,6 +100,12 @@ class AgentRunRequestSnapshot(BaseModel):
             else None
         )
 
+        effective_governance = (
+            EffectiveAgentGovernance.from_dict(self.effective_governance)
+            if self.effective_governance is not None
+            else None
+        )
+
         return AgentRequest(
             input=self.input,
             session_id=session_id,
@@ -100,6 +115,7 @@ class AgentRunRequestSnapshot(BaseModel):
             memory_namespace=self.memory_namespace,
             governance_policy=governance_policy,
             model_governance=model_governance,
+            effective_governance=effective_governance,
             metadata=dict(self.metadata),
             execution_budget=execution_budget,
         )

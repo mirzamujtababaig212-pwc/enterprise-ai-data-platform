@@ -434,3 +434,50 @@ def test_tenant_policy_memory_namespace_configuration_is_immutable() -> None:
 
     with pytest.raises(AttributeError):
         policy.allowed_memory_namespaces.add("project-alpha")
+
+
+def test_effective_agent_governance_serializes_and_restores() -> None:
+    from ai_platform.agents.policy import EffectiveAgentGovernance
+
+    governance = EffectiveAgentGovernance(
+        tenant_id="tenant-a",
+        policy_id="policy-a",
+        policy_version="v2",
+        effective_model="gpt-4.1-mini",
+        effective_provider="openai",
+        max_tokens_per_run=5000,
+    )
+
+    restored = EffectiveAgentGovernance.from_dict(governance.to_dict())
+
+    assert restored == governance
+
+
+def test_effective_agent_governance_is_immutable() -> None:
+    from dataclasses import FrozenInstanceError
+
+    from ai_platform.agents.policy import EffectiveAgentGovernance
+
+    governance = EffectiveAgentGovernance(
+        tenant_id="tenant-a",
+        effective_model="gpt-4.1-mini",
+    )
+
+    try:
+        governance.tenant_id = "tenant-b"
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("EffectiveAgentGovernance must be immutable")
+
+
+def test_effective_agent_governance_rejects_negative_token_limit() -> None:
+    import pytest
+
+    from ai_platform.agents.policy import EffectiveAgentGovernance
+
+    with pytest.raises(ValueError, match="max_tokens_per_run"):
+        EffectiveAgentGovernance(
+            tenant_id="tenant-a",
+            max_tokens_per_run=-1,
+        )

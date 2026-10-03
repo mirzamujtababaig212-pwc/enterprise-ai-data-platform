@@ -11,7 +11,11 @@ from ai_platform.agents.exceptions import (
     AgentExecutionOwnershipLostError,
 )
 from ai_platform.agents.models import AgentRequest, AgentResponse
-from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
+from ai_platform.agents.policy import (
+    EffectiveAgentGovernance,
+    TenantPolicy,
+    TenantPolicyEngine,
+)
 from rag.governance import GovernancePolicy
 from rag.evaluation.lineage import RetrievalEvaluationArtifact
 from ai_platform.agents.observability import (
@@ -263,6 +267,38 @@ class AgentRunApplicationService:
 
         return effective_budget, policy
 
+    @staticmethod
+    def _build_effective_governance(
+        *,
+        tenant_id: str | None,
+        model_governance,
+        effective_budget: ExecutionBudget,
+        budget_policy: TenantPolicy | None,
+    ) -> EffectiveAgentGovernance:
+        policy_id = (
+            model_governance.policy_id
+            if model_governance is not None
+            else budget_policy.policy_id if budget_policy is not None else None
+        )
+        policy_version = (
+            model_governance.policy_version
+            if model_governance is not None
+            else budget_policy.policy_version if budget_policy is not None else None
+        )
+
+        return EffectiveAgentGovernance(
+            tenant_id=tenant_id,
+            policy_id=policy_id,
+            policy_version=policy_version,
+            effective_model=(
+                model_governance.effective_model if model_governance is not None else None
+            ),
+            effective_provider=(
+                model_governance.effective_provider if model_governance is not None else None
+            ),
+            max_tokens_per_run=effective_budget.max_tokens_per_run,
+        )
+
     async def _emit(
         self,
         event: AgentExecutionEvent,
@@ -348,11 +384,20 @@ class AgentRunApplicationService:
             tenant_id=request.tenant_id,
             requested_decision=request.model_governance,
         )
+
+        effective_governance = self._build_effective_governance(
+            tenant_id=request.tenant_id,
+            model_governance=effective_model_governance,
+            effective_budget=effective_budget,
+            budget_policy=budget_policy,
+        )
+
         effective_request = replace(
             request,
             execution_budget=effective_budget,
             governance_policy=effective_governance_policy,
             model_governance=effective_model_governance,
+            effective_governance=effective_governance,
         )
 
         await self._authorize_memory_namespace(

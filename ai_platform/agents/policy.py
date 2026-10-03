@@ -73,6 +73,85 @@ class ModelGovernanceDecision:
 
 
 @dataclass(frozen=True)
+class EffectiveAgentGovernance:
+    """Immutable governance configuration pinned to an agent run."""
+
+    tenant_id: str | None = None
+    policy_id: str | None = None
+    policy_version: str | None = None
+    effective_model: str | None = None
+    effective_provider: str | None = None
+    max_tokens_per_run: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.tenant_id is not None and not self.tenant_id.strip():
+            raise ValueError("tenant_id must not be empty when provided")
+
+        for field_name, value in (
+            ("policy_id", self.policy_id),
+            ("policy_version", self.policy_version),
+            ("effective_model", self.effective_model),
+            ("effective_provider", self.effective_provider),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must not be empty when provided")
+
+        if self.max_tokens_per_run is not None and self.max_tokens_per_run < 0:
+            raise ValueError("max_tokens_per_run must be non-negative")
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        """Serialize the effective governance configuration."""
+        return {
+            "tenant_id": self.tenant_id,
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
+            "effective_model": self.effective_model,
+            "effective_provider": self.effective_provider,
+            "max_tokens_per_run": self.max_tokens_per_run,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: dict[str, object],
+    ) -> "EffectiveAgentGovernance":
+        """Restore an effective governance configuration."""
+        if not isinstance(payload, dict):
+            raise TypeError("Effective agent governance payload must be a dictionary.")
+
+        string_fields = (
+            "tenant_id",
+            "policy_id",
+            "policy_version",
+            "effective_model",
+            "effective_provider",
+        )
+
+        values: dict[str, object] = {}
+
+        for field_name in string_fields:
+            value = payload.get(field_name)
+            if value is not None and not isinstance(value, str):
+                raise TypeError(
+                    f"Effective agent governance {field_name} must be a string or None."
+                )
+            values[field_name] = value
+
+        max_tokens_per_run = payload.get("max_tokens_per_run")
+
+        if max_tokens_per_run is not None and (
+            not isinstance(max_tokens_per_run, int) or isinstance(max_tokens_per_run, bool)
+        ):
+            raise TypeError(
+                "Effective agent governance max_tokens_per_run must be an integer or None."
+            )
+
+        values["max_tokens_per_run"] = max_tokens_per_run
+
+        return cls(**values)
+
+
+@dataclass(frozen=True)
 class OutputGovernanceDecision:
     """Immutable output governance decision for an agent response."""
 
