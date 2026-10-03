@@ -1,9 +1,15 @@
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from spark.glue.pipeline_job import _parse_arguments, main
+from spark.glue.pipeline_job import (
+    CONFIG_ROOT,
+    _download_configuration,
+    _parse_arguments,
+    main,
+)
 
 
 def test_parse_arguments_reads_glue_arguments() -> None:
@@ -12,24 +18,62 @@ def test_parse_arguments_reads_glue_arguments() -> None:
         "PIPELINE_NAME": "silver",
         "MODE": "batch",
         "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": "enterprise-ai-platform-dev-123456789012",
+        "RELEASE_VERSION": "abc123",
     }
-
-    fake_awsglue = MagicMock()
-    fake_awsglue_utils = fake_utils
 
     with patch.dict(
         sys.modules,
         {
-            "awsglue": fake_awsglue,
-            "awsglue.utils": fake_awsglue_utils,
+            "awsglue": MagicMock(),
+            "awsglue.utils": fake_utils,
         },
     ):
-        result = _parse_arguments(["script.py", "--PIPELINE_NAME", "silver", "--MODE", "batch"])
+        result = _parse_arguments(
+            [
+                "script.py",
+                "--PIPELINE_NAME",
+                "silver",
+                "--MODE",
+                "batch",
+                "--APP_ENV",
+                "aws",
+                "--ARTIFACT_BUCKET",
+                "enterprise-ai-platform-dev-123456789012",
+                "--RELEASE_VERSION",
+                "abc123",
+            ]
+        )
 
-    assert result == ("silver", "batch", "aws")
+    assert result == (
+        "silver",
+        "batch",
+        "aws",
+        "enterprise-ai-platform-dev-123456789012",
+        "abc123",
+    )
+
     fake_utils.getResolvedOptions.assert_called_once_with(
-        ["script.py", "--PIPELINE_NAME", "silver", "--MODE", "batch"],
-        ["PIPELINE_NAME", "MODE", "APP_ENV"],
+        [
+            "script.py",
+            "--PIPELINE_NAME",
+            "silver",
+            "--MODE",
+            "batch",
+            "--APP_ENV",
+            "aws",
+            "--ARTIFACT_BUCKET",
+            "enterprise-ai-platform-dev-123456789012",
+            "--RELEASE_VERSION",
+            "abc123",
+        ],
+        [
+            "PIPELINE_NAME",
+            "MODE",
+            "APP_ENV",
+            "ARTIFACT_BUCKET",
+            "RELEASE_VERSION",
+        ],
     )
 
 
@@ -39,6 +83,8 @@ def test_parse_arguments_rejects_invalid_mode() -> None:
         "PIPELINE_NAME": "silver",
         "MODE": "invalid",
         "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": "bucket",
+        "RELEASE_VERSION": "abc123",
     }
 
     with patch.dict(
@@ -51,6 +97,54 @@ def test_parse_arguments_rejects_invalid_mode() -> None:
         with pytest.raises(
             ValueError,
             match="Unsupported pipeline mode",
+        ):
+            _parse_arguments(["script.py"])
+
+
+def test_parse_arguments_rejects_empty_artifact_bucket() -> None:
+    fake_utils = MagicMock()
+    fake_utils.getResolvedOptions.return_value = {
+        "PIPELINE_NAME": "silver",
+        "MODE": "batch",
+        "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": " ",
+        "RELEASE_VERSION": "abc123",
+    }
+
+    with patch.dict(
+        sys.modules,
+        {
+            "awsglue": MagicMock(),
+            "awsglue.utils": fake_utils,
+        },
+    ):
+        with pytest.raises(
+            ValueError,
+            match="ARTIFACT_BUCKET cannot be empty",
+        ):
+            _parse_arguments(["script.py"])
+
+
+def test_parse_arguments_rejects_empty_release_version() -> None:
+    fake_utils = MagicMock()
+    fake_utils.getResolvedOptions.return_value = {
+        "PIPELINE_NAME": "silver",
+        "MODE": "batch",
+        "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": "bucket",
+        "RELEASE_VERSION": " ",
+    }
+
+    with patch.dict(
+        sys.modules,
+        {
+            "awsglue": MagicMock(),
+            "awsglue.utils": fake_utils,
+        },
+    ):
+        with pytest.raises(
+            ValueError,
+            match="RELEASE_VERSION cannot be empty",
         ):
             _parse_arguments(["script.py"])
 
@@ -70,7 +164,59 @@ def test_parse_arguments_requires_glue_libraries() -> None:
             _parse_arguments(["script.py"])
 
 
-def test_main_sets_environment_before_pipeline_imports(monkeypatch) -> None:
+def test_download_configuration_uses_release_prefix(tmp_path: Path) -> None:
+    fake_s3 = MagicMock()
+    fake_boto3 = MagicMock()
+    fake_boto3.client.return_value = fake_s3
+
+    with patch.dict(
+        sys.modules,
+        {"boto3": fake_boto3},
+    ):
+        _download_configuration(
+            artifact_bucket="enterprise-ai-platform-dev-123456789012",
+            release_version="abc123",
+            destination=tmp_path,
+        )
+
+    fake_boto3.client.assert_called_once_with("s3")
+
+    expected = [
+        (
+            "enterprise-ai-platform-dev-123456789012",
+            "glue/enterprise-ai-platform/abc123/" "config/environments/aws.yaml",
+            str(tmp_path / "config/environments/aws.yaml"),
+        ),
+        (
+            "enterprise-ai-platform-dev-123456789012",
+            "glue/enterprise-ai-platform/abc123/" "config/pipelines/bronze.yaml",
+            str(tmp_path / "config/pipelines/bronze.yaml"),
+        ),
+        (
+            "enterprise-ai-platform-dev-123456789012",
+            "glue/enterprise-ai-platform/abc123/" "config/pipelines/silver.yaml",
+            str(tmp_path / "config/pipelines/silver.yaml"),
+        ),
+        (
+            "enterprise-ai-platform-dev-123456789012",
+            "glue/enterprise-ai-platform/abc123/" "config/pipelines/gold.yaml",
+            str(tmp_path / "config/pipelines/gold.yaml"),
+        ),
+        (
+            "enterprise-ai-platform-dev-123456789012",
+            "glue/enterprise-ai-platform/abc123/" "config/pipelines/silver_streaming.yaml",
+            str(tmp_path / "config/pipelines/silver_streaming.yaml"),
+        ),
+    ]
+
+    assert fake_s3.download_file.call_count == len(expected)
+
+    actual = [call.args for call in fake_s3.download_file.call_args_list]
+
+    assert actual == expected
+
+
+def test_main_sets_environment_after_configuration_bootstrap(monkeypatch) -> None:
     fake_runtime_config = MagicMock()
     fake_runtime_config.return_value = MagicMock()
 
@@ -101,6 +247,8 @@ def test_main_sets_environment_before_pipeline_imports(monkeypatch) -> None:
         "PIPELINE_NAME": "silver",
         "MODE": "batch",
         "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": "bucket",
+        "RELEASE_VERSION": "abc123",
     }
 
     with patch.dict(
@@ -115,10 +263,18 @@ def test_main_sets_environment_before_pipeline_imports(monkeypatch) -> None:
         },
     ):
         monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.delenv("ENTERPRISE_AI_PLATFORM_ROOT", raising=False)
 
-        main(["script.py"])
+        with patch("spark.glue.pipeline_job._download_configuration") as download_configuration:
+            main(["script.py"])
+
+    download_configuration.assert_called_once_with(
+        artifact_bucket="bucket",
+        release_version="abc123",
+    )
 
     assert __import__("os").environ["APP_ENV"] == "aws"
+    assert __import__("os").environ["ENTERPRISE_AI_PLATFORM_ROOT"] == str(CONFIG_ROOT)
 
     fake_runtime_config.assert_called_once_with(runtime="glue")
     fake_execution_runtime.create_spark_session.assert_called_once_with(
