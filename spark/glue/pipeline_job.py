@@ -17,7 +17,7 @@ CONFIG_ROOT = Path("/tmp/enterprise-ai-platform")
 
 def _parse_arguments(
     argv: Sequence[str],
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, str, str, str]:
     try:
         from awsglue.utils import getResolvedOptions
     except ImportError as exc:
@@ -33,6 +33,7 @@ def _parse_arguments(
             "APP_ENV",
             "ARTIFACT_BUCKET",
             "RELEASE_VERSION",
+            "RUN_ID",
         ],
     )
 
@@ -41,6 +42,7 @@ def _parse_arguments(
     app_env = args["APP_ENV"].strip().lower()
     artifact_bucket = args["ARTIFACT_BUCKET"].strip()
     release_version = args["RELEASE_VERSION"].strip()
+    run_id = args["RUN_ID"].strip()
 
     if not pipeline_name:
         raise ValueError("PIPELINE_NAME cannot be empty.")
@@ -57,12 +59,16 @@ def _parse_arguments(
     if not release_version:
         raise ValueError("RELEASE_VERSION cannot be empty.")
 
+    if not run_id:
+        raise ValueError("RUN_ID cannot be empty.")
+
     return (
         pipeline_name,
         mode,
         app_env,
         artifact_bucket,
         release_version,
+        run_id,
     )
 
 
@@ -102,6 +108,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         app_env,
         artifact_bucket,
         release_version,
+        run_id,
     ) = _parse_arguments(argv if argv is not None else sys.argv)
 
     _download_configuration(
@@ -134,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             spark,
             mode=mode,
             glue_synchronizer=glue_synchronizer,
+            run_id=run_id,
         )
     finally:
         spark.stop()

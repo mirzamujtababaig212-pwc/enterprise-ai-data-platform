@@ -398,6 +398,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             "--APP_ENV"         = "aws"
             "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
             "--RELEASE_VERSION" = var.glue_release_version
+            "--RUN_ID.$"        = "States.UUID()"
           }
         }
 
@@ -425,6 +426,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             "--APP_ENV"         = "aws"
             "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
             "--RELEASE_VERSION" = var.glue_release_version
+            "--RUN_ID.$"        = "States.UUID()"
           }
         }
 
@@ -452,6 +454,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             "--APP_ENV"         = "aws"
             "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
             "--RELEASE_VERSION" = var.glue_release_version
+            "--RUN_ID.$"        = "States.UUID()"
           }
         }
 

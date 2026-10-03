@@ -20,6 +20,7 @@ def test_parse_arguments_reads_glue_arguments() -> None:
         "APP_ENV": "aws",
         "ARTIFACT_BUCKET": "enterprise-ai-platform-dev-123456789012",
         "RELEASE_VERSION": "abc123",
+        "RUN_ID": "run-123",
     }
 
     with patch.dict(
@@ -51,6 +52,7 @@ def test_parse_arguments_reads_glue_arguments() -> None:
         "aws",
         "enterprise-ai-platform-dev-123456789012",
         "abc123",
+        "run-123",
     )
 
     fake_utils.getResolvedOptions.assert_called_once_with(
@@ -73,6 +75,7 @@ def test_parse_arguments_reads_glue_arguments() -> None:
             "APP_ENV",
             "ARTIFACT_BUCKET",
             "RELEASE_VERSION",
+            "RUN_ID",
         ],
     )
 
@@ -85,6 +88,7 @@ def test_parse_arguments_rejects_invalid_mode() -> None:
         "APP_ENV": "aws",
         "ARTIFACT_BUCKET": "bucket",
         "RELEASE_VERSION": "abc123",
+        "RUN_ID": "run-123",
     }
 
     with patch.dict(
@@ -109,6 +113,7 @@ def test_parse_arguments_rejects_empty_artifact_bucket() -> None:
         "APP_ENV": "aws",
         "ARTIFACT_BUCKET": " ",
         "RELEASE_VERSION": "abc123",
+        "RUN_ID": "run-123",
     }
 
     with patch.dict(
@@ -133,6 +138,7 @@ def test_parse_arguments_rejects_empty_release_version() -> None:
         "APP_ENV": "aws",
         "ARTIFACT_BUCKET": "bucket",
         "RELEASE_VERSION": " ",
+        "RUN_ID": "run-123",
     }
 
     with patch.dict(
@@ -249,6 +255,7 @@ def test_main_sets_environment_after_configuration_bootstrap(monkeypatch) -> Non
         "APP_ENV": "aws",
         "ARTIFACT_BUCKET": "bucket",
         "RELEASE_VERSION": "abc123",
+        "RUN_ID": "run-123",
     }
 
     with patch.dict(
@@ -287,5 +294,31 @@ def test_main_sets_environment_after_configuration_bootstrap(monkeypatch) -> Non
         spark,
         mode="batch",
         glue_synchronizer=glue_synchronizer,
+        run_id="run-123",
     )
     spark.stop.assert_called_once()
+
+
+def test_parse_arguments_rejects_empty_run_id() -> None:
+    fake_utils = MagicMock()
+    fake_utils.getResolvedOptions.return_value = {
+        "PIPELINE_NAME": "silver",
+        "MODE": "batch",
+        "APP_ENV": "aws",
+        "ARTIFACT_BUCKET": "bucket",
+        "RELEASE_VERSION": "abc123",
+        "RUN_ID": " ",
+    }
+
+    with patch.dict(
+        sys.modules,
+        {
+            "awsglue": MagicMock(),
+            "awsglue.utils": fake_utils,
+        },
+    ):
+        with pytest.raises(
+            ValueError,
+            match="RUN_ID cannot be empty",
+        ):
+            _parse_arguments(["script.py"])

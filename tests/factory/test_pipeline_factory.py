@@ -14,3 +14,13 @@ def test_create_silver_pipeline(spark):
 def test_create_gold_pipeline(spark):
     pipeline = PipelineFactory.get_pipeline("gold", spark)
     assert pipeline.config.pipeline_name == "gold"
+
+
+def test_create_pipeline_forwards_platform_run_id(spark):
+    pipeline = PipelineFactory.get_pipeline(
+        "bronze",
+        spark,
+        run_id="run-123",
+    )
+
+    assert pipeline.run_id == "run-123"

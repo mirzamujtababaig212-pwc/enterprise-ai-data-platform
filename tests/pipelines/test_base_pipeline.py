@@ -13,6 +13,7 @@ def make_pipeline(
     mock_transformer,
     mock_metrics,
     mock_dlq,
+    run_id=None,
 ):
     return DummyPipeline(
         spark=spark,
@@ -23,6 +24,7 @@ def make_pipeline(
         metrics=mock_metrics,
         dlq=mock_dlq,
         config=DummyPipeline.CONFIG,
+        run_id=run_id,
     )
 
 
@@ -419,3 +421,48 @@ def test_run_stream_uses_stream_reader(
     mock_writer.write_stream.assert_called_once()
 
     assert result == "terminated"
+
+
+def test_pipeline_run_id_defaults_to_none(
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
+):
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
+    )
+
+    assert pipeline.run_id is None
+
+
+def test_pipeline_stores_platform_run_id(
+    spark,
+    mock_reader,
+    mock_writer,
+    mock_validator,
+    mock_transformer,
+    mock_metrics,
+    mock_dlq,
+):
+    pipeline = make_pipeline(
+        spark,
+        mock_reader,
+        mock_writer,
+        mock_validator,
+        mock_transformer,
+        mock_metrics,
+        mock_dlq,
+        run_id="run-123",
+    )
+
+    assert pipeline.run_id == "run-123"

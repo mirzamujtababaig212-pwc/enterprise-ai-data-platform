@@ -15,6 +15,7 @@ class PipelineFactory:
         spark,
         *,
         glue_synchronizer=None,
+        run_id=None,
     ):
         config = PipelineLoader.load(name)
         pipeline_name = config["pipeline"]["class"]
@@ -33,4 +34,5 @@ class PipelineFactory:
             metrics=MetricsFactory.create(config),
             dlq=DLQFactory.create(config),
             config=PipelineLoader.load_runtime_config(name),
+            run_id=run_id,
         )

@@ -20,6 +20,7 @@ class BasePipeline(ABC):
         metrics=None,
         dlq=None,
         config: PipelineRuntimeConfig | None = None,
+        run_id=None,
     ):
         self.spark = spark
         self.reader = reader
@@ -28,6 +29,8 @@ class BasePipeline(ABC):
         self.transformer = transformer
         self.metrics = metrics
         self.dlq = dlq
+        self.run_id = run_id
+
         if config is None:
             raise ValueError("PipelineRuntimeConfig is required.")
 
