@@ -334,7 +334,14 @@ class AgentRunApplicationService:
         if existing_run.session_id != request.session_id:
             return False
 
-        return existing_run.request_snapshot == AgentRunRequestSnapshot.from_request(request)
+        existing_snapshot = existing_run.request_snapshot.model_copy(
+            update={"effective_governance": None}
+        )
+        requested_snapshot = AgentRunRequestSnapshot.from_request(request).model_copy(
+            update={"effective_governance": None}
+        )
+
+        return existing_snapshot == requested_snapshot
 
     def _resolve_existing_idempotent_run(
         self,
@@ -479,6 +486,7 @@ class AgentRunApplicationService:
             effective_request=effective_request,
             budget_policy=budget_policy,
             admission_agent_name=agent_name,
+            pinned_governance=request.effective_governance is not None,
         )
 
     async def execute_existing_run(
@@ -536,19 +544,25 @@ class AgentRunApplicationService:
                 f"agent run '{run_id}' request tenant does not match " "its persisted identity."
             )
 
-        effective_budget, budget_policy = self._resolve_effective_budget(
-            tenant_id=request.tenant_id,
-            requested_budget=request.execution_budget or ExecutionBudget(),
-        )
-        effective_governance_policy = self._resolve_effective_governance_policy(
-            tenant_id=request.tenant_id,
-            requested_policy=request.governance_policy,
-        )
-        effective_model_governance = await self._resolve_model_governance(
-            agent_name=agent_name,
-            tenant_id=request.tenant_id,
-            requested_decision=request.model_governance,
-        )
+        if request.effective_governance is not None:
+            effective_budget = request.execution_budget or ExecutionBudget()
+            budget_policy = None
+            effective_governance_policy = request.governance_policy
+            effective_model_governance = request.model_governance
+        else:
+            effective_budget, budget_policy = self._resolve_effective_budget(
+                tenant_id=request.tenant_id,
+                requested_budget=request.execution_budget or ExecutionBudget(),
+            )
+            effective_governance_policy = self._resolve_effective_governance_policy(
+                tenant_id=request.tenant_id,
+                requested_policy=request.governance_policy,
+            )
+            effective_model_governance = await self._resolve_model_governance(
+                agent_name=agent_name,
+                tenant_id=request.tenant_id,
+                requested_decision=request.model_governance,
+            )
 
         effective_request = replace(
             request,
@@ -568,6 +582,7 @@ class AgentRunApplicationService:
             effective_request=effective_request,
             budget_policy=budget_policy,
             admission_agent_name=agent_name,
+            pinned_governance=request.effective_governance is not None,
         )
 
     async def _execute_persisted_run(
@@ -577,19 +592,31 @@ class AgentRunApplicationService:
         effective_request: AgentRequest,
         budget_policy: TenantPolicy | None,
         admission_agent_name: str,
+        pinned_governance: bool = False,
     ) -> AgentRunExecutionResult:
         await self._emit_model_governance_decision(
             run=run,
             decision=effective_request.model_governance,
         )
 
-        if budget_policy is not None:
+        if budget_policy is not None or pinned_governance:
+            policy_id = (
+                budget_policy.policy_id
+                if budget_policy is not None
+                else effective_request.effective_governance.policy_id
+            )
+            policy_version = (
+                budget_policy.policy_version
+                if budget_policy is not None
+                else effective_request.effective_governance.policy_version
+            )
+
             await self._emit_governance_decision(
                 run=run,
                 governance_domain="budget",
                 decision="allow",
-                policy_id=budget_policy.policy_id,
-                policy_version=budget_policy.policy_version,
+                policy_id=policy_id,
+                policy_version=policy_version,
                 details={
                     "max_tokens_per_run": (effective_request.execution_budget.max_tokens_per_run),
                 },

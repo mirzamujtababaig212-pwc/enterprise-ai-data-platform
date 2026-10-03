@@ -13,6 +13,7 @@ from ai_platform.agents.exceptions import (
 )
 from ai_platform.agents.models import AgentDefinition, AgentRequest, AgentResponse
 from ai_platform.agents.policy import (
+    EffectiveAgentGovernance,
     ModelGovernanceDecision,
     TenantPolicy,
     TenantPolicyEngine,
@@ -1059,13 +1060,21 @@ async def test_execute_persists_pending_running_and_completed_lifecycle() -> Non
     runtime.run.assert_awaited_once()
 
     runtime_call = runtime.run.await_args
-    assert runtime_call.args == (
-        "enterprise-analyst",
-        AgentRequest(
-            input="Explain the platform",
-            session_id="session-1",
-            user_id="user-1",
-            execution_budget=ExecutionBudget(),
+    assert runtime_call.args[0] == "enterprise-analyst"
+
+    runtime_request = runtime_call.args[1]
+    assert runtime_request == AgentRequest(
+        input="Explain the platform",
+        session_id="session-1",
+        user_id="user-1",
+        execution_budget=ExecutionBudget(),
+        effective_governance=EffectiveAgentGovernance(
+            tenant_id=None,
+            policy_id=None,
+            policy_version=None,
+            effective_model=None,
+            effective_provider=None,
+            max_tokens_per_run=ExecutionBudget().max_tokens_per_run,
         ),
     )
     assert runtime_call.kwargs["lease_id"] == running.lease_id
@@ -3490,6 +3499,122 @@ async def test_execute_existing_run_raises_when_already_executing() -> None:
         )
 
     repository.claim_pending_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_existing_run_uses_pinned_effective_governance_without_reauthorization() -> (
+    None
+):
+    repository = _repository()
+
+    runtime = Mock()
+    runtime.run = AsyncMock(return_value=_response())
+
+    tenant_policy_engine = TenantPolicyEngine()
+    tenant_policy_engine.register_policy(
+        TenantPolicy(
+            tenant_id="tenant-1",
+            allowed_models=frozenset({"claude-sonnet-4"}),
+            max_tokens_per_run=1_000,
+            policy_id="current-policy",
+            policy_version="v9",
+        )
+    )
+
+    authorize_model = Mock(wraps=tenant_policy_engine.authorize_model)
+    tenant_policy_engine.authorize_model = authorize_model
+
+    get_policy = Mock(wraps=tenant_policy_engine.get_policy)
+    tenant_policy_engine.get_policy = get_policy
+
+    request = AgentRequest(
+        input="Recover the existing run",
+        session_id="session-1",
+        user_id="user-1",
+        principal="principal-1",
+        tenant_id="tenant-1",
+        execution_budget=ExecutionBudget(
+            max_tokens_per_run=20_000,
+        ),
+        model_governance=ModelGovernanceDecision(
+            effective_model="gpt-5",
+            effective_provider="openai",
+            policy_id="pinned-model-policy",
+            policy_version="v7",
+        ),
+        effective_governance=EffectiveAgentGovernance(
+            tenant_id="tenant-1",
+            policy_id="pinned-model-policy",
+            policy_version="v7",
+            effective_model="gpt-5",
+            effective_provider="openai",
+            max_tokens_per_run=20_000,
+        ),
+    )
+
+    run = AgentRun(
+        run_id="run-governance-recovery",
+        agent_name="enterprise-analyst",
+        status=AgentRunStatus.PENDING,
+        user_id="user-1",
+        principal="principal-1",
+        tenant_id="tenant-1",
+        session_id="session-1",
+        request_snapshot=AgentRunRequestSnapshot.from_request(request),
+    )
+    repository.created_run = run
+
+    observer = RecordingObserver()
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+        tenant_policy_engine=tenant_policy_engine,
+        observer=observer,
+    )
+
+    await service.execute_existing_run(
+        run_id=run.run_id,
+        agent_name=run.agent_name,
+        request=request,
+    )
+
+    effective_request = runtime.run.await_args.args[1]
+
+    assert effective_request.model_governance == ModelGovernanceDecision(
+        effective_model="gpt-5",
+        effective_provider="openai",
+        policy_id="pinned-model-policy",
+        policy_version="v7",
+    )
+
+    assert effective_request.execution_budget is not None
+    assert effective_request.execution_budget.max_tokens_per_run == 20_000
+
+    budget_events = [
+        event
+        for event in observer.events
+        if event.event_type is AgentExecutionEventType.GOVERNANCE_DECISION
+        and event.metadata.get("governance_domain") == "budget"
+    ]
+
+    assert len(budget_events) == 1
+
+    budget_event = budget_events[0]
+    assert budget_event.run_id == run.run_id
+    assert budget_event.metadata == {
+        "governance_domain": "budget",
+        "decision": "allow",
+        "tenant_id": "tenant-1",
+        "policy_id": "pinned-model-policy",
+        "policy_version": "v7",
+        "details": {
+            "max_tokens_per_run": 20_000,
+        },
+    }
+
+    tenant_policy_engine.authorize_model.assert_not_called()
+    tenant_policy_engine.get_policy.assert_not_called()
 
 
 @pytest.mark.asyncio

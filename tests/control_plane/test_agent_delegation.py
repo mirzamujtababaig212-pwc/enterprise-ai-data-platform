@@ -8,6 +8,7 @@ import pytest
 from ai_platform.agents.exceptions import AgentExecutionWaitingForApprovalError
 from ai_platform.agents.models import AgentDefinition, AgentRequest
 from ai_platform.agents.tool_calls import AgentToolCall
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 from ai_platform.agents.registry import InMemoryAgentRegistry
 from app.control_plane.agent_delegation.models import AgentDelegationRequest
 from app.control_plane.agent_delegation.policy import AgentDelegationPolicy
@@ -908,6 +909,14 @@ class Phase3BDelegationLLMGateway:
 
     def __init__(self) -> None:
         self.requests: list[dict] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(
         self,
