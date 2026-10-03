@@ -12,10 +12,13 @@ from ai_platform.agents.runtime import AgentRuntime
 from ai_platform.agents.tool_calls import AgentToolCall
 from rag.governance import GovernancePolicy
 from tools.authorization.in_memory import InMemoryToolAuthorizer
-from tools.authorization.policy import MetadataAuthorizationPolicy
+from tools.authorization.policy import (
+    CapabilityAuthorizationPolicy,
+    MetadataAuthorizationPolicy,
+)
 from tools.authorization.service import ToolAuthorizationService
 from tools.execution.service import ToolExecutionService
-from tools.mcp.config import MCPServerConfig
+from tools.mcp.config import MCPServerConfig, MCPToolCapability
 from tools.mcp.manager import MCPServerManager
 from tools.mcp.recovery import MCPRecoveryPolicy
 from tools.registry.in_memory import InMemoryToolRegistry
@@ -438,6 +441,131 @@ async def test_agent_runtime_denies_real_mcp_tool_before_server_execution() -> N
         assert tool_result.success is False
         assert tool_result.output is None
         assert "mcp_server='finance-server'" in tool_result.error
+
+    finally:
+        await manager.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_resolves_and_authorizes_real_mcp_capability() -> None:
+    registry = InMemoryToolRegistry()
+
+    authorization_policy = CapabilityAuthorizationPolicy(
+        allowed_capabilities={"document.search"},
+        allowed_risk_tiers={"low"},
+        allowed_side_effects={False},
+        required_permission_scope="documents:read",
+        policy_id="enterprise_capability_policy",
+        policy_version="2.0",
+    )
+
+    authorizer = InMemoryToolAuthorizer(
+        policy=authorization_policy,
+    )
+    authorization_service = ToolAuthorizationService(authorizer)
+
+    execution_service = ToolExecutionService(
+        registry,
+        authorization_service=authorization_service,
+    )
+
+    manager = MCPServerManager(registry)
+
+    config = MCPServerConfig(
+        name="document-server",
+        transport="stdio",
+        command=sys.executable,
+        args=(str(SEARCH_SERVER),),
+        tool_capabilities={
+            "search_documents": MCPToolCapability(
+                capability="document.search",
+                risk_tier="low",
+                side_effect=False,
+                permission_scope="documents:read",
+            ),
+        },
+    )
+
+    await manager.register_server(config)
+
+    agent = MCPCallingAgent(
+        AgentDefinition(
+            name="governed-mcp-capability-agent-test",
+            description=("Agent integration test for capability-based MCP authorization."),
+            system_prompt=(
+                "You are an enterprise AI agent. "
+                "Use the document.search capability when required."
+            ),
+            model="mock-gpt",
+            tool_names=("document.search",),
+        )
+    )
+
+    agent_registry = InMemoryAgentRegistry()
+    await agent_registry.register(agent)
+
+    runtime = AgentRuntime(
+        agent_registry,
+        tool_execution_service=execution_service,
+    )
+
+    await authorizer.allow(
+        "user-mcp-capability-456",
+        "search_documents",
+    )
+
+    try:
+        definitions = await manager.connect_and_discover("document-server")
+
+        assert [definition.name for definition in definitions] == [
+            "search_documents",
+        ]
+
+        assert definitions[0].metadata == {
+            "source": "mcp",
+            "mcp_server": "document-server",
+            "capability": "document.search",
+            "risk_tier": "low",
+            "side_effect": False,
+            "permission_scope": "documents:read",
+        }
+
+        response = await runtime.run(
+            "governed-mcp-capability-agent-test",
+            AgentRequest(
+                input="Find enterprise AI architecture information.",
+                session_id="session-mcp-capability-auth-123",
+                user_id="user-mcp-capability-456",
+                principal="user-mcp-capability-456",
+                governance_policy=make_governance_policy(),
+                metadata={
+                    "source": "agent-mcp-capability-authorization-test",
+                },
+            ),
+        )
+
+        assert response.agent_name == "governed-mcp-capability-agent-test"
+        assert response.session_id == "session-mcp-capability-auth-123"
+
+        assert agent.last_tool_results is not None
+        assert len(agent.last_tool_results) == 1
+
+        tool_result = agent.last_tool_results[0]
+
+        # The agent declares the capability, while the execution path
+        # resolves it to the provider-specific MCP tool name.
+        assert tool_result.tool_name == "search_documents"
+        assert tool_result.success is True
+
+        assert tool_result.output == {
+            "query": "enterprise AI",
+            "results": [
+                {
+                    "id": "document-1",
+                    "content": "Enterprise AI platform architecture.",
+                }
+            ],
+        }
 
     finally:
         await manager.disconnect_all()
