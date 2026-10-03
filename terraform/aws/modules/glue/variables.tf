@@ -18,3 +18,19 @@ variable "catalog_database_name" {
   type        = string
   default     = "enterprise_ai_platform"
 }
+
+variable "artifact_bucket_arn" {
+  description = "ARN of the S3 bucket containing Glue deployment artifacts."
+  type        = string
+}
+
+variable "artifact_prefix" {
+  description = "S3 key prefix containing immutable Glue deployment artifacts."
+  type        = string
+  default     = "glue/enterprise-ai-platform/"
+}
+
+variable "kms_key_arn" {
+  description = "KMS key ARN used to encrypt the Glue artifact bucket."
+  type        = string
+}

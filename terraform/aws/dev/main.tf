@@ -28,6 +28,9 @@ module "glue" {
   project_name          = var.project_name
   environment           = var.environment
   s3_bucket_arn         = data.aws_s3_bucket.enterprise_data.arn
+  artifact_bucket_arn   = module.s3.bucket_arn
+  artifact_prefix       = "glue/enterprise-ai-platform/"
+  kms_key_arn           = module.kms.key_arn
   catalog_database_name = "enterprise_ai_platform"
 }
 

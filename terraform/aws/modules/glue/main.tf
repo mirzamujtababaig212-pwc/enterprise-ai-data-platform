@@ -59,6 +59,23 @@ resource "aws_iam_role_policy" "glue_data_access" {
           "glue:UpdateTable"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "GlueArtifactRead"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "${var.artifact_bucket_arn}/${var.artifact_prefix}*"
+      },
+      {
+        Sid    = "GlueArtifactDecrypt"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = var.kms_key_arn
       }
     ]
   })
