@@ -56,3 +56,30 @@ def test_runtime_config_uses_defaults_for_unconfigured_fields():
 
     assert config.query_name is None
     assert config.trigger is None
+
+
+def test_pipeline_loader_uses_configured_project_root(monkeypatch, tmp_path):
+    config_root = tmp_path / "config" / "pipelines"
+    config_root.mkdir(parents=True)
+
+    (config_root / "custom.yaml").write_text(
+        """
+pipeline:
+  class: custom
+
+reader:
+  type: test
+
+writer:
+  type: test
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(tmp_path))
+
+    result = PipelineLoader.load("custom")
+
+    assert result["pipeline"]["class"] == "custom"
+    assert result["reader"]["type"] == "test"
+    assert result["writer"]["type"] == "test"

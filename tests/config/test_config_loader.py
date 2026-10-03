@@ -25,3 +25,31 @@ def test_load_qa():
 def test_invalid_environment():
     with pytest.raises(FileNotFoundError):
         ConfigLoader.load("invalid")
+
+
+def test_config_loader_uses_configured_project_root(monkeypatch, tmp_path):
+    config_root = tmp_path / "config" / "environments"
+    config_root.mkdir(parents=True)
+
+    (config_root / "aws.yaml").write_text(
+        """
+environment:
+  name: aws
+  cloud: aws
+
+storage:
+  raw: s3://example/raw
+  bronze: s3://example/bronze
+  silver: s3://example/silver
+  gold: s3://example/gold
+  checkpoints: s3://example/checkpoints
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(tmp_path))
+
+    result = ConfigLoader.load("aws")
+
+    assert result["environment"]["name"] == "aws"
+    assert result["storage"]["bronze"] == "s3://example/bronze"

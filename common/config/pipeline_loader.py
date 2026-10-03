@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,14 @@ class PipelineLoader:
         path: /app/data/delta/silver/vehicle_events
     """
 
-    CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config" / "pipelines"
+    @staticmethod
+    def _resolve_config_root() -> Path:
+        configured_root = os.getenv("ENTERPRISE_AI_PLATFORM_ROOT")
+
+        if configured_root:
+            return Path(configured_root) / "config" / "pipelines"
+
+        return Path(__file__).resolve().parents[2] / "config" / "pipelines"
 
     @staticmethod
     def load(name: str) -> dict[str, Any]:
@@ -33,7 +41,7 @@ class PipelineLoader:
 
         pipeline_name = name.strip()
 
-        config_path = PipelineLoader.CONFIG_ROOT / f"{pipeline_name}.yaml"
+        config_path = PipelineLoader._resolve_config_root() / f"{pipeline_name}.yaml"
 
         if not config_path.exists():
             raise FileNotFoundError(f"Pipeline configuration not found: {config_path}")

@@ -73,7 +73,7 @@ ragas = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["ai_platform*", "common*", "rag*", "app*"]
+include = ["ai_platform*", "common*", "rag*", "app*", "spark*"]
 
 [tool.ruff]
 line-length = 100
