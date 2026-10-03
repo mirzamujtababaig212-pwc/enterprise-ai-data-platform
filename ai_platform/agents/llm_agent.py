@@ -505,6 +505,8 @@ class LLMAgent:
                                 if not decision.allowed:
                                     continue
 
+                                context.raise_if_cancellation_requested()
+
                                 retried_step = repository.retry(
                                     context.run_id,
                                     step.step_id,
@@ -1881,6 +1883,8 @@ class LLMAgent:
 
                     if not decision.allowed:
                         raise
+
+                    context.raise_if_cancellation_requested()
 
                     retried_step = repository.retry(
                         context.run_id,

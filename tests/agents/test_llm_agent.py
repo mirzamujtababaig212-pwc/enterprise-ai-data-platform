@@ -3660,6 +3660,121 @@ async def test_llm_agent_retries_transient_provider_failure_durably() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_agent_cancellation_after_llm_failure_prevents_durable_retry() -> None:
+    class CancellationAfterFailureRepository(InMemoryAgentRunStepsRepository):
+        def __init__(self, cancellation_requested: asyncio.Event) -> None:
+            super().__init__()
+            self.cancellation_requested = cancellation_requested
+            self.retry_calls = 0
+
+        def retry(self, *args, **kwargs):
+            self.retry_calls += 1
+            return super().retry(*args, **kwargs)
+
+        def transition(self, *args, **kwargs):
+            result = super().transition(*args, **kwargs)
+
+            if kwargs.get("status") is AgentRunStepStatus.FAILED and result is not None:
+                self.cancellation_requested.set()
+
+            return result
+
+    class FailingRetryGateway(FakeLLMGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_count = 0
+
+        async def route_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.generate_count += 1
+            raise TimeoutError("provider timeout before durable retry")
+
+    definition = AgentDefinition(
+        name="cancel-before-llm-durable-retry-agent",
+        description="Test cancellation before durable LLM retry.",
+        system_prompt="You are a cancellation race test agent.",
+        model="mock-gpt",
+    )
+
+    cancellation_requested = asyncio.Event()
+    gateway = FailingRetryGateway()
+    repository = CancellationAfterFailureRepository(cancellation_requested)
+    observer = FakeAgentExecutionObserver()
+    run_id = "run-cancel-before-llm-durable-retry"
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="answer",
+                step_index=0,
+                name="Produce answer",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_AGENT_RESPONSE,
+            ),
+        )
+    )
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Trigger cancellation before LLM retry.",
+            session_id="session-cancel-before-llm-durable-retry",
+        ),
+        tools=AgentToolContext(
+            InMemoryToolRegistry(),
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        cancellation_requested=cancellation_requested,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+        retry_policy=RetryPolicy(
+            max_attempts=2,
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run(context)
+
+    step = repository.get(run_id, "answer")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.attempt == 1
+    assert step.failure_category == "timeout"
+    assert gateway.generate_count == 1
+    assert repository.retry_calls == 0
+    assert cancellation_requested.is_set()
+
+    orchestration_events = [
+        event
+        for event in observer.events
+        if event.step_id == "answer"
+        and event.event_type
+        in {
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        }
+    ]
+
+    assert [(event.event_type, event.attempt) for event in orchestration_events] == [
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_FAILED, 1),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_applies_durable_retry_backoff(monkeypatch) -> None:
     class RetryGateway(FakeLLMGateway):
         def __init__(self) -> None:
@@ -4237,6 +4352,144 @@ async def test_llm_agent_classifies_tool_failure_using_execution_policy() -> Non
     assert step.completed_at is not None
     assert tool.execution_count == 3
     assert tool.definition.execution_policy.max_retries == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_cancellation_after_failure_commit_prevents_durable_retry() -> None:
+    class CancellationAfterFailureRepository(InMemoryAgentRunStepsRepository):
+        def __init__(self, cancellation_requested: asyncio.Event) -> None:
+            super().__init__()
+            self.cancellation_requested = cancellation_requested
+            self.retry_calls = 0
+
+        def retry(self, *args, **kwargs):
+            self.retry_calls += 1
+            return super().retry(*args, **kwargs)
+
+        def transition(self, *args, **kwargs):
+            result = super().transition(*args, **kwargs)
+
+            if kwargs.get("status") is AgentRunStepStatus.FAILED and result is not None:
+                self.cancellation_requested.set()
+
+            return result
+
+    class FailingTool:
+        def __init__(self) -> None:
+            self._definition = ToolDefinition(
+                name="cancel_before_durable_retry_tool",
+                description="A tool that always fails.",
+                execution_policy=ToolExecutionPolicy(
+                    max_retries=1,
+                    retryable_failure_categories=frozenset(
+                        {ToolExecutionFailureCategory.EXECUTION_ERROR}
+                    ),
+                ),
+            )
+            self.execution_count = 0
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments):
+            self.execution_count += 1
+            raise RuntimeError("simulated durable retry failure")
+
+    definition = AgentDefinition(
+        name="cancel-before-durable-retry-agent",
+        description="Test cancellation before durable retry.",
+        system_prompt="You are a cancellation race test agent.",
+        model="gpt-test",
+        tool_names=("cancel_before_durable_retry_tool",),
+    )
+
+    gateway = FakeToolCallingLLMGateway(
+        tool_name="cancel_before_durable_retry_tool",
+    )
+    tool_registry = InMemoryToolRegistry()
+    tool = FailingTool()
+    await tool_registry.register(tool)
+
+    plan = OrchestrationPlan(
+        steps=(
+            OrchestrationStep(
+                step_id="execute_tool",
+                step_index=0,
+                name="Execute cancellation race tool",
+                status=OrchestrationStepStatus.PENDING,
+                completion_policy=OrchestrationStepCompletionPolicy.ON_TOOL_RESULT,
+                metadata={"completion_tool_name": "cancel_before_durable_retry_tool"},
+            ),
+        )
+    )
+
+    cancellation_requested = asyncio.Event()
+    repository = CancellationAfterFailureRepository(cancellation_requested)
+    observer = FakeAgentExecutionObserver()
+    run_id = "run-cancel-before-durable-retry"
+
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Execute the cancellation race tool.",
+            session_id="session-cancel-before-durable-retry",
+        ),
+        tools=AgentToolContext(
+            tool_registry,
+            definition,
+        ),
+        llm=AgentLLMContext(
+            gateway,
+            definition.llm_config,
+        ),
+        run_id=run_id,
+        orchestration_plan=plan,
+        cancellation_requested=cancellation_requested,
+        agent_run_steps_repository_factory=lambda: repository,
+    )
+
+    context.orchestration_state = plan.materialize_state()
+
+    agent = LLMAgent(
+        definition,
+        observer=observer,
+        retry_policy=RetryPolicy(
+            max_attempts=2,
+            retryable_categories={"execution_error"},
+            initial_backoff_seconds=0,
+            jitter=0,
+        ),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run(context)
+
+    step = repository.get(run_id, "execute_tool")
+
+    assert step is not None
+    assert step.status is AgentRunStepStatus.FAILED
+    assert step.attempt == 1
+    assert step.failure_category == ToolExecutionFailureCategory.EXECUTION_ERROR.value
+    assert tool.execution_count == 2
+    assert repository.retry_calls == 0
+    assert cancellation_requested.is_set()
+
+    orchestration_events = [
+        event
+        for event in observer.events
+        if event.step_id == "execute_tool"
+        and event.event_type
+        in {
+            AgentExecutionEventType.ORCHESTRATION_STEP_STARTED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_FAILED,
+            AgentExecutionEventType.ORCHESTRATION_STEP_COMPLETED,
+        }
+    ]
+
+    assert [(event.event_type, event.attempt) for event in orchestration_events] == [
+        (AgentExecutionEventType.ORCHESTRATION_STEP_STARTED, 1),
+        (AgentExecutionEventType.ORCHESTRATION_STEP_FAILED, 1),
+    ]
 
 
 @pytest.mark.asyncio
