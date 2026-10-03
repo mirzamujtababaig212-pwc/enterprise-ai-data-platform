@@ -262,8 +262,8 @@ def test_main_sets_environment_after_configuration_bootstrap(monkeypatch) -> Non
             "common.runner.pipeline_runner": fake_runner_module,
         },
     ):
-        monkeypatch.delenv("APP_ENV", raising=False)
-        monkeypatch.delenv("ENTERPRISE_AI_PLATFORM_ROOT", raising=False)
+        monkeypatch.setenv("APP_ENV", "test")
+        monkeypatch.setenv("ENTERPRISE_AI_PLATFORM_ROOT", str(CONFIG_ROOT))
 
         with patch("spark.glue.pipeline_job._download_configuration") as download_configuration:
             main(["script.py"])

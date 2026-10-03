@@ -31,3 +31,8 @@ variable "ecs_desired_count" {
   type        = number
   default     = 0
 }
+
+variable "glue_release_version" {
+  description = "Immutable Glue application release version."
+  type        = string
+}

@@ -145,10 +145,10 @@ resource "aws_cloudwatch_log_group" "batch_pipeline" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "pipeline_failed" {
-  alarm_name          = "${var.project_name}-${var.environment}-batch-pipeline-failed"
-  alarm_description   = "Alarm when the AWS Bronze-Silver-Gold Step Functions pipeline fails."
-  namespace           = "AWS/States"
-  metric_name         = "ExecutionsFailed"
+  alarm_name        = "${var.project_name}-${var.environment}-batch-pipeline-failed"
+  alarm_description = "Alarm when the AWS Bronze-Silver-Gold Step Functions pipeline fails."
+  namespace         = "AWS/States"
+  metric_name       = "ExecutionsFailed"
   dimensions = {
     StateMachineArn = aws_sfn_state_machine.batch_pipeline.arn
   }
@@ -173,10 +173,10 @@ resource "aws_cloudwatch_metric_alarm" "pipeline_failed" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "pipeline_timed_out" {
-  alarm_name          = "${var.project_name}-${var.environment}-batch-pipeline-timed-out"
-  alarm_description   = "Alarm when the AWS Bronze-Silver-Gold Step Functions pipeline times out."
-  namespace           = "AWS/States"
-  metric_name         = "ExecutionsTimedOut"
+  alarm_name        = "${var.project_name}-${var.environment}-batch-pipeline-timed-out"
+  alarm_description = "Alarm when the AWS Bronze-Silver-Gold Step Functions pipeline times out."
+  namespace         = "AWS/States"
+  metric_name       = "ExecutionsTimedOut"
   dimensions = {
     StateMachineArn = aws_sfn_state_machine.batch_pipeline.arn
   }
@@ -213,9 +213,34 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
   definition = jsonencode({
     Comment = "Enterprise AI Platform AWS Bronze-Silver-Gold batch pipeline"
 
-    StartAt = "Bronze"
+    StartAt = "RuntimeChoice"
 
     States = {
+      RuntimeChoice = {
+        Type = "Choice"
+
+        Choices = [
+          {
+            Variable     = "$.execution_runtime"
+            StringEquals = "glue"
+            Next         = "GlueBronze"
+          },
+          {
+            Variable     = "$.execution_runtime"
+            StringEquals = "ecs"
+            Next         = "Bronze"
+          }
+        ]
+
+        Default = "InvalidExecutionRuntime"
+      }
+
+      InvalidExecutionRuntime = {
+        Type  = "Fail"
+        Error = "InvalidExecutionRuntime"
+        Cause = "execution_runtime must be either 'ecs' or 'glue'."
+      }
+
       Bronze = {
         Type     = "Task"
         Resource = "arn:aws:states:::ecs:runTask.sync"
@@ -246,11 +271,12 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             ]
           }
         }
+
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            ResultPath   = "$.error"
-            Next         = "PipelineFailedNotification"
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
           }
         ]
 
@@ -287,6 +313,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             ]
           }
         }
+
         Retry = [
           {
             ErrorEquals     = ["AmazonECS.Unknown", "States.Timeout"]
@@ -299,10 +326,11 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            ResultPath   = "$.error"
-            Next         = "PipelineFailedNotification"
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
           }
         ]
+
         Next = "Gold"
       }
 
@@ -336,6 +364,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             ]
           }
         }
+
         Retry = [
           {
             ErrorEquals     = ["AmazonECS.Unknown", "States.Timeout"]
@@ -348,13 +377,95 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            ResultPath   = "$.error"
-            Next         = "PipelineFailedNotification"
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
           }
         ]
 
         Next = "PipelineSucceededNotification"
       }
+
+      GlueBronze = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::glue:startJobRun.sync"
+
+        Parameters = {
+          JobName = var.glue_job_name
+
+          Arguments = {
+            "--PIPELINE_NAME"   = "bronze"
+            "--MODE"            = "batch"
+            "--APP_ENV"         = "aws"
+            "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
+            "--RELEASE_VERSION" = var.glue_release_version
+          }
+        }
+
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
+          }
+        ]
+
+        Next = "GlueSilver"
+      }
+
+      GlueSilver = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::glue:startJobRun.sync"
+
+        Parameters = {
+          JobName = var.glue_job_name
+
+          Arguments = {
+            "--PIPELINE_NAME"   = "silver"
+            "--MODE"            = "batch"
+            "--APP_ENV"         = "aws"
+            "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
+            "--RELEASE_VERSION" = var.glue_release_version
+          }
+        }
+
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
+          }
+        ]
+
+        Next = "GlueGold"
+      }
+
+      GlueGold = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::glue:startJobRun.sync"
+
+        Parameters = {
+          JobName = var.glue_job_name
+
+          Arguments = {
+            "--PIPELINE_NAME"   = "gold"
+            "--MODE"            = "batch"
+            "--APP_ENV"         = "aws"
+            "--ARTIFACT_BUCKET" = var.glue_artifact_bucket_name
+            "--RELEASE_VERSION" = var.glue_release_version
+          }
+        }
+
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "PipelineFailedNotification"
+          }
+        ]
+
+        Next = "PipelineSucceededNotification"
+      }
+
       PipelineSucceededNotification = {
         Type     = "Task"
         Resource = "arn:aws:states:::sns:publish"
@@ -383,7 +494,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
         Resource = "arn:aws:states:::sns:publish"
 
         Parameters = {
-          TopicArn  = aws_sns_topic.pipeline_notifications.arn
+          TopicArn    = aws_sns_topic.pipeline_notifications.arn
           "Message.$" = "States.JsonToString($)"
         }
 
@@ -400,7 +511,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
       PipelineFailed = {
         Type  = "Fail"
         Error = "EnterpriseAIPipelineFailed"
-        Cause = "Bronze, Silver, or Gold ECS batch task failed."
+        Cause = "Bronze, Silver, or Gold ECS or Glue batch task failed."
       }
     }
   })
@@ -410,4 +521,34 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
     Environment = var.environment
     ManagedBy   = "Terraform"
   }
+}
+
+resource "aws_iam_role_policy" "sfn_glue" {
+  name = "${var.project_name}-${var.environment}-sfn-glue"
+  role = aws_iam_role.sfn_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "GlueStartJobRun"
+        Effect = "Allow"
+        Action = [
+          "glue:StartJobRun"
+        ]
+        Resource = "arn:aws:glue:${var.aws_region}:*:job/${var.glue_job_name}"
+      },
+      {
+        Sid    = "GlueMonitorJobRun"
+        Effect = "Allow"
+        Action = [
+          "glue:GetJobRun",
+          "glue:GetJobRuns",
+          "glue:BatchStopJobRun"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
