@@ -202,6 +202,7 @@ class OpenAIProvider(BaseProvider):
     @staticmethod
     def _extract_tool_calls(
         response: Any,
+        external_to_canonical_name: dict[str, str] | None = None,
     ) -> list[AgentToolCall]:
         """Translate OpenAI Responses API function calls into Agent contracts."""
 
@@ -211,6 +212,7 @@ class OpenAIProvider(BaseProvider):
             return []
 
         tool_calls: list[AgentToolCall] = []
+        name_mapping = external_to_canonical_name or {}
 
         for item in output_items:
             item_type = getattr(item, "type", None)
@@ -228,30 +230,33 @@ class OpenAIProvider(BaseProvider):
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("OpenAI function call did not contain a valid tool name.")
 
+            canonical_name = name_mapping.get(name, name)
+
             if isinstance(arguments, str):
                 try:
                     parsed_arguments = json.loads(arguments)
                 except json.JSONDecodeError as exc:
                     raise ValueError(
-                        f"OpenAI function call arguments were not valid JSON " f"for tool '{name}'."
+                        f"OpenAI function call arguments were not valid JSON "
+                        f"for tool '{canonical_name}'."
                     ) from exc
             elif isinstance(arguments, dict):
                 parsed_arguments = arguments
             else:
                 raise ValueError(
-                    f"OpenAI function call arguments were invalid " f"for tool '{name}'."
+                    f"OpenAI function call arguments were invalid " f"for tool '{canonical_name}'."
                 )
 
             if not isinstance(parsed_arguments, dict):
                 raise ValueError(
                     f"OpenAI function call arguments must decode to an object "
-                    f"for tool '{name}'."
+                    f"for tool '{canonical_name}'."
                 )
 
             tool_calls.append(
                 AgentToolCall(
                     call_id=call_id,
-                    name=name,
+                    name=canonical_name,
                     arguments=parsed_arguments,
                 )
             )
@@ -277,8 +282,11 @@ class OpenAIProvider(BaseProvider):
             raise ProviderAuthenticationError("OpenAI provider is not configured.")
 
         try:
-            tools = self._chat_tools(request)
+            chat_tools = self._chat_tools(request)
             text = self._structured_output(request)
+
+            tools = chat_tools[0] if chat_tools is not None else None
+            external_to_canonical_name = chat_tools[1] if chat_tools is not None else {}
 
             response = await self.client.responses.create(
                 model=model,
@@ -320,7 +328,7 @@ class OpenAIProvider(BaseProvider):
                 else 0
             )
 
-            tool_calls = self._extract_tool_calls(response)
+            tool_calls = self._extract_tool_calls(response, external_to_canonical_name)
 
             return {
                 "reply": reply,
@@ -606,7 +614,9 @@ class OpenAIProvider(BaseProvider):
         return sorted(SUPPORTED_CHAT_MODELS)
 
     @staticmethod
-    def _chat_tools(request: dict[str, Any]) -> list[dict[str, Any]] | None:
+    def _chat_tools(
+        request: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, str]] | None:
         raw_tools = request.get("tools")
 
         if raw_tools is None:
@@ -616,16 +626,17 @@ class OpenAIProvider(BaseProvider):
             raise ValueError("OpenAI chat tools must be a list.")
 
         tools: list[dict[str, Any]] = []
+        external_to_canonical_name: dict[str, str] = {}
 
         for tool in raw_tools:
             if not isinstance(tool, dict):
                 raise ValueError("OpenAI chat tools must contain dictionaries.")
 
-            name = tool.get("name")
+            canonical_name = tool.get("name")
             description = tool.get("description")
             input_schema = tool.get("input_schema", {})
 
-            if not isinstance(name, str) or not name.strip():
+            if not isinstance(canonical_name, str) or not canonical_name.strip():
                 raise ValueError("OpenAI chat tool name must be a non-empty string.")
 
             if not isinstance(description, str) or not description.strip():
@@ -634,13 +645,44 @@ class OpenAIProvider(BaseProvider):
             if not isinstance(input_schema, dict):
                 raise ValueError("OpenAI chat tool input_schema must be a dictionary.")
 
+            external_name = "".join(
+                (
+                    character
+                    if (
+                        "a" <= character <= "z"
+                        or "A" <= character <= "Z"
+                        or "0" <= character <= "9"
+                        or character in "_-"
+                    )
+                    else "_"
+                )
+                for character in canonical_name
+            )
+
+            if len(external_name) > 64:
+                raise ValueError(
+                    "OpenAI chat tool name must be 64 characters or fewer "
+                    f"after sanitization: '{canonical_name}'."
+                )
+
+            existing_canonical_name = external_to_canonical_name.get(external_name)
+
+            if existing_canonical_name is not None and existing_canonical_name != canonical_name:
+                raise ValueError(
+                    "OpenAI chat tool name collision after sanitization: "
+                    f"'{existing_canonical_name}' and '{canonical_name}' "
+                    f"both map to '{external_name}'."
+                )
+
+            external_to_canonical_name[external_name] = canonical_name
+
             tools.append(
                 {
                     "type": "function",
-                    "name": name,
+                    "name": external_name,
                     "description": description,
                     "parameters": dict(input_schema),
                 }
             )
 
-        return tools
+        return tools, external_to_canonical_name

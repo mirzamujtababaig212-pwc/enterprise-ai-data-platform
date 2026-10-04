@@ -30,6 +30,7 @@ from ai_platform.agents.orchestration import (
     OrchestrationStepStatus,
 )
 from ai_platform.agents.runtime_evaluation import AgentRuntimeEvaluationSnapshot
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
 from memory.context.builder import MemoryContext
@@ -59,6 +60,14 @@ class EmptyMemoryBuilder:
 class RuntimeFakeLLMGateway:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(
         self,

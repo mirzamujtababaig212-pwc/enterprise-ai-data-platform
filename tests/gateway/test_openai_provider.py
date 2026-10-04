@@ -991,6 +991,154 @@ async def test_chat_translates_tool_definitions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_sanitizes_deldai_tool_names_for_openai() -> None:
+    provider = OpenAIProvider()
+
+    response = MagicMock()
+    response.output_text = "Tool-enabled response"
+    response.usage = None
+    response.output = []
+
+    fake_client = MagicMock()
+    fake_client.responses.create = AsyncMock(
+        return_value=response,
+    )
+
+    provider.client = fake_client
+
+    await provider.chat(
+        {
+            "model": "gpt-4o",
+            "prompt": "Use the enterprise tools.",
+            "tools": [
+                {
+                    "name": "rag.search",
+                    "description": "Search enterprise knowledge.",
+                    "input_schema": {
+                        "type": "object",
+                    },
+                },
+                {
+                    "name": "vehicle.data.query",
+                    "description": "Query vehicle data.",
+                    "input_schema": {
+                        "type": "object",
+                    },
+                },
+            ],
+        }
+    )
+
+    call = provider.client.responses.create.call_args
+
+    assert call.kwargs["tools"] == [
+        {
+            "type": "function",
+            "name": "rag_search",
+            "description": "Search enterprise knowledge.",
+            "parameters": {
+                "type": "object",
+            },
+        },
+        {
+            "type": "function",
+            "name": "vehicle_data_query",
+            "description": "Query vehicle data.",
+            "parameters": {
+                "type": "object",
+            },
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_restores_canonical_tool_name_from_openai_name() -> None:
+    provider = OpenAIProvider()
+
+    response = MagicMock()
+    response.output_text = "Tool-enabled response"
+    response.usage = None
+
+    function_call = MagicMock()
+    function_call.type = "function_call"
+    function_call.call_id = "call_rag"
+    function_call.name = "rag_search"
+    function_call.arguments = '{"query": "vehicle status"}'
+
+    response.output = [function_call]
+
+    fake_client = MagicMock()
+    fake_client.responses.create = AsyncMock(
+        return_value=response,
+    )
+
+    provider.client = fake_client
+
+    result = await provider.chat(
+        {
+            "model": "gpt-4o",
+            "prompt": "Search the enterprise knowledge base.",
+            "tools": [
+                {
+                    "name": "rag.search",
+                    "description": "Search enterprise knowledge.",
+                    "input_schema": {
+                        "type": "object",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert len(result["tool_calls"]) == 1
+    assert result["tool_calls"][0].call_id == "call_rag"
+    assert result["tool_calls"][0].name == "rag.search"
+    assert result["tool_calls"][0].arguments == {
+        "query": "vehicle status",
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_tool_name_sanitization_collision() -> None:
+    provider = OpenAIProvider()
+
+    response = MagicMock()
+    response.output_text = "Tool-enabled response"
+    response.usage = None
+    response.output = []
+
+    fake_client = MagicMock()
+    fake_client.responses.create = AsyncMock(
+        return_value=response,
+    )
+
+    provider.client = fake_client
+
+    with pytest.raises(
+        ValueError,
+        match="collision after sanitization",
+    ):
+        await provider.chat(
+            {
+                "model": "gpt-4o",
+                "prompt": "Use the enterprise tools.",
+                "tools": [
+                    {
+                        "name": "foo.bar",
+                        "description": "First tool.",
+                        "input_schema": {},
+                    },
+                    {
+                        "name": "foo_bar",
+                        "description": "Second tool.",
+                        "input_schema": {},
+                    },
+                ],
+            }
+        )
+
+
+@pytest.mark.asyncio
 async def test_chat_preserves_tool_order() -> None:
     provider = OpenAIProvider()
 
