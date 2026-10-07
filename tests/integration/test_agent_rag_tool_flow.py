@@ -7,6 +7,7 @@ from ai_platform.agents.policy import TenantPolicy, TenantPolicyEngine
 from ai_platform.agents.models import AgentDefinition, AgentRequest
 from ai_platform.agents.registry.in_memory import InMemoryAgentRegistry
 from ai_platform.agents.runtime import AgentRuntime
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 from ai_platform.llm_gateway.routing.router import Router
 from rag.chunking.recursive import RecursiveChunker
 from rag.embeddings.gateway import GatewayEmbeddingService
@@ -107,6 +108,14 @@ class TenantPolicyToolCallingLLMGateway:
 
     def __init__(self) -> None:
         self.requests: list[dict] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(self, request: dict) -> dict:
         self.requests.append(request)
