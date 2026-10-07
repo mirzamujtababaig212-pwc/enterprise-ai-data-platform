@@ -479,17 +479,17 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
         assert evaluation_payload["evaluation_run_id"]
         assert evaluation_payload["passed"] is True
 
-        assert evaluation_payload["lineage"] == {
-            "evaluated_run_id": run_id,
-            "agent_name": "enterprise-analyst",
-            "agent_version": None,
-            "tenant_id": "tenant-a",
-            "effective_model": "gpt-4.1-mini",
-            "effective_provider": None,
-            "model_policy_id": None,
-            "model_policy_version": None,
-            "evidence_fingerprint": evaluation_payload["lineage"]["evidence_fingerprint"],
-        }
+        lineage = evaluation_payload["lineage"]
+        assert lineage["evaluated_run_id"] == run_id
+        assert lineage["agent_name"] == "enterprise-analyst"
+        assert lineage["agent_version"] is None
+        assert lineage["tenant_id"] == "tenant-a"
+        assert lineage["effective_model"] == "gpt-4.1-mini"
+        assert lineage["effective_provider"] is None
+        assert lineage["model_policy_id"] is None
+        assert lineage["model_policy_version"] is None
+        assert lineage["evidence_fingerprint"]
+        assert lineage["retrieval_artifact"] is not None
 
         metrics = evaluation_payload["metrics"]
 
@@ -552,17 +552,20 @@ def test_production_control_plane_persists_and_reads_agent_evaluation() -> None:
             assert evaluation_record.tenant_id == "tenant-a"
             assert evaluation_record.passed is True
 
-            assert evaluation_record.lineage == {
-                "evaluated_run_id": run_id,
-                "agent_name": "enterprise-analyst",
-                "agent_version": None,
-                "tenant_id": "tenant-a",
-                "effective_model": "gpt-4.1-mini",
-                "effective_provider": None,
-                "model_policy_id": None,
-                "model_policy_version": None,
-                "evidence_fingerprint": evaluation_payload["lineage"]["evidence_fingerprint"],
-            }
+            persisted_lineage = evaluation_record.lineage
+            assert persisted_lineage["evaluated_run_id"] == run_id
+            assert persisted_lineage["agent_name"] == "enterprise-analyst"
+            assert persisted_lineage["agent_version"] is None
+            assert persisted_lineage["tenant_id"] == "tenant-a"
+            assert persisted_lineage["effective_model"] == "gpt-4.1-mini"
+            assert persisted_lineage["effective_provider"] is None
+            assert persisted_lineage["model_policy_id"] is None
+            assert persisted_lineage["model_policy_version"] is None
+            assert (
+                persisted_lineage["evidence_fingerprint"]
+                == evaluation_payload["lineage"]["evidence_fingerprint"]
+            )
+            assert persisted_lineage["retrieval_artifact"] is not None
 
             assert evaluation_record.metrics["task_completed"] is True
             assert evaluation_record.metrics["tool_calls_total"] == 0
@@ -897,9 +900,8 @@ def test_production_control_plane_persists_agent_run_events() -> None:
         assert run.session_id == session_id
         assert run.user_id == "integration-test-user"
         assert run.output == "Deterministic integration-test response."
-        assert run.metadata == {
-            "test": "production-control-plane-agent-run",
-        }
+        assert run.metadata["test"] == "production-control-plane-agent-run"
+        assert run.metadata["rag_retriever_artifact"] is not None
 
     finally:
         if run_id is not None:
@@ -1180,9 +1182,8 @@ def test_production_control_plane_persists_failed_agent_run() -> None:
         assert run_record.error_type == "RuntimeError"
         assert run_record.error_message == "deterministic provider failure"
         assert run_record.output is None
-        assert run_record.run_metadata == {
-            "test": "production-control-plane-agent-run-failure",
-        }
+        assert run_record.run_metadata["test"] == "production-control-plane-agent-run-failure"
+        assert run_record.run_metadata["rag_retriever_artifact"] is not None
 
         with SessionLocal() as session:
             events = list(
@@ -1491,9 +1492,9 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert len(steps) == 3
 
         assert [(step.step_id, step.step_index, step.status) for step in steps] == [
-            ("retrieve_evidence", 0, "completed"),
-            ("analyze_evidence", 1, "completed"),
-            ("produce_answer", 2, "completed"),
+            ("iteration-1:retrieve_evidence", 0, "completed"),
+            ("iteration-1:analyze_evidence", 1, "completed"),
+            ("iteration-1:produce_answer", 2, "completed"),
         ]
 
         assert all(step.run_id == run_id for step in steps)
@@ -1568,12 +1569,12 @@ def test_production_rag_agent_persists_post_tool_checkpoint() -> None:
         assert [
             (event.step_id, event.step_index, event.step_name) for event in orchestration_events
         ] == [
-            ("retrieve_evidence", 0, "Retrieve enterprise evidence"),
-            ("retrieve_evidence", 0, "Retrieve enterprise evidence"),
-            ("analyze_evidence", 1, "Analyze retrieved evidence"),
-            ("analyze_evidence", 1, "Analyze retrieved evidence"),
-            ("produce_answer", 2, "Produce grounded answer"),
-            ("produce_answer", 2, "Produce grounded answer"),
+            ("iteration-1:retrieve_evidence", 0, "Retrieve enterprise evidence"),
+            ("iteration-1:retrieve_evidence", 0, "Retrieve enterprise evidence"),
+            ("iteration-1:analyze_evidence", 1, "Analyze retrieved evidence"),
+            ("iteration-1:analyze_evidence", 1, "Analyze retrieved evidence"),
+            ("iteration-1:produce_answer", 2, "Produce grounded answer"),
+            ("iteration-1:produce_answer", 2, "Produce grounded answer"),
         ]
 
         assert all(event.run_id == run_id for event in events)
