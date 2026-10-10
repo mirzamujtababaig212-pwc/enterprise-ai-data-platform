@@ -181,9 +181,17 @@ class RAGSearchTool:
         arguments: dict[str, Any],
         context: ToolExecutionContext,
     ) -> dict[str, Any]:
+        effective_policy = context.governance_policy
+
+        if context.tenant_id is not None:
+            base_policy = effective_policy if effective_policy is not None else GovernancePolicy()
+            # Reject conflicting tenant scopes and enforce the authenticated
+            # tenant even when the supplied policy has no explicit tenant.
+            effective_policy = base_policy.with_tenant_scope(context.tenant_id)
+
         result = await self._execute(
             arguments,
-            governance_policy=context.governance_policy,
+            governance_policy=effective_policy,
         )
 
         await self._emit_rag_governance_decision(

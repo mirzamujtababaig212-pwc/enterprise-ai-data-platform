@@ -454,3 +454,61 @@ async def test_rag_search_governance_event_does_not_duplicate_for_retriever_call
 
     assert len(retriever.calls) == 1
     assert len(observer.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_search_rejects_tenant_mismatch_in_tool_context() -> None:
+    retriever = FakeRetriever()
+    tool = RAGSearchTool(retriever)
+
+    context = ToolExecutionContext(
+        tenant_id="tenant-acme",
+        governance_policy=GovernancePolicy(
+            tenant_id="tenant-unauthorized",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="tenant scope conflicts"):
+        await tool.execute_with_context({"query": "test"}, context)
+
+    assert retriever.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rag_search_rejects_conflicting_tenant_metadata() -> None:
+    retriever = FakeRetriever()
+    tool = RAGSearchTool(retriever)
+
+    context = ToolExecutionContext(
+        tenant_id="tenant-acme",
+        governance_policy=GovernancePolicy(
+            required_metadata={"tenant_id": "tenant-unauthorized"},
+        ),
+    )
+
+    with pytest.raises(ValueError, match="tenant metadata conflicts"):
+        await tool.execute_with_context({"query": "test"}, context)
+
+    assert retriever.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rag_search_scopes_unscoped_policy_to_context_tenant() -> None:
+    retriever = FakeRetriever()
+    tool = RAGSearchTool(retriever)
+
+    context = ToolExecutionContext(
+        tenant_id="tenant-acme",
+        governance_policy=GovernancePolicy(
+            required_metadata={"source": "internal"},
+        ),
+    )
+
+    await tool.execute_with_context({"query": "test"}, context)
+
+    policy = retriever.calls[0][4]
+    assert policy.tenant_id == "tenant-acme"
+    assert policy.to_metadata_filter() == {
+        "source": "internal",
+        "tenant_id": "tenant-acme",
+    }
