@@ -527,3 +527,41 @@ def test_model_capabilities(provider):
     assert capabilities["gemini-chat"].max_output_tokens == 65_536
     assert capabilities["gemini-chat"].supports_tools is True
     assert capabilities["gemini-chat"].supports_vision is True
+
+
+def test_provider_error_translation_does_not_expose_upstream_message():
+    marker = "SENSITIVE_TEST_MARKER_91A7"
+    upstream_error = genai_errors.APIError(
+        400,
+        {
+            "error": {
+                "status": "INVALID_ARGUMENT",
+                "message": marker,
+            }
+        },
+    )
+
+    with pytest.raises(ProviderExecutionError) as caught:
+        GeminiProvider._raise_provider_error(upstream_error)
+
+    assert marker not in str(caught.value)
+    assert str(caught.value) == "Gemini request failed."
+
+
+def test_quota_translation_preserves_classification_without_leaking_message():
+    marker = "SENSITIVE_TEST_MARKER_91A7"
+    upstream_error = genai_errors.APIError(
+        429,
+        {
+            "error": {
+                "status": "RESOURCE_EXHAUSTED",
+                "message": f"Quota exceeded: {marker}",
+            }
+        },
+    )
+
+    with pytest.raises(ProviderQuotaExceededError) as caught:
+        GeminiProvider._raise_provider_error(upstream_error)
+
+    assert marker not in str(caught.value)
+    assert str(caught.value) == "Gemini quota exceeded."

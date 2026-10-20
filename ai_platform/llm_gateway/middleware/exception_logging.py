@@ -24,7 +24,7 @@ class ExceptionLoggingMiddleware(BaseHTTPMiddleware):
                 None,
             )
 
-            logger.exception(
+            logger.error(
                 "Unhandled exception",
                 extra={
                     "request_id": request_id,

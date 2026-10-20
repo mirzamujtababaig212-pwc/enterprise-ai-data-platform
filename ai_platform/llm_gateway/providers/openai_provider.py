@@ -72,26 +72,8 @@ class OpenAIProvider(BaseProvider):
 
     @staticmethod
     def _rate_limit_message(exc: RateLimitError) -> str:
-        """Extract the most useful OpenAI rate-limit/quota information."""
-
-        body = getattr(exc, "body", None)
-
-        if isinstance(body, dict):
-            error_body = body.get("error")
-
-            if isinstance(error_body, dict):
-                code = error_body.get("code")
-                message = error_body.get("message")
-
-                if code:
-                    if message:
-                        return f"OpenAI error code: {code}. {message}"
-                    return f"OpenAI error code: {code}."
-
-                if message:
-                    return str(message)
-
-        return str(exc)
+        """Return a generic message without upstream response content."""
+        return "Provider rate limit or quota limit reported."
 
     @staticmethod
     def _is_quota_exceeded(exc: RateLimitError) -> bool:
@@ -340,17 +322,17 @@ class OpenAIProvider(BaseProvider):
             }
 
         except AuthenticationError as exc:
-            logger.exception("OpenAI authentication failed.")
+            logger.error("OpenAI authentication failed.")
 
             raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
-            logger.exception("OpenAI request timed out.")
+            logger.error("OpenAI request timed out.")
 
             raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to OpenAI.")
+            logger.error("Unable to connect to OpenAI.")
 
             raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
 
@@ -358,14 +340,14 @@ class OpenAIProvider(BaseProvider):
             message = self._rate_limit_message(exc)
 
             if self._is_quota_exceeded(exc):
-                logger.exception(
+                logger.error(
                     "OpenAI quota exceeded: %s",
                     message,
                 )
 
                 raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
 
-            logger.exception(
+            logger.error(
                 "OpenAI rate limit exceeded: %s",
                 message,
             )
@@ -379,7 +361,7 @@ class OpenAIProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Unexpected OpenAI provider error.")
+            logger.error("Unexpected OpenAI provider error.")
             raise ProviderExecutionError("Unexpected OpenAI provider error.") from exc
 
     async def stream(
@@ -428,17 +410,17 @@ class OpenAIProvider(BaseProvider):
                     logger.debug("OpenAI streaming response completed.")
 
         except AuthenticationError as exc:
-            logger.exception("OpenAI streaming authentication failed.")
+            logger.error("OpenAI streaming authentication failed.")
 
             raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
-            logger.exception("OpenAI streaming request timed out.")
+            logger.error("OpenAI streaming request timed out.")
 
             raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to OpenAI during streaming.")
+            logger.error("Unable to connect to OpenAI during streaming.")
 
             raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
 
@@ -446,14 +428,14 @@ class OpenAIProvider(BaseProvider):
             message = self._rate_limit_message(exc)
 
             if self._is_quota_exceeded(exc):
-                logger.exception(
+                logger.error(
                     "OpenAI streaming quota exceeded: %s",
                     message,
                 )
 
                 raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
 
-            logger.exception(
+            logger.error(
                 "OpenAI streaming rate limit exceeded: %s",
                 message,
             )
@@ -461,7 +443,7 @@ class OpenAIProvider(BaseProvider):
             raise ProviderRateLimitError(f"OpenAI rate limit exceeded: {message}") from exc
 
         except Exception as exc:
-            logger.exception("Unexpected OpenAI streaming error.")
+            logger.error("Unexpected OpenAI streaming error.")
             raise ProviderConnectionError("Unexpected OpenAI streaming error.") from exc
 
     async def embeddings(
@@ -500,7 +482,7 @@ class OpenAIProvider(BaseProvider):
             return embedding
 
         except AuthenticationError as exc:
-            logger.exception("OpenAI embedding authentication failed.")
+            logger.error("OpenAI embedding authentication failed.")
 
             raise ProviderAuthenticationError("OpenAI authentication failed.") from exc
 
@@ -508,14 +490,14 @@ class OpenAIProvider(BaseProvider):
             message = self._rate_limit_message(exc)
 
             if self._is_quota_exceeded(exc):
-                logger.exception(
+                logger.error(
                     "OpenAI embedding quota exceeded: %s",
                     message,
                 )
 
                 raise ProviderQuotaExceededError(f"OpenAI quota exceeded: {message}") from exc
 
-            logger.exception(
+            logger.error(
                 "OpenAI embedding rate limit exceeded: %s",
                 message,
             )
@@ -523,12 +505,12 @@ class OpenAIProvider(BaseProvider):
             raise ProviderRateLimitError(f"OpenAI rate limit exceeded: {message}") from exc
 
         except APITimeoutError as exc:
-            logger.exception("OpenAI embedding request timed out.")
+            logger.error("OpenAI embedding request timed out.")
 
             raise ProviderTimeoutError("OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to OpenAI embedding API.")
+            logger.error("Unable to connect to OpenAI embedding API.")
 
             raise ProviderConnectionError("Unable to connect to OpenAI.") from exc
 
@@ -536,7 +518,7 @@ class OpenAIProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Unexpected OpenAI embedding error.")
+            logger.error("Unexpected OpenAI embedding error.")
 
             raise ProviderConnectionError("Unexpected OpenAI embedding error.") from exc
 

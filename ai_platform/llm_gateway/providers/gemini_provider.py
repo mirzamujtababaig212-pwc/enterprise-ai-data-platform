@@ -281,16 +281,18 @@ class GeminiProvider(BaseProvider):
 
     @staticmethod
     def _error_message(exc: genai_errors.APIError) -> str:
+        # Do not propagate raw upstream error text to API responses.
         code = getattr(exc, "code", None)
-        message = getattr(exc, "message", None)
 
-        if code is not None and message:
-            return f"Gemini API error {code}: {message}"
-
-        if message:
-            return str(message)
-
-        return str(exc)
+        if code in {401, 403}:
+            return "Gemini authentication failed."
+        if code == 429:
+            return "Gemini rate limit or quota exceeded."
+        if code in {408, 504}:
+            return "Gemini request timed out."
+        if code is not None and code >= 500:
+            return "Gemini provider connection failed."
+        return "Gemini request failed."
 
     @classmethod
     def _raise_provider_error(
@@ -299,13 +301,16 @@ class GeminiProvider(BaseProvider):
     ) -> None:
         if isinstance(exc, genai_errors.APIError):
             code = getattr(exc, "code", None)
+            # Use upstream text only for internal classification, never as the
+            # public-facing exception message.
+            upstream_message = str(getattr(exc, "message", None) or exc).lower()
             message = cls._error_message(exc)
 
             if code in {401, 403}:
                 raise ProviderAuthenticationError(message) from exc
 
             if code == 429:
-                lowered = message.lower()
+                lowered = upstream_message
 
                 if any(
                     token in lowered
@@ -315,9 +320,9 @@ class GeminiProvider(BaseProvider):
                         "exceeded",
                     )
                 ):
-                    raise ProviderQuotaExceededError(message) from exc
+                    raise ProviderQuotaExceededError("Gemini quota exceeded.") from exc
 
-                raise ProviderRateLimitError(message) from exc
+                raise ProviderRateLimitError("Gemini rate limit exceeded.") from exc
 
             if code in {408, 504}:
                 raise ProviderTimeoutError(message) from exc
@@ -433,7 +438,7 @@ class GeminiProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Gemini chat request failed.")
+            logger.error("Gemini chat request failed.")
             self._raise_provider_error(exc)
 
         raise ProviderExecutionError("Unexpected Gemini chat failure.")
@@ -485,7 +490,7 @@ class GeminiProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Gemini streaming request failed.")
+            logger.error("Gemini streaming request failed.")
             self._raise_provider_error(exc)
 
     async def embeddings(
@@ -533,7 +538,7 @@ class GeminiProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Gemini embedding request failed.")
+            logger.error("Gemini embedding request failed.")
             self._raise_provider_error(exc)
 
         raise ProviderExecutionError("Unexpected Gemini embedding failure.")

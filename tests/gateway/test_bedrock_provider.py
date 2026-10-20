@@ -287,3 +287,27 @@ def test_supported_embedding_models(provider):
 
 def test_supported_stream_models(provider):
     assert set(provider.supported_stream_models()) == SUPPORTED_CHAT_MODELS
+
+
+def test_provider_error_translation_does_not_expose_upstream_message():
+    from botocore.exceptions import ClientError
+    from ai_platform.llm_gateway.exceptions.provider_exceptions import (
+        ProviderExecutionError,
+    )
+
+    marker = "SENSITIVE_TEST_MARKER_91A7"
+    upstream_error = ClientError(
+        {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": marker,
+            }
+        },
+        "Converse",
+    )
+
+    with pytest.raises(ProviderExecutionError) as caught:
+        BedrockProvider._raise_provider_error(upstream_error)
+
+    assert marker not in str(caught.value)
+    assert str(caught.value) == "Bedrock request failed."
