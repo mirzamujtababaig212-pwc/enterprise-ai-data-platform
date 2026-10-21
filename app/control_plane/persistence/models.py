@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     JSON,
     PrimaryKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -1224,5 +1226,325 @@ class AgentRunCheckpointRecord(Base):
             "ix_agent_run_checkpoints_run_created_at",
             "run_id",
             "created_at",
+        ),
+    )
+
+
+class VoiceCallRecord(Base):
+    """Tenant-owned call state, excluding transcripts and raw provider payloads."""
+
+    __tablename__ = "voice_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_key",
+            "provider_call_id",
+            name="uq_voice_calls_provider_call",
+        ),
+        CheckConstraint(
+            "status IN ('received', 'in_progress', 'completed', 'failed')",
+            name="ck_voice_calls_status",
+        ),
+        Index(
+            "ix_voice_calls_tenant_created_at",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_voice_calls_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+    call_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    voice_line_id: Mapped[int] = mapped_column(
+        ForeignKey("voice_line_configs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    provider_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_call_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    business_line_e164: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="received", server_default="received"
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class VoiceProviderEventRecord(Base):
+    """Deduplicated provider event metadata; deliberately stores no raw payload."""
+
+    __tablename__ = "voice_provider_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_key",
+            "provider_event_id",
+            name="uq_voice_provider_events_provider_event",
+        ),
+        Index(
+            "ix_voice_provider_events_tenant_received_at",
+            "tenant_id",
+            "received_at",
+        ),
+        Index(
+            "ix_voice_provider_events_call_occurred_at",
+            "call_id",
+            "occurred_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    call_id: Mapped[str] = mapped_column(
+        ForeignKey("voice_calls.call_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider_call_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class VoiceLineConfigRecord(Base):
+    """Tenant-scoped voice line and agent configuration."""
+
+    __tablename__ = "voice_line_configs"
+    __table_args__ = (
+        UniqueConstraint(
+            "configured_phone_number",
+            name="uq_voice_line_configs_configured_phone_number",
+        ),
+        CheckConstraint(
+            "line_status IN ('active', 'paused', 'offline')",
+            name="ck_voice_line_configs_line_status",
+        ),
+        CheckConstraint(
+            "provider_sync_status IN ('not_configured', 'pending', 'synced', 'error')",
+            name="ck_voice_line_configs_provider_sync_status",
+        ),
+        CheckConstraint(
+            "conversational_pause_pacing >= 0 AND conversational_pause_pacing <= 10",
+            name="ck_voice_line_configs_pause_pacing",
+        ),
+        CheckConstraint(
+            "barge_in_sensitivity BETWEEN 1 AND 10",
+            name="ck_voice_line_configs_barge_in_sensitivity",
+        ),
+        CheckConstraint(
+            "max_call_duration_minutes BETWEEN 1 AND 240",
+            name="ck_voice_line_configs_max_call_duration",
+        ),
+        Index(
+            "ix_voice_line_configs_tenant_updated_at",
+            "tenant_id",
+            "updated_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    configured_phone_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    carrier_trunk_line: Mapped[str] = mapped_column(String(255), nullable=False)
+    call_forwarding_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # A saved configuration is not proof that calls are routing.
+    line_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="paused", server_default="paused"
+    )
+
+    inbound_opening_greeting: Mapped[str] = mapped_column(Text, nullable=False)
+    inbound_system_prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outbound_opening_message: Mapped[str] = mapped_column(Text, nullable=False)
+    outbound_system_prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    provider_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    agent_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_sync_status: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        default="not_configured",
+        server_default="not_configured",
+    )
+    last_provider_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Store a sanitized code, not credentials or raw provider responses.
+    last_provider_sync_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    voice_synthesizer: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="polly-kajal",
+        server_default="polly-kajal",
+    )
+    spoken_language: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="hi-IN", server_default="hi-IN"
+    )
+    conversational_pause_pacing: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0, server_default="1.0"
+    )
+    barge_in_sensitivity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2"
+    )
+    llm_reasoning_model: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="openai/gpt-4o-mini",
+        server_default="openai/gpt-4o-mini",
+    )
+    max_call_duration_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class VoiceCallTurnRecord(Base):
+    """Durable state for one inbound voice interaction turn."""
+
+    __tablename__ = "voice_call_turns"
+
+    turn_id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+    )
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    call_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("voice_calls.call_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    turn_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    callback_token: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        server_default="awaiting_input",
+    )
+
+    # SHA-256 fingerprint of normalized recognized input; never the transcript.
+    request_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    # Opaque ownership token; never derived from recognized speech.
+    claim_token: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+
+    agent_run_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+
+    # Persist only the bounded response needed for safe callback replay.
+    response_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    failure_code: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "call_id",
+            "turn_number",
+            name="uq_voice_call_turns_tenant_call_turn",
+        ),
+        UniqueConstraint(
+            "callback_token",
+            name="uq_voice_call_turns_callback_token",
+        ),
+        CheckConstraint(
+            "turn_number >= 1",
+            name="ck_voice_call_turns_positive_turn_number",
+        ),
+        CheckConstraint(
+            "status IN ('awaiting_input', 'processing', 'completed', " "'failed', 'no_input')",
+            name="ck_voice_call_turns_status",
+        ),
+        CheckConstraint(
+            "request_fingerprint IS NULL OR length(request_fingerprint) = 64",
+            name="ck_voice_call_turns_fingerprint_length",
+        ),
+        CheckConstraint(
+            "response_text IS NULL OR length(response_text) <= 8000",
+            name="ck_voice_call_turns_response_length",
+        ),
+        Index(
+            "ix_voice_call_turns_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+        Index(
+            "ix_voice_call_turns_call_turn_number",
+            "call_id",
+            "turn_number",
         ),
     )

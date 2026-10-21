@@ -14,6 +14,13 @@ from app.control_plane.routes.ml import router as ml_router
 from app.control_plane.routes.mcp import router as mcp_router
 from app.control_plane.routes.platform import router as platform_router
 from app.control_plane.routes.rag import router as rag_router
+from app.control_plane.routes.voice import router as voice_router
+from app.control_plane.routes.twilio_voice_webhook import (
+    router as twilio_voice_webhook_router,
+)
+from app.control_plane.routes.twilio_voice_inbound_webhook import (
+    router as twilio_voice_inbound_webhook_router,
+)
 from app.control_plane.dependencies import (
     close_mcp_servers,
     close_rag_vector_store,
@@ -52,5 +59,8 @@ app.include_router(llm_router)
 app.include_router(ml_router)
 app.include_router(mcp_router)
 app.include_router(rag_router)
+app.include_router(voice_router)
+app.include_router(twilio_voice_webhook_router)
+app.include_router(twilio_voice_inbound_webhook_router)
 
 app.mount("/", llm_gateway_app)
