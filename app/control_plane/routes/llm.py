@@ -43,6 +43,12 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
+def _format_sse_data(data: str) -> str:
+    """Encode text as a valid SSE data event, preserving embedded newlines."""
+    normalized = data.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(f"data: {line}\n" for line in normalized.split("\n")) + "\n"
+
+
 def _authorized_provider_allow_list(
     http_request: Request,
     model: str,
@@ -268,7 +274,7 @@ async def chat_stream(
                 request.model_dump(),
                 **route_kwargs,
             ):
-                yield f"data: {chunk}\n\n"
+                yield _format_sse_data(chunk)
 
             yield "data: [DONE]\n\n"
 

@@ -856,6 +856,77 @@ def test_direct_llm_stream_passes_policy_allow_list() -> None:
     assert fake_router.route_stream.call_args.kwargs["allowed_providers"] == ("openai",)
 
 
+async def _fake_multiline_stream_chunks():
+    yield "first line\nsecond line"
+
+
+async def _fake_failing_stream_chunks():
+    yield "partial output"
+    raise RuntimeError("sensitive-provider-error")
+
+
+def test_direct_llm_stream_frames_multiline_chunks() -> None:
+    fake_router = Mock()
+    fake_router.route_stream = Mock(return_value=_fake_multiline_stream_chunks())
+
+    with (
+        patch(
+            "app.control_plane.routes.llm.get_tenant_policy_engine",
+            return_value=_direct_llm_policy_engine(),
+        ),
+        patch(
+            "app.control_plane.routes.llm.get_llm_router",
+            return_value=fake_router,
+        ),
+    ):
+        response = client.post(
+            "/api/v1/llm/chat/stream",
+            json={
+                "prompt": "Hello",
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+                "stream": True,
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    assert "data: first line\ndata: second line\n\n" in response.text
+    assert "data: [DONE]\n\n" in response.text
+
+
+def test_direct_llm_stream_sanitizes_generation_failure() -> None:
+    fake_router = Mock()
+    fake_router.route_stream = Mock(return_value=_fake_failing_stream_chunks())
+
+    with (
+        patch(
+            "app.control_plane.routes.llm.get_tenant_policy_engine",
+            return_value=_direct_llm_policy_engine(),
+        ),
+        patch(
+            "app.control_plane.routes.llm.get_llm_router",
+            return_value=fake_router,
+        ),
+    ):
+        response = client.post(
+            "/api/v1/llm/chat/stream",
+            json={
+                "prompt": "Hello",
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+                "stream": True,
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    assert "data: partial output\n\n" in response.text
+    assert 'event: error\ndata: {"error":"Stream generation failed."}\n\n' in response.text
+    assert "sensitive-provider-error" not in response.text
+    assert "data: [DONE]\n\n" not in response.text
+
+
 def test_direct_llm_stream_denies_disallowed_provider() -> None:
     fake_router = Mock()
     fake_router.route_stream = Mock(return_value=_fake_stream_chunks())
