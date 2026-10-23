@@ -170,6 +170,19 @@ def _build_tenant_policy_engine() -> TenantPolicyEngine | None:
 _tenant_policy_engine = _build_tenant_policy_engine()
 
 
+def get_tenant_policy_engine() -> TenantPolicyEngine | None:
+    """Return the process-configured tenant policy engine."""
+    return _tenant_policy_engine
+
+
+def tenant_policy_enforcement_required() -> bool:
+    """Return whether direct LLM endpoints must fail closed without policy."""
+    app_settings = Settings.from_environment()
+    return app_settings.tenant_policy_enforcement_enabled or (
+        app_settings.environment in {"prod", "production"}
+    )
+
+
 def _agent_run_steps_repository_factory():
     return PostgreSQLAgentRunStepsRepository(SessionLocal())
 

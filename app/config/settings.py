@@ -9,6 +9,9 @@ from ai_platform.agents.policy import TenantPolicy
 from tools.mcp.config import MCPServerConfig
 
 
+VALID_ENVIRONMENTS = frozenset({"local", "dev", "test", "demo", "staging", "prod", "production"})
+
+
 @dataclass(frozen=True)
 class Settings:
     environment: str
@@ -27,6 +30,12 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        environment = os.getenv("ENVIRONMENT", "dev").strip().lower()
+        if environment not in VALID_ENVIRONMENTS:
+            raise RuntimeError(
+                f"ENVIRONMENT must be one of: {', '.join(sorted(VALID_ENVIRONMENTS))}."
+            )
+
         credentials_raw = os.getenv("PROVIDER_CREDENTIALS", "{}")
 
         try:
@@ -250,6 +259,9 @@ class Settings:
                 "tenant policy enforcement is enabled."
             )
 
+        if environment in {"prod", "production"} and not tenant_policy_enforcement_enabled:
+            raise RuntimeError("Tenant policy enforcement must be enabled in production.")
+
         approval_risk_tiers_raw = os.getenv(
             "APPROVAL_RISK_TIERS",
             "high,critical",
@@ -270,7 +282,7 @@ class Settings:
         )
 
         return cls(
-            environment=os.getenv("ENVIRONMENT", "dev"),
+            environment=environment,
             aws_region=os.getenv("AWS_REGION", "us-east-1"),
             default_provider=os.getenv(
                 "DEFAULT_PROVIDER",

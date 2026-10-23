@@ -561,3 +561,60 @@ def test_approval_override_principals_are_parsed_and_trimmed(
             "api_key:operator-2",
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("local", "local"),
+        ("DEV", "dev"),
+        (" test ", "test"),
+        ("demo", "demo"),
+        ("staging", "staging"),
+        ("PROD", "prod"),
+        ("production", "production"),
+    ],
+)
+def test_environment_is_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    expected: str,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", value)
+    monkeypatch.setenv("TENANT_POLICY_ENFORCEMENT_ENABLED", "false")
+
+    if expected in {"prod", "production"}:
+        monkeypatch.setenv("TENANT_POLICY_ENFORCEMENT_ENABLED", "true")
+        monkeypatch.setenv(
+            "TENANT_POLICIES",
+            json.dumps([{"tenant_id": "tenant-acme"}]),
+        )
+
+    settings = Settings.from_environment()
+
+    assert settings.environment == expected
+
+
+def test_invalid_environment_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production-like")
+
+    with pytest.raises(RuntimeError, match="ENVIRONMENT must be one of"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize("environment", ["prod", "production"])
+def test_production_requires_tenant_policy_enforcement(
+    monkeypatch: pytest.MonkeyPatch,
+    environment: str,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    monkeypatch.setenv("TENANT_POLICY_ENFORCEMENT_ENABLED", "false")
+    monkeypatch.delenv("TENANT_POLICIES", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Tenant policy enforcement must be enabled in production",
+    ):
+        Settings.from_environment()
