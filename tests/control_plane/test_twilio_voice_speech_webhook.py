@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
@@ -14,6 +15,7 @@ from starlette.datastructures import FormData
 from twilio.request_validator import RequestValidator
 
 from ai_platform.llm_gateway.config.settings import settings
+from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.persistence.database import get_db
 from app.control_plane.persistence.models import (
     VoiceCallRecord,
@@ -26,7 +28,6 @@ from app.control_plane.routes.twilio_voice_inbound_webhook import (
 )
 from app.control_plane.voice.call_repository import VoiceCallRepository
 from app.control_plane.voice.turn_repository import VoiceTurnRepository
-
 
 AUTH_TOKEN = "test-twilio-auth-token"
 PHONE = "+14155550101"
@@ -104,12 +105,21 @@ def speech_env(monkeypatch):
         finally:
             session.close()
 
+    agent_result = SimpleNamespace(
+        run_id="test-run-123",
+        response=SimpleNamespace(output="I can help with that request."),
+    )
+    agent_service = SimpleNamespace(
+        execute=AsyncMock(return_value=agent_result),
+    )
+
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_agent_run_application_service] = lambda: agent_service
 
     with TestClient(app) as client:
-        yield client, session_factory
+        yield client, session_factory, agent_service
 
     app.dependency_overrides.clear()
     engine.dispose()
@@ -175,27 +185,38 @@ def read_turn(session_factory) -> VoiceCallTurnRecord:
 
 
 def test_valid_speech_is_claimed_and_transcript_is_not_persisted(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     response = send_speech(client)
 
     assert response.status_code == 200
     assert "<Response>" in response.text
-    assert "can't process that request" in response.text
+    assert "I can help with that request." in response.text
 
     turn = read_turn(session_factory)
-    assert turn.status == "failed"
-    assert turn.failure_code == "agent_not_configured"
+    assert turn.status == "completed"
+    assert turn.failure_code is None
     assert turn.request_fingerprint is None
     assert turn.claim_token is not None
+    assert turn.agent_run_id == "test-run-123"
+    assert turn.response_text == "I can help with that request."
+
+    agent_service.execute.assert_awaited_once()
+    call = agent_service.execute.await_args
+    assert call.kwargs["agent_name"] == "voice-receptionist"
+    request = call.kwargs["request"]
+    assert request.input == "Please schedule an appointment."
+    assert request.transient_input is True
+    assert request.tenant_id == "tenant-trusted"
+    assert request.session_id == turn.turn_id
     assert "Please schedule an appointment." not in str(turn.__dict__)
     assert not hasattr(turn, "transcript")
     assert not hasattr(turn, "raw_payload")
 
 
 def test_speech_callback_does_not_log_transcript_or_callback_token(speech_env, caplog):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
     transcript = "privacy-canary-transcript-7f3a9c"
     caplog.set_level(logging.DEBUG)
@@ -216,15 +237,17 @@ def test_speech_callback_does_not_log_transcript_or_callback_token(speech_env, c
     assert TURN_TOKEN not in caplog.text
 
     turn = read_turn(session_factory)
-    assert turn.status == "failed"
-    assert turn.failure_code == "agent_not_configured"
+    assert turn.status == "completed"
+    assert turn.failure_code is None
     assert turn.request_fingerprint is None
-    assert turn.response_text is None
+    assert turn.response_text == "I can help with that request."
     assert transcript not in str(turn.__dict__)
+    agent_service.execute.assert_awaited_once()
+    assert agent_service.execute.await_args.kwargs["request"].input == transcript
 
 
 def test_duplicate_speech_callback_does_not_reclaim_turn(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     first = send_speech(client)
@@ -235,12 +258,14 @@ def test_duplicate_speech_callback_does_not_reclaim_turn(speech_env):
     assert "already been processed" in second.text
 
     turn = read_turn(session_factory)
-    assert turn.status == "failed"
-    assert turn.failure_code == "agent_not_configured"
+    assert turn.status == "completed"
+    assert turn.failure_code is None
+    assert turn.agent_run_id == "test-run-123"
+    agent_service.execute.assert_awaited_once()
 
 
 def test_empty_speech_marks_turn_no_input(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     response = send_speech(
@@ -258,7 +283,7 @@ def test_empty_speech_marks_turn_no_input(speech_env):
 
 
 def test_invalid_signature_cannot_change_turn(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     response = send_speech(
@@ -273,7 +298,7 @@ def test_invalid_signature_cannot_change_turn(speech_env):
 
 
 def test_call_identity_mismatch_is_rejected(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     items = speech_items(CallSid="CA999999999")
@@ -286,7 +311,7 @@ def test_call_identity_mismatch_is_rejected(speech_env):
 
 
 def test_callback_query_must_match_configured_base(speech_env):
-    client, session_factory = speech_env
+    client, session_factory, agent_service = speech_env
     seed_turn(session_factory)
 
     response = send_speech(
@@ -297,3 +322,124 @@ def test_callback_query_must_match_configured_base(speech_env):
     assert response.status_code == 403
     turn = read_turn(session_factory)
     assert turn.status == "awaiting_input"
+
+
+def test_agent_execution_failure_is_generic_and_does_not_leak_data(speech_env, caplog):
+    client, session_factory, agent_service = speech_env
+    seed_turn(session_factory)
+
+    transcript = "failure-canary-transcript-8a42"
+    exception_secret = "private-provider-error-secret-92c1"
+    agent_service.execute.side_effect = RuntimeError(exception_secret)
+
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.WARNING, logger="httpx")
+
+    response = send_speech(
+        client,
+        items=speech_items(SpeechResult=transcript),
+    )
+
+    assert response.status_code == 200
+    assert "<Response>" in response.text
+    assert "can't process that request right now" in response.text
+    assert transcript not in response.text
+    assert exception_secret not in response.text
+    assert TURN_TOKEN not in response.text
+
+    assert transcript not in caplog.text
+    assert exception_secret not in caplog.text
+    assert TURN_TOKEN not in caplog.text
+
+    turn = read_turn(session_factory)
+    assert turn.status == "failed"
+    assert turn.failure_code == "agent_execution_failed"
+    assert turn.request_fingerprint is None
+    assert turn.response_text is None
+    assert turn.agent_run_id is None
+    assert transcript not in str(turn.__dict__)
+    assert exception_secret not in str(turn.__dict__)
+
+    agent_service.execute.assert_awaited_once()
+
+
+def test_completion_persistence_failure_does_not_rerun_agent(
+    speech_env,
+    monkeypatch,
+    caplog,
+):
+    client, session_factory, agent_service = speech_env
+    seed_turn(session_factory)
+
+    private_error = "private-db-error-canary-91"
+
+    def fail_completion(self, **kwargs):
+        raise RuntimeError(private_error)
+
+    monkeypatch.setattr(
+        VoiceTurnRepository,
+        "complete_transient",
+        fail_completion,
+    )
+
+    caplog.set_level(logging.DEBUG)
+
+    response = send_speech(client)
+
+    assert response.status_code == 200
+    assert "Please try again later." in response.text
+    assert private_error not in response.text
+    assert private_error not in caplog.text
+
+    # The agent ran exactly once; persistence failure must not trigger
+    # a second execution of potentially side-effecting actions.
+    agent_service.execute.assert_awaited_once()
+
+    turn = read_turn(session_factory)
+    assert turn.status == "failed"
+    assert turn.failure_code == "response_persistence_failed"
+    assert turn.response_text is None
+    assert turn.agent_run_id is None
+    assert turn.request_fingerprint is None
+
+
+def test_ambiguous_completion_does_not_overwrite_completed_turn(
+    speech_env,
+    monkeypatch,
+    caplog,
+):
+    client, session_factory, agent_service = speech_env
+    seed_turn(session_factory)
+
+    original_complete = VoiceTurnRepository.complete_transient
+    private_error = "private-ambiguous-commit-canary-17"
+
+    def complete_then_raise(self, **kwargs):
+        original_complete(self, **kwargs)
+        # Simulate a successful commit followed by an ambiguous client error.
+        raise RuntimeError(private_error)
+
+    monkeypatch.setattr(
+        VoiceTurnRepository,
+        "complete_transient",
+        complete_then_raise,
+    )
+
+    caplog.set_level(logging.DEBUG)
+
+    response = send_speech(client)
+
+    assert response.status_code == 200
+    assert "Please try again later." in response.text
+    assert private_error not in response.text
+    assert private_error not in caplog.text
+
+    # The agent may have performed side effects: never execute it again.
+    agent_service.execute.assert_awaited_once()
+
+    turn = read_turn(session_factory)
+    assert turn.status == "completed"
+    assert turn.failure_code is None
+    assert turn.response_text == "I can help with that request."
+    assert turn.agent_run_id == "test-run-123"
+    assert turn.request_fingerprint is None

@@ -10,7 +10,10 @@ from starlette.datastructures import FormData
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
+from ai_platform.agents.models import AgentRequest
 from ai_platform.llm_gateway.config.settings import settings
+from app.control_plane.agent_runs.application_service import AgentRunApplicationService
+from app.control_plane.dependencies import get_agent_run_application_service
 from app.control_plane.persistence.database import get_db
 from app.control_plane.persistence.models import VoiceCallRecord
 from app.control_plane.voice.call_repository import (
@@ -300,6 +303,10 @@ def _speech_terminal_response(message: str) -> Response:
 async def twilio_speech_callback(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    agent_service: Annotated[
+        AgentRunApplicationService,
+        Depends(get_agent_run_application_service),
+    ],
 ) -> Response:
     """Authenticate and claim one speech turn without persisting its transcript."""
     try:
@@ -447,15 +454,74 @@ async def twilio_speech_callback(
     if not claimed or claim_token is None:
         return _speech_terminal_response("This response has already been processed. Goodbye.")
 
-    # Keep execution disabled until the dedicated receptionist-agent
-    # mapping and transient-input privacy guarantees are verified.
-    turns.fail_transient(
+    # Only the trusted persisted call/line/turn records determine tenant
+    # ownership. Caller identity is not authenticated by the speech transcript.
+    agent_request = AgentRequest(
+        input=speech,
+        transient_input=True,
         tenant_id=claimed_turn.tenant_id,
-        turn_id=claimed_turn.turn_id,
-        claim_token=claim_token,
-        failure_code="agent_not_configured",
+        session_id=claimed_turn.turn_id,
     )
 
-    return _speech_terminal_response(
-        "I'm sorry, I can't process that request right now. Please try again later. Goodbye."
-    )
+    try:
+        result = await agent_service.execute(
+            agent_name="voice-receptionist",
+            request=agent_request,
+        )
+        response_text = result.response.output
+
+        # Do not persist or speak malformed or unexpectedly large agent output.
+        if (
+            not isinstance(response_text, str)
+            or not response_text.strip()
+            or len(response_text) > 8000
+        ):
+            raise ValueError("Invalid receptionist response")
+
+    except Exception:
+        # Never log or persist exception details: they may contain caller data.
+        try:
+            turns.fail_transient(
+                tenant_id=claimed_turn.tenant_id,
+                turn_id=claimed_turn.turn_id,
+                claim_token=claim_token,
+                failure_code="agent_execution_failed",
+            )
+        except VoiceTurnConflictError:
+            return _speech_terminal_response("This response has already been processed. Goodbye.")
+
+        return _speech_terminal_response(
+            "I'm sorry, I can't process that request right now. Please try again later. Goodbye."
+        )
+
+    try:
+        turns.complete_transient(
+            tenant_id=claimed_turn.tenant_id,
+            turn_id=claimed_turn.turn_id,
+            claim_token=claim_token,
+            response_text=response_text.strip(),
+            agent_run_id=result.run_id,
+        )
+    except VoiceTurnConflictError:
+        return _speech_terminal_response("This response has already been processed. Goodbye.")
+    except Exception:
+        # The agent has already executed. Never retry it just because
+        # persisting the voice response failed, and never expose the error.
+        try:
+            turns.fail_transient(
+                tenant_id=claimed_turn.tenant_id,
+                turn_id=claimed_turn.turn_id,
+                claim_token=claim_token,
+                failure_code="response_persistence_failed",
+            )
+        except Exception:
+            # The database may still be unavailable, or the completion
+            # may have committed despite an ambiguous client-side error.
+            # Do not mask this with another retry or expose details.
+            pass
+
+        return _speech_terminal_response(
+            "I'm sorry, I can't process that request right now. " "Please try again later. Goodbye."
+        )
+
+    return _speech_terminal_response(response_text.strip())
