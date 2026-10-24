@@ -6,7 +6,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 _E164_PATTERN = re.compile(r"^\+[1-9][0-9]{1,14}$")
 
 

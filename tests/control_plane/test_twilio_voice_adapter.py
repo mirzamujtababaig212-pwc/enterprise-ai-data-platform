@@ -14,7 +14,6 @@ from app.control_plane.voice.adapters import (
 from app.control_plane.voice.models import VoiceEventType
 from app.control_plane.voice.twilio_adapter import TwilioVoiceStatusAdapter
 
-
 AUTH_TOKEN = "test-twilio-auth-token"
 CALLBACK_URL = "https://voice.example.test/api/v1/voice/webhooks/twilio/status?source=prod"
 TIMESTAMP = "2026-10-18T10:00:00Z"

@@ -222,8 +222,9 @@ def test_span_filter_sanitizes_event_link_and_status_content():
 
 
 def test_gateway_tracer_proxy_uses_noop_when_export_is_disabled(monkeypatch):
-    import ai_platform.llm_gateway.tracing.tracing as tracing_module
     from opentelemetry import trace
+
+    import ai_platform.llm_gateway.tracing.tracing as tracing_module
 
     monkeypatch.setenv("OTEL_EXPORT_ENABLED", "false")
     monkeypatch.setattr(
@@ -271,6 +272,7 @@ def test_configure_tracing_explicitly_uses_noop_provider_when_disabled(monkeypat
 
     from fastapi import FastAPI
     from opentelemetry import trace
+
     import ai_platform.llm_gateway.tracing.tracing as tracing_module
 
     instrument_app = Mock()

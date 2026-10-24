@@ -4,7 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 _PHONE_PATTERN = r"^\+[1-9][0-9]{1,14}$"
 
 

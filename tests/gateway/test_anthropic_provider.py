@@ -336,9 +336,8 @@ def test_model_capabilities(provider):
 
 
 def test_authentication_error_translation_does_not_expose_upstream_message():
-    from anthropic import AuthenticationError
-
     import httpx
+    from anthropic import AuthenticationError
 
     marker = "SENSITIVE_TEST_MARKER_91A7"
     request = httpx.Request(

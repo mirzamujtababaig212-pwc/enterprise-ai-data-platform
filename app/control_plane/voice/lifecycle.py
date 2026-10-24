@@ -1,6 +1,5 @@
 from app.control_plane.voice.models import VoiceCallStatus, VoiceEventType
 
-
 _TERMINAL_STATUSES = frozenset(
     {
         VoiceCallStatus.COMPLETED,
