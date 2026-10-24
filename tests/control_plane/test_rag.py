@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.control_plane.app import app
+from app.control_plane.routes.rag import _authenticated_tenant_id
 from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
@@ -150,7 +154,7 @@ class FakeChatService:
         user_id: str | None = None,
     ):
         return {
-            "reply": "The enterprise platform supports RAG and model routing.",
+            "reply": "The enterprise platform supports RAG and model routing. [Source 1]",
         }
 
 
@@ -240,6 +244,7 @@ def test_control_plane_rag_index_executes() -> None:
 
     assert saved["document"].id == "doc-control-plane"
     assert saved["document"].metadata["source"] == "architecture.md"
+    assert saved["document"].metadata["tenant_id"] == "tenant-a"
     assert len(saved["chunks"]) == 1
     assert saved["chunks"][0].id == "doc-control-plane:chunk:0"
     assert saved["embedding_model"] == "test-physical-embedding"
@@ -256,6 +261,59 @@ def test_control_plane_rag_index_executes() -> None:
     assert identity.dimension == 2
 
 
+def test_control_plane_rag_index_preserves_matching_tenant_metadata() -> None:
+    indexer = build_test_indexer()
+    state_repository = FakeRAGStateRepository()
+
+    app.dependency_overrides[get_rag_indexer] = lambda: indexer
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.post(
+        "/api/v1/rag/index",
+        json={
+            "document_id": "doc-control-plane-matching-tenant",
+            "content": "Tenant-scoped enterprise document.",
+            "metadata": {
+                "source": "architecture.md",
+                "tenant_id": "tenant-a",
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    saved = state_repository.saved[0]
+
+    assert saved["document"].metadata["tenant_id"] == "tenant-a"
+
+
+def test_control_plane_rag_index_rejects_conflicting_tenant_metadata() -> None:
+    indexer = build_test_indexer()
+    state_repository = FakeRAGStateRepository()
+
+    app.dependency_overrides[get_rag_indexer] = lambda: indexer
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.post(
+        "/api/v1/rag/index",
+        json={
+            "document_id": "doc-control-plane-conflicting-tenant",
+            "content": "Conflicting tenant document.",
+            "metadata": {
+                "source": "architecture.md",
+                "tenant_id": "tenant-b",
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Document metadata tenant_id conflicts with authenticated tenant."
+    )
+    assert state_repository.saved == []
+
+
 def test_control_plane_rag_delete_removes_vectors_and_state() -> None:
     indexer = build_test_indexer()
     state_repository = FakeRAGStateRepository()
@@ -264,7 +322,7 @@ def test_control_plane_rag_delete_removes_vectors_and_state() -> None:
     document = Document(
         id="doc-delete",
         content="Enterprise AI Platform deletion test.",
-        metadata={"source": "test"},
+        metadata={"source": "test", "tenant_id": "tenant-a"},
     )
 
     import asyncio
@@ -300,6 +358,69 @@ def test_control_plane_rag_delete_removes_vectors_and_state() -> None:
     assert state_repository.get_chunks("doc-delete") == []
 
 
+def test_control_plane_rag_index_does_not_overwrite_another_tenant_document() -> None:
+    indexer = build_test_indexer()
+    state_repository = FakeRAGStateRepository()
+
+    original = Document(
+        id="doc-owned-by-tenant-b",
+        content="Original tenant-b document.",
+        metadata={"tenant_id": "tenant-b", "source": "original"},
+    )
+    state_repository.save_document(original, [])
+
+    app.dependency_overrides[get_rag_indexer] = lambda: indexer
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.post(
+        "/api/v1/rag/index",
+        json={
+            "document_id": original.id,
+            "content": "Attempted tenant-a overwrite.",
+            "metadata": {"source": "overwrite"},
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert state_repository.get_document(original.id) == original
+    assert len(state_repository.saved) == 1
+
+
+def test_control_plane_rag_delete_does_not_remove_another_tenant_document() -> None:
+    state_repository = FakeRAGStateRepository()
+    vector_store = FakeRAGVectorStore()
+
+    document = Document(
+        id="doc-owned-by-tenant-b",
+        content="Private tenant-b document.",
+        metadata={"tenant_id": "tenant-b"},
+    )
+    from rag.models import DocumentChunk
+
+    chunk = DocumentChunk(
+        id="doc-owned-by-tenant-b:chunk:0",
+        document_id=document.id,
+        content=document.content,
+        chunk_index=0,
+        metadata={"tenant_id": "tenant-b"},
+    )
+    state_repository.save_document(document, [chunk])
+
+    app.dependency_overrides[get_rag_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_rag_state_repository] = lambda: state_repository
+
+    response = client.delete(
+        f"/api/v1/rag/{document.id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 204
+    assert state_repository.get_document(document.id) == document
+    assert state_repository.get_chunks(document.id) == [chunk]
+    vector_store.delete_chunks.assert_not_awaited()
+
+
 def test_control_plane_rag_delete_missing_document_is_idempotent() -> None:
     state_repository = FakeRAGStateRepository()
     vector_store = FakeRAGVectorStore()
@@ -323,7 +444,7 @@ def test_control_plane_rag_delete_does_not_remove_state_when_vector_delete_fails
     document = Document(
         id="doc-vector-failure",
         content="Vector deletion failure test.",
-        metadata={},
+        metadata={"tenant_id": "tenant-a"},
     )
 
     chunk = __import__(
@@ -443,7 +564,7 @@ def test_control_plane_rag_query_executes() -> None:
 
     payload = response.json()
 
-    assert payload["answer"] == "The enterprise platform supports RAG and model routing."
+    assert payload["answer"] == "The enterprise platform supports RAG and model routing. [Source 1]"
     assert payload["retrieved_count"] == 1
     assert len(payload["sources"]) == 1
 
@@ -727,3 +848,63 @@ def test_control_plane_rag_query_rejects_cross_tenant_metadata_filter() -> None:
 
     assert response.status_code == 400
     assert "authenticated tenant" in response.json()["detail"]
+
+
+def _request_with_tenant_state(state: dict) -> Request:
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/rag/query",
+        "raw_path": b"/api/v1/rag/query",
+        "query_string": b"",
+        "headers": [],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+        "state": state,
+    }
+    return Request(scope)
+
+
+def test_authenticated_tenant_id_returns_tenant_from_request_state() -> None:
+    request = _request_with_tenant_state({"tenant_id": "tenant-a"})
+
+    assert _authenticated_tenant_id(request) == "tenant-a"
+
+
+def test_authenticated_tenant_id_rejects_missing_tenant() -> None:
+    request = _request_with_tenant_state({})
+
+    with pytest.raises(HTTPException) as exc_info:
+        _authenticated_tenant_id(request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Authenticated tenant identity is required."
+
+
+def test_authenticated_tenant_id_rejects_empty_tenant() -> None:
+    request = _request_with_tenant_state({"tenant_id": ""})
+
+    with pytest.raises(HTTPException) as exc_info:
+        _authenticated_tenant_id(request)
+
+    assert exc_info.value.status_code == 403
+
+
+def test_authenticated_tenant_id_rejects_whitespace_tenant() -> None:
+    request = _request_with_tenant_state({"tenant_id": "   "})
+
+    with pytest.raises(HTTPException) as exc_info:
+        _authenticated_tenant_id(request)
+
+    assert exc_info.value.status_code == 403
+
+
+def test_authenticated_tenant_id_rejects_non_string_tenant() -> None:
+    request = _request_with_tenant_state({"tenant_id": 123})
+
+    with pytest.raises(HTTPException) as exc_info:
+        _authenticated_tenant_id(request)
+
+    assert exc_info.value.status_code == 403

@@ -136,10 +136,8 @@ class BedrockProvider(BaseProvider):
 
     @staticmethod
     def _error_message(exc: ClientError) -> str:
-        error = exc.response.get("Error", {})
-        code = error.get("Code", "UnknownError")
-        message = error.get("Message", str(exc))
-        return f"{code}: {message}"
+        # Provider-supplied error messages can contain sensitive request data.
+        return "AWS Bedrock request failed."
 
     @classmethod
     def _raise_provider_error(cls, exc: Exception) -> None:
@@ -152,7 +150,6 @@ class BedrockProvider(BaseProvider):
         if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             code = str(error.get("Code", "")).lower()
-            message = cls._error_message(exc)
 
             if code in {
                 "accessdeniedexception",
@@ -161,15 +158,13 @@ class BedrockProvider(BaseProvider):
                 "expiredtokenexception",
                 "invalidclienttokenid",
             }:
-                raise ProviderAuthenticationError(
-                    f"Bedrock authentication failed: {message}"
-                ) from exc
+                raise ProviderAuthenticationError("Bedrock authentication failed.") from exc
 
             if code in {
                 "throttlingexception",
                 "toomanyrequestsexception",
             }:
-                raise ProviderRateLimitError(f"Bedrock rate limit exceeded: {message}") from exc
+                raise ProviderRateLimitError("Bedrock rate limit exceeded.") from exc
 
             if code in {
                 "servicequotafeatureexceededexception",
@@ -177,12 +172,12 @@ class BedrockProvider(BaseProvider):
                 "quotaexceededexception",
                 "limitexceededexception",
             }:
-                raise ProviderQuotaExceededError(f"Bedrock quota exceeded: {message}") from exc
+                raise ProviderQuotaExceededError("Bedrock quota exceeded.") from exc
 
-            raise ProviderExecutionError(f"Bedrock request failed: {message}") from exc
+            raise ProviderExecutionError("Bedrock request failed.") from exc
 
         if isinstance(exc, BotoCoreError):
-            raise ProviderConnectionError(f"Bedrock SDK error: {exc}") from exc
+            raise ProviderConnectionError("AWS Bedrock SDK request failed.") from exc
 
         raise ProviderExecutionError("Unexpected Bedrock provider error.") from exc
 
@@ -256,7 +251,7 @@ class BedrockProvider(BaseProvider):
         ):
             raise
         except Exception as exc:
-            logger.exception("Bedrock chat request failed.")
+            logger.error("Bedrock chat request failed.")
             self._raise_provider_error(exc)
             raise AssertionError("unreachable")
 
@@ -320,7 +315,7 @@ class BedrockProvider(BaseProvider):
         ):
             raise
         except Exception as exc:
-            logger.exception("Bedrock streaming request failed.")
+            logger.error("Bedrock streaming request failed.")
             self._raise_provider_error(exc)
 
     async def embeddings(
@@ -378,7 +373,7 @@ class BedrockProvider(BaseProvider):
         ):
             raise
         except Exception as exc:
-            logger.exception("Bedrock embedding request failed.")
+            logger.error("Bedrock embedding request failed.")
             self._raise_provider_error(exc)
             raise AssertionError("unreachable")
 

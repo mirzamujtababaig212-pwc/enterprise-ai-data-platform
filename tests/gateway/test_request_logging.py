@@ -180,3 +180,48 @@ async def test_metrics_are_recorded(
     mock_input.inc.assert_called_once_with(10)
     mock_output.inc.assert_called_once_with(20)
     mock_cost.inc.assert_called_once_with(0.015)
+
+
+@patch(
+    "ai_platform.llm_gateway.middleware.request_logging.logger",
+)
+@pytest.mark.asyncio
+async def test_chat_content_is_not_written_to_request_logs(
+    mock_logger,
+    middleware,
+):
+    secret_prompt = "private voice transcript: customer account 12345"
+    secret_message = "another private conversation detail"
+
+    payload = {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "prompt": secret_prompt,
+        "messages": [
+            {"role": "user", "content": secret_message},
+        ],
+    }
+    request = make_request(body=json.dumps(payload).encode())
+    response = Response(status_code=200)
+
+    await middleware.dispatch(
+        request,
+        AsyncMock(return_value=response),
+    )
+
+    completed_logs = [
+        call
+        for call in mock_logger.info.call_args_list
+        if call.args and call.args[0] == "HTTP Request Completed"
+    ]
+    assert len(completed_logs) == 1
+
+    logged_body = completed_logs[0].kwargs["extra"]["request_body"]
+    assert logged_body["provider"] == "openai"
+    assert logged_body["model"] == "gpt-4o"
+    assert logged_body["prompt"] == "********"
+    assert logged_body["messages"] == "********"
+
+    serialized_log_body = json.dumps(logged_body)
+    assert secret_prompt not in serialized_log_body
+    assert secret_message not in serialized_log_body

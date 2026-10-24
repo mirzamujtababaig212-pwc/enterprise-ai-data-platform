@@ -69,6 +69,7 @@ class AgentExecutionEvent:
     step_name: str | None = None
     attempt: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    transient_input: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(

@@ -34,8 +34,9 @@ class ToolAuthorizationAuditObserver(ToolAuthorizationAuditSink):
 
         metadata = {
             "allowed": record.allowed,
-            "reason": record.reason,
         }
+        if not record.transient_input:
+            metadata["reason"] = record.reason
 
         if record.policy_id is not None:
             metadata["policy_id"] = record.policy_id
@@ -51,6 +52,7 @@ class ToolAuthorizationAuditObserver(ToolAuthorizationAuditSink):
             user_id=record.principal,
             tool_name=record.tool_name,
             call_id=record.call_id,
+            transient_input=record.transient_input,
             metadata=metadata,
         )
 

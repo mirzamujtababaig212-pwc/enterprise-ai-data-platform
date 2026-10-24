@@ -184,3 +184,52 @@ async def test_tool_governance_record_does_not_copy_principal_into_metadata() ->
     assert event.user_id == "sensitive-user-id"
     assert "principal" not in event.metadata
     assert "sensitive-user-id" not in event.metadata
+
+
+@pytest.mark.asyncio
+async def test_transient_authorization_reason_is_not_emitted() -> None:
+    observer = RecordingAgentExecutionObserver()
+    audit_observer = ToolAuthorizationAuditObserver(observer)
+    secret = "private transcript marker"
+
+    record = ToolAuthorizationAuditRecord(
+        principal="user-123",
+        tool_name="rag.search",
+        allowed=False,
+        reason=secret,
+        agent_name="enterprise-rag-analyst",
+        transient_input=True,
+    )
+
+    await audit_observer.record(record)
+
+    assert len(observer.events) == 1
+    event = observer.events[0]
+    assert event.transient_input is True
+    assert "reason" not in event.metadata
+    assert secret not in repr(event.metadata)
+
+
+@pytest.mark.asyncio
+async def test_transient_governance_reason_and_details_are_not_emitted() -> None:
+    observer = RecordingAgentExecutionObserver()
+    governance_observer = ToolGovernanceDecisionObserver(observer)
+    secret = "private transcript marker"
+
+    record = ToolGovernanceDecisionRecord(
+        tool_name="rag.search",
+        decision="deny",
+        reason=secret,
+        agent_name="enterprise-rag-analyst",
+        details={"policy_error": secret},
+        transient_input=True,
+    )
+
+    await governance_observer.record(record)
+
+    assert len(observer.events) == 1
+    event = observer.events[0]
+    assert event.transient_input is True
+    assert "reason" not in event.metadata
+    assert "details" not in event.metadata
+    assert secret not in repr(event.metadata)

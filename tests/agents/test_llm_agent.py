@@ -7657,6 +7657,82 @@ async def test_llm_agent_resume_continues_with_new_tool_call_and_checkpoint() ->
     assert '"query": "follow-up"' in new_checkpoint.messages[5].content
 
 
+def test_llm_agent_checkpoint_tool_result_restore_rejects_transient_input() -> None:
+    context, _ = make_context(
+        request=AgentRequest(
+            input="Sensitive voice transcript",
+            user_id="user-123",
+            session_id="session-456",
+            transient_input=True,
+        ),
+        run_id="run-transient-restore",
+    )
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test agent.",
+            system_prompt="System.",
+            model="mock-gpt",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Transient-input executions cannot restore tool results " "from checkpoint messages.",
+    ):
+        agent._restore_orchestration_tool_result_from_messages(
+            context,
+            (),
+            tool_round=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_agent_resume_rejects_transient_input() -> None:
+    context, _ = make_context()
+    context = AgentExecutionContext(
+        AgentRequest(
+            input="Sensitive voice transcript",
+            user_id="user-123",
+            session_id="session-456",
+            transient_input=True,
+        ),
+        tools=context.tools,
+        llm=context.llm,
+        run_id="run-transient-resume",
+    )
+
+    checkpoint = AgentExecutionCheckpoint(
+        schema_version=AgentExecutionCheckpoint.CURRENT_SCHEMA_VERSION,
+        run_id="run-transient-resume",
+        agent_name="test-llm-agent",
+        session_id="session-456",
+        user_id="user-123",
+        messages=(
+            system_message("System."),
+            user_message("Sensitive voice transcript"),
+        ),
+        tool_round=0,
+        position=AgentCheckpointPosition.AFTER_TOOL_EXECUTION,
+        metadata={},
+    )
+
+    agent = LLMAgent(
+        AgentDefinition(
+            name="test-llm-agent",
+            description="Test agent.",
+            system_prompt="System.",
+            model="mock-gpt",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Transient-input executions cannot be resumed from checkpoints.",
+    ):
+        await agent.resume(context, checkpoint)
+
+
 @pytest.mark.asyncio
 async def test_llm_agent_resume_rejects_mismatched_agent() -> None:
     context, _ = make_context()

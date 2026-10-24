@@ -16,6 +16,7 @@ class ToolAuthorizationAuditRecord:
     call_id: str | None = None
     agent_name: str | None = None
     session_id: str | None = None
+    transient_input: bool = False
 
     def __post_init__(self) -> None:
         if not self.principal.strip():

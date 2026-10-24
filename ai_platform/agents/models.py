@@ -109,6 +109,7 @@ class AgentRequest:
     effective_governance: EffectiveAgentGovernance | None = None
 
     metadata: dict[str, Any] = field(default_factory=dict)
+    transient_input: bool = False
 
     def __post_init__(self) -> None:
         if not self.input.strip():

@@ -67,4 +67,4 @@ async def test_dispatch_exception(
 
     assert "Internal Server Error" in body
 
-    mock_logger.exception.assert_called_once()
+    mock_logger.error.assert_called_once()

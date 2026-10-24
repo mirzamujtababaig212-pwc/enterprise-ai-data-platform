@@ -1416,6 +1416,42 @@ async def test_execute_persists_failed_run_for_lookup_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_redacts_transient_input_from_persisted_failure() -> None:
+    repository = _repository()
+    transcript = "TRANSCRIPT_SECRET_7f3a9c"
+
+    runtime = Mock()
+    runtime.run = AsyncMock(
+        side_effect=RuntimeError(f"provider failed while processing: {transcript}"),
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    with pytest.raises(RuntimeError, match="TRANSCRIPT_SECRET_7f3a9c"):
+        await service.execute(
+            agent_name="enterprise-analyst",
+            request=AgentRequest(
+                input=transcript,
+                transient_input=True,
+            ),
+        )
+
+    pending = repository.create.call_args.args[0]
+    failed = repository.failed_run
+
+    assert pending.request_snapshot.transient_input is True
+    assert transcript not in pending.request_snapshot.model_dump_json()
+    assert failed is not None
+    assert failed.error_type == "RuntimeError"
+    assert failed.error_message == "Agent execution failed."
+    assert transcript not in failed.error_message
+    repository.fail_if_owner.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_execute_does_not_mark_failed_when_running_persistence_fails() -> None:
     repository = _repository()
     repository.claim_pending_run.side_effect = RuntimeError("running persistence failed")
@@ -3670,3 +3706,35 @@ async def test_execute_injects_retrieval_artifact_and_overrides_caller_metadata_
         pending.request_snapshot.metadata["rag_retriever_artifact"]
         == request.metadata["rag_retriever_artifact"]
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_persist_output_for_transient_input() -> None:
+    repository = _repository()
+    sensitive_output = "TRANSCRIPT_DERIVED_SECRET_91bd"
+
+    runtime = Mock()
+    runtime.run = AsyncMock(
+        return_value=_response(output=sensitive_output),
+    )
+
+    service = AgentRunApplicationService(
+        runtime=runtime,
+        repository=repository,
+    )
+
+    result = await service.execute(
+        agent_name="enterprise-analyst",
+        request=AgentRequest(
+            input="transient caller transcript",
+            transient_input=True,
+        ),
+    )
+
+    assert result.response.output == sensitive_output
+    repository.complete_if_owner.assert_called_once()
+    assert repository.complete_if_owner.call_args.kwargs["output"] is None
+
+    completed = repository.completed_run
+    assert completed is not None
+    assert completed.output is None

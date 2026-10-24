@@ -44,7 +44,7 @@ async def test_rag_query_returns_answer_and_sources():
     chat_service = MagicMock()
     chat_service.generate = AsyncMock(
         return_value={
-            "reply": "The platform supports RAG and model routing.",
+            "reply": ("The platform supports RAG [Source 1] " "and model routing [Source 2]."),
         }
     )
 
@@ -58,7 +58,9 @@ async def test_rag_query_returns_answer_and_sources():
         top_k=2,
     )
 
-    assert result.answer == ("The platform supports RAG and model routing.")
+    assert result.answer == (
+        "The platform supports RAG [Source 1] " "and model routing [Source 2]."
+    )
 
     assert result.retrieved_count == 2
 
@@ -69,12 +71,12 @@ async def test_rag_query_returns_answer_and_sources():
     assert result.sources[0].score == 0.95
     assert result.sources[0].evidence_id == "evidence:doc-1:chunk:0"
     assert result.sources[0].retrieval_rank == 1
-    assert result.sources[0].source_ref is None
+    assert result.sources[0].source_ref == {"source": "architecture.md"}
     assert result.sources[0].locator is None
 
     assert result.sources[1].evidence_id == "evidence:doc-2:chunk:0"
     assert result.sources[1].retrieval_rank == 2
-    assert result.sources[1].source_ref is None
+    assert result.sources[1].source_ref == {"source": "gateway.md"}
     assert result.sources[1].locator is None
 
     retriever.retrieve.assert_awaited_once_with(
@@ -122,7 +124,12 @@ async def test_rag_query_passes_min_score_and_metadata_filter() -> None:
         metadata_filter=metadata_filter,
     )
 
+    assert result.answer == (
+        "I couldn't find sufficient evidence in the indexed sources " "to answer this question."
+    )
+    assert result.sources == ()
     assert result.retrieved_count == 0
+    chat_service.generate.assert_not_awaited()
 
     retriever.retrieve.assert_awaited_once_with(
         "What does the platform support?",
@@ -411,11 +418,14 @@ async def test_rag_query_observer_failure_is_non_fatal() -> None:
 
     result = await service.query("normal query")
 
-    assert result.answer == "safe response"
+    assert result.answer == (
+        "I couldn't find sufficient evidence in the indexed sources " "to answer this question."
+    )
+    assert result.sources == ()
     assert result.retrieved_count == 0
     assert observer.calls == 1
     retriever.retrieve.assert_awaited_once()
-    chat_service.generate.assert_awaited_once()
+    chat_service.generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -477,7 +487,7 @@ async def test_rag_query_propagates_source_ref_and_locator_to_evidence() -> None
     chat_service = MagicMock()
     chat_service.generate = AsyncMock(
         return_value={
-            "reply": "Customer data is stored in the analytics platform.",
+            "reply": "Customer data is stored in the analytics platform [Source 1].",
         }
     )
 
@@ -499,3 +509,126 @@ async def test_rag_query_propagates_source_ref_and_locator_to_evidence() -> None
     assert source.locator == locator
     assert source.metadata["source_ref"] == source_ref
     assert source.metadata["locator"] == locator
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "The platform supports RAG.",
+        "The platform supports RAG [Source 2].",
+        "The platform supports RAG [Source X].",
+        "The platform supports RAG [Source 1] [Source 99].",
+        "The platform supports RAG [Source 1] [Source X].",
+        "The platform supports RAG [Source 1] [Source X",
+    ],
+)
+async def test_rag_query_abstains_on_missing_or_invalid_citations(
+    reply: str,
+) -> None:
+    retrieved = [
+        RetrievalResult(
+            chunk=DocumentChunk(
+                id="doc-1:chunk:0",
+                document_id="doc-1",
+                content="The enterprise platform supports RAG.",
+                metadata={"source": "architecture.md"},
+                chunk_index=0,
+            ),
+            score=0.95,
+        ),
+    ]
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=retrieved)
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(return_value={"reply": reply})
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+    )
+
+    result = await service.query("What does the platform support?")
+
+    assert result.answer == (
+        "I couldn't find sufficient evidence in the indexed sources " "to answer this question."
+    )
+    # Retain retrieved evidence for diagnostics even when the answer abstains.
+    assert result.retrieved_count == 1
+    assert len(result.sources) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_query_accepts_valid_source_citation() -> None:
+    retrieved = [
+        RetrievalResult(
+            chunk=DocumentChunk(
+                id="doc-1:chunk:0",
+                document_id="doc-1",
+                content="The enterprise platform supports RAG.",
+                metadata={"source": "architecture.md"},
+                chunk_index=0,
+            ),
+            score=0.95,
+        ),
+    ]
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=retrieved)
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(
+        return_value={"reply": "The platform supports RAG [Source 1]."}
+    )
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+    )
+
+    result = await service.query("What does the platform support?")
+
+    assert result.answer == "The platform supports RAG [Source 1]."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I couldn't find sufficient evidence in the retrieved sources " "to answer this question.",
+        "I don't have enough information to answer this question.",
+        "The retrieved context does not contain enough information " "to answer this question.",
+    ],
+)
+async def test_rag_query_accepts_explicit_abstention(reply: str) -> None:
+    retrieved = [
+        RetrievalResult(
+            chunk=DocumentChunk(
+                id="doc-1:chunk:0",
+                document_id="doc-1",
+                content="The enterprise platform supports RAG.",
+                metadata={"source": "architecture.md"},
+                chunk_index=0,
+            ),
+            score=0.95,
+        ),
+    ]
+
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=retrieved)
+
+    chat_service = MagicMock()
+    chat_service.generate = AsyncMock(return_value={"reply": reply})
+
+    service = RAGQueryService(
+        retriever=retriever,
+        chat_service=chat_service,
+    )
+
+    result = await service.query("What does the platform support?")
+
+    assert result.answer == reply
+    assert result.retrieved_count == 1
+    assert len(result.sources) == 1

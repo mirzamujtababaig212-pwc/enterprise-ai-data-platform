@@ -20,6 +20,7 @@ class ToolGovernanceDecisionRecord:
     session_id: str | None = None
     principal: str | None = None
     details: dict[str, Any] | None = None
+    transient_input: bool = False
 
     def __post_init__(self) -> None:
         if not self.tool_name.strip():

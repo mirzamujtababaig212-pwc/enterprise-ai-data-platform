@@ -24,7 +24,7 @@ async def provider_not_found_handler(
 ):
     return JSONResponse(
         status_code=400,
-        content={"error": str(exc)},
+        content={"error": "Unknown provider or unsupported model."},
     )
 
 
@@ -37,7 +37,7 @@ async def http_exception_handler(
         content=ErrorResponse(
             error=ErrorDetail(
                 code=exc.status_code,
-                message=exc.detail,
+                message=(exc.detail if exc.status_code < 500 else "Internal server error."),
             ),
             request_id=getattr(request.state, "request_id", None),
         ).model_dump(),
@@ -68,7 +68,7 @@ async def provider_auth_handler(
         status_code=401,
         content={
             "status": "error",
-            "error": {"code": 401, "message": str(exc)},
+            "error": {"code": 401, "message": "Provider authentication failed."},
             "request_id": getattr(request.state, "request_id", None),
         },
     )
@@ -84,7 +84,7 @@ async def provider_rate_limit_handler(
             "status": "error",
             "error": {
                 "code": 429,
-                "message": str(exc),
+                "message": "Provider rate limit exceeded.",
             },
             "request_id": request.state.request_id,
         },
@@ -99,7 +99,7 @@ async def provider_timeout_handler(
         status_code=504,
         content={
             "status": "error",
-            "error": {"code": 504, "message": str(exc)},
+            "error": {"code": 504, "message": "Provider request timed out."},
             "request_id": getattr(request.state, "request_id", None),
         },
     )
@@ -113,7 +113,7 @@ async def provider_connection_handler(
         status_code=503,
         content={
             "status": "error",
-            "error": {"code": 503, "message": str(exc)},
+            "error": {"code": 503, "message": "Provider connection failed."},
             "request_id": getattr(request.state, "request_id", None),
         },
     )
@@ -131,7 +131,7 @@ async def provider_quota_exceeded_exception_handler(
             "status": "error",
             "error": {
                 "code": 429,
-                "message": str(exc),
+                "message": "Provider quota exceeded.",
             },
             "request_id": request_id,
         },

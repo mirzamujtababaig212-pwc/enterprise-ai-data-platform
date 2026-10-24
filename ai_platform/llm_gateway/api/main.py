@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     Response,
@@ -254,8 +254,8 @@ async def chat_endpoint(
                 yield "data: [DONE]\n\n"
 
             except Exception:
-                logger.exception("Streaming request failed.")
-                raise
+                logger.error("Streaming request failed.")
+                yield ("event: error\n" 'data: {"error":"Stream generation failed."}\n\n')
 
         return StreamingResponse(
             generate(),
@@ -284,7 +284,7 @@ async def chat_endpoint(
     except ValueError as e:
         raise HTTPException(
             status_code=400,
-            detail=str(e),
+            detail="Invalid chat request.",
         ) from e
 
     metrics = UsageMetrics(
@@ -326,7 +326,7 @@ async def embeddings_endpoint(
     except ValueError as exc:
         raise HTTPException(
             status_code=404,
-            detail=str(exc),
+            detail="Embedding model not found.",
         ) from exc
 
     metrics = UsageMetrics(
@@ -383,21 +383,6 @@ async def health_check():
         status="ok",
         providers=await router.route_health(),
     )
-
-
-@app.get("/v1/test-error")
-async def test_error():
-    raise RuntimeError("This is a test exception")
-
-
-@app.post("/v1/test-body")
-async def test_body(payload: dict = Body(...)):  # noqa: B008
-    """
-    Temporary endpoint used to verify middleware body sanitization.
-    """
-    return {
-        "received": payload,
-    }
 
 
 @app.get(

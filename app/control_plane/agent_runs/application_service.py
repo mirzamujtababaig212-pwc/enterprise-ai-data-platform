@@ -331,6 +331,9 @@ class AgentRunApplicationService:
         if existing_run.request_snapshot is None:
             return False
 
+        if existing_run.request_snapshot.transient_input or request.transient_input:
+            return False
+
         if existing_run.session_id != request.session_id:
             return False
 
@@ -378,6 +381,9 @@ class AgentRunApplicationService:
         request: AgentRequest,
         idempotency_key: str | None = None,
     ) -> AgentRunExecutionResult:
+        if request.transient_input and idempotency_key is not None:
+            raise ValueError("Transient-input requests cannot use durable idempotency keys.")
+
         effective_budget, budget_policy = self._resolve_effective_budget(
             tenant_id=request.tenant_id,
             requested_budget=request.execution_budget or ExecutionBudget(),
@@ -794,7 +800,9 @@ class AgentRunApplicationService:
                     lease_id=lease_id,
                     completed_at=failed_at,
                     error_type=type(exc).__name__,
-                    error_message=str(exc),
+                    error_message=(
+                        "Agent execution failed." if effective_request.transient_input else str(exc)
+                    ),
                 )
             except Exception:
                 # Preserve the original execution failure if terminal
@@ -825,7 +833,7 @@ class AgentRunApplicationService:
             run.run_id,
             lease_id=lease_id,
             completed_at=completed_at,
-            output=response.output,
+            output=(None if effective_request.transient_input else response.output),
         )
 
         if completed_run is None:

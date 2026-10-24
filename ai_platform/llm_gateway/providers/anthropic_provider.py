@@ -219,22 +219,23 @@ class AnthropicProvider(BaseProvider):
 
     @staticmethod
     def _raise_provider_error(exc: Exception) -> None:
+        # Never include provider-supplied exception text in public messages.
         if isinstance(exc, AuthenticationError):
-            raise RuntimeError(f"Anthropic authentication error: {exc}") from exc
+            raise RuntimeError("Anthropic authentication failed.") from exc
 
         if isinstance(exc, RateLimitError):
-            raise RuntimeError(f"Anthropic rate limit error: {exc}") from exc
+            raise RuntimeError("Anthropic rate limit exceeded.") from exc
 
         if isinstance(exc, APITimeoutError):
-            raise TimeoutError(f"Anthropic request timed out: {exc}") from exc
+            raise TimeoutError("Anthropic request timed out.") from exc
 
         if isinstance(exc, APIConnectionError):
-            raise ConnectionError(f"Anthropic connection error: {exc}") from exc
+            raise ConnectionError("Anthropic connection failed.") from exc
 
         if isinstance(exc, APIError):
-            raise RuntimeError(f"Anthropic API error: {exc}") from exc
+            raise RuntimeError("Anthropic API request failed.") from exc
 
-        raise RuntimeError(f"Anthropic execution error: {exc}") from exc
+        raise RuntimeError("Anthropic execution failed.") from exc
 
     async def chat(self, request: dict[str, Any]) -> dict[str, Any]:
         client = self._require_client()

@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         "",
     )
 
+    # Twilio voice webhook configuration.
+    # Required credentials remain empty by default; handlers must fail closed.
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WEBHOOK_URL: str = ""
+    TWILIO_INBOUND_WEBHOOK_URL: str = ""
+    TWILIO_SPEECH_WEBHOOK_URL: str = ""
+    VOICE_FINGERPRINT_SECRET: str = ""
+
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv(
         "GEMINI_API_KEY",

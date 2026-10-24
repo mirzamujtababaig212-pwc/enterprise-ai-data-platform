@@ -32,7 +32,7 @@ class ToolGovernanceDecisionObserver(ToolGovernanceDecisionSink):
         if record.tenant_id is not None:
             metadata["tenant_id"] = record.tenant_id
 
-        if record.reason is not None:
+        if not record.transient_input and record.reason is not None:
             metadata["reason"] = record.reason
 
         if record.policy_id is not None:
@@ -41,7 +41,7 @@ class ToolGovernanceDecisionObserver(ToolGovernanceDecisionSink):
         if record.policy_version is not None:
             metadata["policy_version"] = record.policy_version
 
-        if record.details:
+        if not record.transient_input and record.details:
             metadata["details"] = dict(record.details)
 
         await self._observer.record(
@@ -53,6 +53,7 @@ class ToolGovernanceDecisionObserver(ToolGovernanceDecisionSink):
                 user_id=record.principal,
                 tool_name=record.tool_name,
                 call_id=record.call_id,
+                transient_input=record.transient_input,
                 metadata=metadata,
             )
         )

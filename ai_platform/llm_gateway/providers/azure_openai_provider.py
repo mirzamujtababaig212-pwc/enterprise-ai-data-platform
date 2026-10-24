@@ -62,25 +62,8 @@ class AzureOpenAIProvider(BaseProvider):
 
     @staticmethod
     def _rate_limit_message(exc: RateLimitError) -> str:
-        body = getattr(exc, "body", None)
-
-        if isinstance(body, dict):
-            error_body = body.get("error")
-
-            if isinstance(error_body, dict):
-                code = error_body.get("code")
-                message = error_body.get("message")
-
-                if code and message:
-                    return f"Azure OpenAI error code: {code}. {message}"
-
-                if code:
-                    return f"Azure OpenAI error code: {code}."
-
-                if message:
-                    return str(message)
-
-        return str(exc)
+        """Return a generic message without upstream response content."""
+        return "Provider rate limit or quota limit reported."
 
     @staticmethod
     def _is_quota_exceeded(exc: RateLimitError) -> bool:
@@ -386,28 +369,28 @@ class AzureOpenAIProvider(BaseProvider):
             }
 
         except AuthenticationError as exc:
-            logger.exception("Azure OpenAI authentication failed.")
+            logger.error("Azure OpenAI authentication failed.")
             raise ProviderAuthenticationError("Azure OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
-            logger.exception("Azure OpenAI request timed out.")
+            logger.error("Azure OpenAI request timed out.")
             raise ProviderTimeoutError("Azure OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to Azure OpenAI.")
+            logger.error("Unable to connect to Azure OpenAI.")
             raise ProviderConnectionError("Unable to connect to Azure OpenAI.") from exc
 
         except RateLimitError as exc:
             message = self._rate_limit_message(exc)
 
             if self._is_quota_exceeded(exc):
-                logger.exception(
+                logger.error(
                     "Azure OpenAI quota exceeded: %s",
                     message,
                 )
                 raise ProviderQuotaExceededError(f"Azure OpenAI quota exceeded: {message}") from exc
 
-            logger.exception(
+            logger.error(
                 "Azure OpenAI rate limit exceeded: %s",
                 message,
             )
@@ -427,7 +410,7 @@ class AzureOpenAIProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Unexpected Azure OpenAI provider error.")
+            logger.error("Unexpected Azure OpenAI provider error.")
             raise ProviderExecutionError("Unexpected Azure OpenAI provider error.") from exc
 
     async def stream(
@@ -482,15 +465,15 @@ class AzureOpenAIProvider(BaseProvider):
                     yield content
 
         except AuthenticationError as exc:
-            logger.exception("Azure OpenAI streaming authentication failed.")
+            logger.error("Azure OpenAI streaming authentication failed.")
             raise ProviderAuthenticationError("Azure OpenAI authentication failed.") from exc
 
         except APITimeoutError as exc:
-            logger.exception("Azure OpenAI streaming request timed out.")
+            logger.error("Azure OpenAI streaming request timed out.")
             raise ProviderTimeoutError("Azure OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to Azure OpenAI during streaming.")
+            logger.error("Unable to connect to Azure OpenAI during streaming.")
             raise ProviderConnectionError("Unable to connect to Azure OpenAI.") from exc
 
         except RateLimitError as exc:
@@ -512,7 +495,7 @@ class AzureOpenAIProvider(BaseProvider):
             raise
 
         except Exception as exc:
-            logger.exception("Unexpected Azure OpenAI streaming error.")
+            logger.error("Unexpected Azure OpenAI streaming error.")
             raise ProviderConnectionError("Unexpected Azure OpenAI streaming error.") from exc
 
     async def embeddings(
@@ -557,7 +540,7 @@ class AzureOpenAIProvider(BaseProvider):
             return embedding
 
         except AuthenticationError as exc:
-            logger.exception("Azure OpenAI embedding authentication failed.")
+            logger.error("Azure OpenAI embedding authentication failed.")
             raise ProviderAuthenticationError("Azure OpenAI authentication failed.") from exc
 
         except RateLimitError as exc:
@@ -569,18 +552,18 @@ class AzureOpenAIProvider(BaseProvider):
             raise ProviderRateLimitError(f"Azure OpenAI rate limit exceeded: {message}") from exc
 
         except APITimeoutError as exc:
-            logger.exception("Azure OpenAI embedding request timed out.")
+            logger.error("Azure OpenAI embedding request timed out.")
             raise ProviderTimeoutError("Azure OpenAI request timed out.") from exc
 
         except APIConnectionError as exc:
-            logger.exception("Unable to connect to Azure OpenAI embedding API.")
+            logger.error("Unable to connect to Azure OpenAI embedding API.")
             raise ProviderConnectionError("Unable to connect to Azure OpenAI.") from exc
 
         except ValueError:
             raise
 
         except Exception as exc:
-            logger.exception("Unexpected Azure OpenAI embedding error.")
+            logger.error("Unexpected Azure OpenAI embedding error.")
             raise ProviderExecutionError("Unexpected Azure OpenAI embedding error.") from exc
 
     @property

@@ -855,6 +855,69 @@ async def test_runtime_memory_write_emits_started_and_completed_events():
 
 
 @pytest.mark.asyncio
+async def test_runtime_transient_input_skips_memory_writes_and_events():
+    registry = InMemoryAgentRegistry()
+
+    class MemoryWriteAgent(FakeAgent):
+        def __init__(self) -> None:
+            super().__init__(
+                name="transient-memory-agent",
+                output="private transcript-derived response",
+            )
+            self._definition = AgentDefinition(
+                name="transient-memory-agent",
+                description="Transient memory privacy test.",
+                system_prompt="You are a memory test agent.",
+                model="test-model",
+                memory_write_enabled=True,
+                memory_episodic_retention_seconds=3600,
+            )
+
+    class TrackingMemoryService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def remember(self, content, **kwargs):
+            self.calls.append((content, kwargs))
+
+    class TrackingObserver:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def record(self, event) -> None:
+            self.events.append(event)
+
+    agent = MemoryWriteAgent()
+    memory_service = TrackingMemoryService()
+    observer = TrackingObserver()
+
+    await registry.register(agent)
+
+    runtime = AgentRuntime(
+        registry,
+        memory_context_builder=EmptyMemoryBuilder(),
+        memory_service=memory_service,
+        observer=observer,
+    )
+
+    response = await runtime.run(
+        "transient-memory-agent",
+        AgentRequest(
+            input="private transcript",
+            memory_namespace="tenant-secret",
+            session_id="session-secret",
+            metadata={"secret": "must-not-leak"},
+            transient_input=True,
+        ),
+        run_id="run-transient-memory",
+    )
+
+    assert response.output == "private transcript-derived response"
+    assert memory_service.calls == []
+    assert observer.events == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_memory_write_failure_is_suppressed_and_emits_failed_event():
     registry = InMemoryAgentRegistry()
 

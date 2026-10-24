@@ -333,3 +333,37 @@ def test_model_capabilities(provider):
     assert capabilities["anthropic-chat"].max_output_tokens == 128_000
     assert capabilities["anthropic-chat"].supports_tools is True
     assert capabilities["anthropic-chat"].supports_vision is True
+
+
+def test_authentication_error_translation_does_not_expose_upstream_message():
+    from anthropic import AuthenticationError
+
+    import httpx
+
+    marker = "SENSITIVE_TEST_MARKER_91A7"
+    request = httpx.Request(
+        "POST",
+        "https://api.anthropic.com/v1/messages",
+    )
+    response = httpx.Response(401, request=request)
+    upstream_error = AuthenticationError(
+        message=marker,
+        response=response,
+        body=None,
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        AnthropicProvider._raise_provider_error(upstream_error)
+
+    assert marker not in str(caught.value)
+    assert str(caught.value) == "Anthropic authentication failed."
+
+
+def test_generic_error_translation_does_not_expose_upstream_message():
+    marker = "SENSITIVE_TEST_MARKER_91A7"
+
+    with pytest.raises(RuntimeError) as caught:
+        AnthropicProvider._raise_provider_error(RuntimeError(marker))
+
+    assert marker not in str(caught.value)
+    assert str(caught.value) == "Anthropic execution failed."

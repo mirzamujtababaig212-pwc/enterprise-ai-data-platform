@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rag.contracts import Retriever
-from ai_platform.agents.policy import TenantPolicyEngine
-from rag.generation.gateway import GatewayChatService
-from rag.governance import GovernancePolicy
-from rag.models import RetrievalResult
 from ai_platform.agents.observability import (
     AgentExecutionEvent,
     AgentExecutionEventType,
 )
 from ai_platform.agents.observer import AgentExecutionObserver
+from ai_platform.agents.policy import TenantPolicyEngine
+from rag.contracts import Retriever
+from rag.generation.gateway import GatewayChatService
+from rag.governance import GovernancePolicy
+from rag.models import RetrievalResult
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,16 @@ class RAGQueryService:
             retrieved_count=len(results),
         )
 
+        if not results:
+            return RAGQueryResult(
+                answer=(
+                    "I couldn't find sufficient evidence in the indexed "
+                    "sources to answer this question."
+                ),
+                sources=(),
+                retrieved_count=0,
+            )
+
         prompt = self._build_prompt(
             query,
             results,
@@ -136,7 +147,7 @@ class RAGQueryService:
             user_id=user_id,
         )
 
-        answer = str(response.get("reply", ""))
+        answer = str(response.get("reply", "")).strip()
 
         sources = tuple(
             self._to_source(
@@ -145,6 +156,14 @@ class RAGQueryService:
             )
             for index, result in enumerate(results, start=1)
         )
+
+        if not self._is_explicit_abstention(answer) and not self._has_valid_citations(
+            answer, source_count=len(sources)
+        ):
+            answer = (
+                "I couldn't find sufficient evidence in the indexed "
+                "sources to answer this question."
+            )
 
         return RAGQueryResult(
             answer=answer,
@@ -238,12 +257,17 @@ class RAGQueryService:
         context_blocks: list[str] = []
 
         for index, result in enumerate(results, start=1):
+            evidence_id = f"evidence:{result.chunk.id}"
+            source = result.chunk.metadata.get("source")
             context_blocks.append(
                 "\n".join(
                     [
                         f"[Source {index}]",
+                        f"Evidence ID: {evidence_id}",
                         f"Document ID: {result.chunk.document_id}",
                         f"Chunk ID: {result.chunk.id}",
+                        f"Source Reference: {source}",
+                        f"Locator: {result.chunk.metadata.get('locator')}",
                         f"Relevance Score: {result.score:.6f}",
                         f"Content:\n{result.chunk.content}",
                     ]
@@ -257,15 +281,54 @@ class RAGQueryService:
 
         return (
             "You are an enterprise knowledge assistant.\n\n"
-            "Answer the user's question using the retrieved context "
-            "when it is available.\n"
+            "Answer the user's question using only facts supported by "
+            "the retrieved context.\n"
+            "Cite sources inline using the exact format [Source N], where N "
+            "is the source number shown in the context. Include at least one "
+            "valid source citation in every non-abstaining answer.\n"
+            "Never cite a source number that was not provided in the context.\n"
             "Do not invent facts that are not supported by the context.\n"
             "If the retrieved context does not contain enough information "
-            "to answer the question, say so clearly.\n\n"
+            "to answer the question, say so clearly rather than guessing.\n\n"
             f"Retrieved Context:\n{context}\n\n"
             f"User Question:\n{query}\n\n"
             "Answer:"
         )
+
+    @staticmethod
+    def _is_explicit_abstention(answer: str) -> bool:
+        """Recognize standalone abstention responses without factual claims."""
+        normalized = " ".join(answer.split())
+        patterns = (
+            r"I (?:couldn't|could not) find sufficient evidence"
+            r"(?: in the (?:retrieved|indexed) (?:context|sources))?"
+            r"(?: to answer this question)?[.!]?",
+            r"I (?:don't|do not) have enough information"
+            r"(?: in the retrieved sources)?"
+            r"(?: to answer this question)?[.!]?",
+            r"The retrieved (?:context|sources) "
+            r"(?:doesn't|does not|don't|do not) contain enough information"
+            r"(?: to answer this question)?[.!]?",
+        )
+        return any(re.fullmatch(pattern, normalized, flags=re.IGNORECASE) for pattern in patterns)
+
+    @staticmethod
+    def _has_valid_citations(answer: str, *, source_count: int) -> bool:
+        """Return whether an answer cites only valid, retrieved source numbers."""
+        markers = re.findall(r"\[Source[^\]]*(?:\]|$)", answer, flags=re.IGNORECASE)
+        if not markers:
+            return False
+
+        for marker in markers:
+            match = re.fullmatch(r"\[Source\s+(\d+)\]", marker, flags=re.IGNORECASE)
+            if match is None:
+                return False
+
+            source_number = int(match.group(1))
+            if not 1 <= source_number <= source_count:
+                return False
+
+        return True
 
     @staticmethod
     def _to_source(
@@ -277,7 +340,8 @@ class RAGQueryService:
 
         source_ref = metadata.get("source_ref")
         if not isinstance(source_ref, dict):
-            source_ref = None
+            source = metadata.get("source")
+            source_ref = {"source": source} if isinstance(source, str) and source.strip() else None
 
         locator = metadata.get("locator")
         if not isinstance(locator, dict):

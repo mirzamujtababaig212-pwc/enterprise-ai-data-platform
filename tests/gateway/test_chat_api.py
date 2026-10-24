@@ -220,3 +220,32 @@ def test_chat_endpoint_bedrock_streaming_success():
     assert response.text == ("data: Hello \n\n" "data: from Bedrock.\n\n" "data: [DONE]\n\n")
 
     mock_route_stream.assert_called_once()
+
+
+def test_chat_endpoint_streaming_failure_is_sanitized():
+    async def failing_route_stream(request):
+        yield "Partial response"
+        raise RuntimeError("SECRET_MARKER provider credentials leaked")
+
+    with patch(
+        "ai_platform.llm_gateway.api.main.router.route_stream",
+        side_effect=failing_route_stream,
+    ):
+        response = client.post(
+            "/v1/chat",
+            headers=HEADERS,
+            json={
+                "provider": "bedrock",
+                "model": "bedrock-chat",
+                "prompt": "Hello",
+                "stream": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "data: Partial response\n\n" in response.text
+    assert ("event: error\n" 'data: {"error":"Stream generation failed."}\n\n') in response.text
+    assert "SECRET_MARKER" not in response.text
+    assert "provider credentials leaked" not in response.text
+    assert "data: [DONE]\n\n" not in response.text

@@ -55,7 +55,7 @@ def test_chat_success(mock_chat):
 @patch("ai_platform.llm_gateway.api.main.router.route_chat", new_callable=AsyncMock)
 def test_chat_value_error(mock_chat):
 
-    mock_chat.side_effect = ValueError("bad provider")
+    mock_chat.side_effect = ValueError("bad provider SECRET_MARKER")
 
     response = client.post(
         "/v1/chat",
@@ -68,7 +68,7 @@ def test_chat_value_error(mock_chat):
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["message"] == "bad provider"
+    assert response.json()["error"]["message"] == "Invalid chat request."
 
 
 ###########################################################################
@@ -149,7 +149,7 @@ def test_embeddings_bedrock_success(mock_embeddings):
 )
 def test_embeddings_not_found(mock_embeddings):
 
-    mock_embeddings.side_effect = ValueError("model not found")
+    mock_embeddings.side_effect = ValueError("model not found SECRET_MARKER")
 
     response = client.post(
         "/v1/embeddings",
@@ -162,7 +162,7 @@ def test_embeddings_not_found(mock_embeddings):
     )
 
     assert response.status_code == 404
-    assert response.json()["error"]["message"] == "model not found"
+    assert response.json()["error"]["message"] == "Embedding model not found."
 
 
 ###########################################################################
@@ -208,46 +208,6 @@ def test_health(mock_health):
 
     assert response.status_code == 200
     assert response.json()["providers"]["openai"]["status"] == "healthy"
-
-
-###########################################################################
-# Test error endpoint
-###########################################################################
-
-
-def test_test_error():
-
-    response = client.get(
-        "/v1/test-error",
-        headers=HEADERS,
-    )
-
-    assert response.status_code == 500
-
-
-###########################################################################
-# Test body endpoint
-###########################################################################
-
-
-def test_test_body():
-
-    payload = {
-        "password": "secret",
-        "username": "annie",
-    }
-
-    response = client.post(
-        "/v1/test-body",
-        headers=HEADERS,
-        json=payload,
-    )
-
-    assert response.status_code == 200
-
-    assert response.json() == {
-        "received": payload,
-    }
 
 
 ###########################################################################

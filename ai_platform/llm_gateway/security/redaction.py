@@ -39,6 +39,9 @@ SENSITIVE_BODY_FIELDS = {
     "client_id",
     "token",
     "bearer_token",
+    # Prompt and conversation content may contain private user data.
+    "prompt",
+    "messages",
 }
 
 SENSITIVE_TEXT_PATTERNS = [

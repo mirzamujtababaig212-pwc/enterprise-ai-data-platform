@@ -148,6 +148,12 @@ class AgentRunRecoveryService:
                 f"Agent run '{run_id}' has no request snapshot and " "cannot be recovered.",
             )
 
+        if existing_run.request_snapshot.transient_input:
+            raise ValueError(
+                "Transient-input agent runs cannot be recovered because "
+                "their original input was not retained."
+            )
+
         claimed_at = datetime.now(UTC)
         lease_id, lease_expires_at = create_lease(self._lease_seconds)
 
@@ -300,6 +306,14 @@ class AgentRunRecoveryService:
         if run.request_snapshot is None:
             exc = RuntimeError(
                 f"Agent run '{run.run_id}' has no request snapshot and " "cannot be recovered.",
+            )
+            await self._mark_failed(run, exc)
+            raise exc
+
+        if run.request_snapshot.transient_input:
+            exc = RuntimeError(
+                "Transient-input agent runs cannot be recovered because "
+                "their original input was not retained."
             )
             await self._mark_failed(run, exc)
             raise exc
@@ -527,7 +541,11 @@ class AgentRunRecoveryService:
                 lease_id=run.lease_id,
                 completed_at=failed_at,
                 error_type=type(exc).__name__,
-                error_message=str(exc),
+                error_message=(
+                    "Agent execution failed during recovery."
+                    if (run.request_snapshot is not None and run.request_snapshot.transient_input)
+                    else str(exc)
+                ),
             )
 
             if failed_run is None:
