@@ -7,15 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.control_plane.persistence.database import get_db
-from app.control_plane.voice.repository import (
-    DuplicateVoiceLinePhoneNumberError,
-    VoiceLineNotFoundError,
-    VoiceLineRepository,
-)
 from app.control_plane.schemas.voice import (
     VoiceLineCreateRequest,
     VoiceLineResponse,
     VoiceLineUpdateRequest,
+)
+from app.control_plane.voice.repository import (
+    DuplicateVoiceLinePhoneNumberError,
+    VoiceLineNotFoundError,
+    VoiceLineRepository,
 )
 
 router = APIRouter(prefix="/api/v1/voice/lines", tags=["voice"])

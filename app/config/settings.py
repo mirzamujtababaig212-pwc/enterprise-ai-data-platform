@@ -8,7 +8,6 @@ from typing import Any
 from ai_platform.agents.policy import TenantPolicy
 from tools.mcp.config import MCPServerConfig
 
-
 VALID_ENVIRONMENTS = frozenset({"local", "dev", "test", "demo", "staging", "prod", "production"})
 
 
@@ -29,7 +28,7 @@ class Settings:
     tenant_policies: tuple[TenantPolicy, ...] = ()
 
     @classmethod
-    def from_environment(cls) -> "Settings":
+    def from_environment(cls) -> Settings:
         environment = os.getenv("ENVIRONMENT", "dev").strip().lower()
         if environment not in VALID_ENVIRONMENTS:
             raise RuntimeError(

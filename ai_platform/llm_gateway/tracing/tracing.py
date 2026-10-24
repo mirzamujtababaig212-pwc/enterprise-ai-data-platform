@@ -28,11 +28,9 @@ from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,
 )
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
-from opentelemetry.sdk.trace import Event
-from opentelemetry.trace import Link, Status, StatusCode
+from opentelemetry.sdk.trace import Event, ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
+from opentelemetry.trace import Link, Status, StatusCode
 
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _NOOP_TRACER_PROVIDER = trace.NoOpTracerProvider()

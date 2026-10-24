@@ -21,8 +21,8 @@ from ai_platform.llm_gateway.exceptions.handlers import (
 from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderAuthenticationError,
     ProviderConnectionError,
-    ProviderRateLimitError,
     ProviderQuotaExceededError,
+    ProviderRateLimitError,
     ProviderTimeoutError,
 )
 

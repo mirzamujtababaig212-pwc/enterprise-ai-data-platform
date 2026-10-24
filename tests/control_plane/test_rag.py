@@ -8,13 +8,13 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from app.control_plane.app import app
-from app.control_plane.routes.rag import _authenticated_tenant_id
 from app.control_plane.dependencies import (
     get_rag_indexer,
     get_rag_query_service,
     get_rag_state_repository,
     get_rag_vector_store,
 )
+from app.control_plane.routes.rag import _authenticated_tenant_id
 from rag import RAGIndexer
 from rag.chunking import RecursiveChunker
 from rag.models import Document, EmbeddingIdentity, EmbeddingResult

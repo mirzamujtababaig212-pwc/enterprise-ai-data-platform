@@ -291,6 +291,7 @@ def test_supported_stream_models(provider):
 
 def test_provider_error_translation_does_not_expose_upstream_message():
     from botocore.exceptions import ClientError
+
     from ai_platform.llm_gateway.exceptions.provider_exceptions import (
         ProviderExecutionError,
     )

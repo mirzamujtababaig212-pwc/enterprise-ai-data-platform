@@ -20,7 +20,6 @@ from app.control_plane.persistence.models import (
 )
 from app.control_plane.routes.twilio_voice_webhook import router
 
-
 AUTH_TOKEN = "test-twilio-auth-token"
 CALLBACK_URL = "https://voice.example.test/api/v1/voice/webhooks/twilio/status?source=prod"
 CALLBACK_PATH = "/api/v1/voice/webhooks/twilio/status"
