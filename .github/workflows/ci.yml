@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,9 +56,56 @@ jobs:
           black --version
           mypy --version
 
-      - name: Run Ruff
+      # Staged rollout: lint changed Python files only.
+      # This does not establish that the entire repository is Ruff-clean.
+      - name: Run Ruff on changed Python files
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          ruff check .
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            BASE_SHA="$PR_BASE_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+          fi
+
+          # Handle a first push, where the previous SHA can be all zeroes.
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            if git rev-parse "${HEAD_SHA}^" >/dev/null 2>&1; then
+              BASE_SHA="$(git rev-parse "${HEAD_SHA}^")"
+            else
+              echo "No parent commit available; linting all tracked Python files."
+              mapfile -t changed_files < <(git ls-files '*.py')
+              BASE_SHA=""
+            fi
+          fi
+
+          if [[ -n "$BASE_SHA" ]]; then
+            mapfile -d '' -t changed_files < <(
+              git diff --name-only -z --diff-filter=ACMRT \
+                "$BASE_SHA" "$HEAD_SHA" -- '*.py'
+            )
+          fi
+
+          existing_files=()
+          for file in "${changed_files[@]}"; do
+            if [[ -f "$file" ]]; then
+              existing_files+=("$file")
+            fi
+          done
+
+          if (( ${#existing_files[@]} > 0 )); then
+            printf 'Running Ruff on %s changed Python file(s).\n' \
+              "${#existing_files[@]}"
+            ruff check "${existing_files[@]}"
+          else
+            echo "No changed Python files to lint; Ruff check skipped."
+          fi
 
       - name: Run Black
         run: |
