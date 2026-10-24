@@ -217,6 +217,79 @@ async def test_completed_result_is_replayed(repository) -> None:
 
 
 @pytest.mark.asyncio
+async def test_transient_tool_result_is_not_persisted_or_replayed(repository) -> None:
+    _, session_factory, _ = repository
+
+    secret = "TRANSCRIPT_SECRET_7f3a9c"
+    key = make_key(
+        run_id="transient-run",
+        call_id="transient-call",
+        tool_name="test_tool",
+    )
+
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    await registry.register(tool)
+
+    first_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+    first_service = ToolExecutionService(
+        registry,
+        idempotency_store=first_store,
+    )
+
+    context = ToolExecutionContext(
+        run_id=key.run_id,
+        call_id=key.call_id,
+        transient_input=True,
+    )
+
+    first = await first_service.execute(
+        key.tool_name,
+        {"value": secret},
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert tool.execution_count == 1
+
+    session = session_factory()
+    try:
+        record = session.scalar(
+            select(ToolExecutionIdempotencyRecord).where(
+                ToolExecutionIdempotencyRecord.run_id == key.run_id,
+                ToolExecutionIdempotencyRecord.call_id == key.call_id,
+                ToolExecutionIdempotencyRecord.tool_name == key.tool_name,
+            )
+        )
+
+        assert record is not None
+        assert record.status == ToolIdempotencyClaimStatus.AMBIGUOUS.value
+        assert record.output is None
+        assert record.execution_metadata == {}
+        assert secret not in str(record.output)
+        assert secret not in str(record.execution_metadata)
+    finally:
+        session.close()
+
+    # Simulate a retry after creating a fresh store and tool service.
+    second_store = PostgreSQLToolExecutionIdempotencyStore(session_factory)
+    second_service = ToolExecutionService(
+        registry,
+        idempotency_store=second_store,
+    )
+
+    second = await second_service.execute(
+        key.tool_name,
+        {"value": secret},
+        execution_context=context,
+    )
+
+    assert second.success is False
+    assert tool.execution_count == 1
+    assert secret not in (second.error or "")
+
+
+@pytest.mark.asyncio
 async def test_completed_result_replays_across_restarted_tool_service(
     repository,
 ) -> None:

@@ -1267,6 +1267,40 @@ async def test_execute_rejects_invalid_argument_type_before_execution():
 
 
 @pytest.mark.asyncio
+async def test_transient_schema_validation_error_redacts_argument_values():
+    registry = InMemoryToolRegistry()
+    tool = SchemaValidatedTool(
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "integer"},
+            },
+            "required": ["query"],
+        }
+    )
+    await registry.register(tool)
+
+    service = ToolExecutionService(registry)
+    private_marker = "private-transcript-marker-7391"
+
+    result = await service.execute(
+        "schema_tool",
+        {"query": private_marker},
+        execution_context=ToolExecutionContext(
+            run_id="run-transient-validation",
+            call_id="call-transient-validation",
+            transient_input=True,
+        ),
+    )
+
+    assert result.success is False
+    assert result.failure_category == ToolExecutionFailureCategory.SCHEMA_VALIDATION
+    assert result.error == "Voice tool arguments failed validation."
+    assert private_marker not in result.error
+    assert tool.execution_count == 0
+
+
+@pytest.mark.asyncio
 async def test_execute_allows_empty_schema():
     registry = InMemoryToolRegistry()
 
@@ -2770,3 +2804,83 @@ async def test_approval_not_required_proceeds_normally():
     assert result.success is True
     assert tool.execution_count == 1
     assert len(coordinator.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_transient_input_does_not_persist_or_replay_tool_result():
+    registry = InMemoryToolRegistry()
+    tool = FakeTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    context = ToolExecutionContext(
+        run_id="run-transient",
+        call_id="call-transient",
+        transient_input=True,
+    )
+
+    first = await service.execute(
+        "test_tool",
+        {"value": "private transcript"},
+        execution_context=context,
+    )
+
+    assert first.success is True
+    assert first.output == {
+        "status": "success",
+        "arguments": {"value": "private transcript"},
+    }
+    assert tool.execution_count == 1
+
+    key = ToolExecutionIdempotencyKey(
+        run_id="run-transient",
+        call_id="call-transient",
+        tool_name="test_tool",
+    )
+
+    assert key in store._ambiguous
+    assert key not in store._completed
+
+    second = await service.execute(
+        "test_tool",
+        {"value": "private transcript"},
+        execution_context=context,
+    )
+
+    assert second.success is False
+    assert tool.execution_count == 1
+    assert "private transcript" not in (second.error or "")
+
+
+@pytest.mark.asyncio
+async def test_transient_tool_exception_is_redacted():
+    registry = InMemoryToolRegistry()
+    tool = FailingTool()
+    store = InMemoryToolExecutionIdempotencyStore()
+
+    await registry.register(tool)
+
+    service = ToolExecutionService(
+        registry,
+        idempotency_store=store,
+    )
+
+    result = await service.execute(
+        "failing_tool",
+        {"value": "private transcript"},
+        execution_context=ToolExecutionContext(
+            run_id="run-transient-failure",
+            call_id="call-transient-failure",
+            transient_input=True,
+        ),
+    )
+
+    assert result.success is False
+    assert result.error == "Voice tool execution failed."
+    assert "private transcript" not in (result.error or "")

@@ -144,6 +144,11 @@ class LLMAgent:
         if self._observer is None:
             return
 
+        if event.transient_input:
+            # Do not expose tool-derived or other content-derived metadata
+            # to durable or external observers for transient user input.
+            event = replace(event, metadata={})
+
         await self._observer.record(event)
 
     @staticmethod
@@ -287,7 +292,9 @@ class LLMAgent:
                 step.step_id,
                 tool_name=tool_call.name,
                 call_id=tool_call.call_id,
-                input=tool_call.arguments,
+                input=(
+                    {"redacted": True} if context.request.transient_input else tool_call.arguments
+                ),
             )
         finally:
             repository.close()
@@ -315,6 +322,7 @@ class LLMAgent:
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.TOOL_CALL_REQUESTED,
                     agent_name=self.definition.name,
+                    transient_input=context.request.transient_input,
                     run_id=context.run_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
@@ -370,6 +378,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -470,20 +479,28 @@ class LLMAgent:
                                     status=AgentRunStepStatus.FAILED,
                                     updated_at=now,
                                     completed_at=now,
-                                    error=(tool_result.error or "Tool execution failed."),
+                                    error=(
+                                        "Voice agent execution failed."
+                                        if context.request.transient_input
+                                        else (tool_result.error or "Tool execution failed.")
+                                    ),
                                     failure_category=failure_category,
-                                    metadata={
-                                        **durable_step.metadata,
-                                        "retry": {
-                                            "category": failure_category,
-                                            "disposition": FailureDisposition.RETRYABLE.value,
-                                            "attempt": durable_step.attempt,
-                                            "max_attempts": decision.max_attempts,
-                                            "retry_allowed": decision.allowed,
-                                            "retry_reason": decision.reason,
-                                            "backoff_seconds": decision.delay_seconds,
-                                        },
-                                    },
+                                    metadata=(
+                                        {}
+                                        if context.request.transient_input
+                                        else {
+                                            **durable_step.metadata,
+                                            "retry": {
+                                                "category": failure_category,
+                                                "disposition": FailureDisposition.RETRYABLE.value,
+                                                "attempt": durable_step.attempt,
+                                                "max_attempts": decision.max_attempts,
+                                                "retry_allowed": decision.allowed,
+                                                "retry_reason": decision.reason,
+                                                "backoff_seconds": decision.delay_seconds,
+                                            },
+                                        }
+                                    ),
                                     commit=not decision.allowed,
                                 )
 
@@ -560,6 +577,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.TOOL_CALL_FAILED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -580,7 +598,11 @@ class LLMAgent:
 
         context.raise_if_execution_ownership_lost()
 
-        if self._checkpoint_handler is not None and context.run_id is not None:
+        if (
+            not context.request.transient_input
+            and self._checkpoint_handler is not None
+            and context.run_id is not None
+        ):
             context.raise_if_execution_ownership_lost()
             await self._checkpoint_handler.save(
                 AgentExecutionCheckpoint(
@@ -627,7 +649,11 @@ class LLMAgent:
 
         context.raise_if_execution_ownership_lost()
 
-        if self._checkpoint_handler is not None and context.run_id is not None:
+        if (
+            not context.request.transient_input
+            and self._checkpoint_handler is not None
+            and context.run_id is not None
+        ):
             context.raise_if_execution_ownership_lost()
             await self._checkpoint_handler.save(
                 AgentExecutionCheckpoint(
@@ -860,6 +886,7 @@ class LLMAgent:
             AgentExecutionEvent(
                 event_type=event_type,
                 agent_name=self.definition.name,
+                transient_input=context.request.transient_input,
                 run_id=context.run_id,
                 session_id=context.session_id,
                 user_id=context.user_id,
@@ -950,8 +977,9 @@ class LLMAgent:
         context: AgentExecutionContext,
         metadata: dict[str, object],
     ) -> dict[str, object]:
-        """Merge Runtime V1 state into existing step metadata."""
-
+        """Merge runtime metadata, excluding content for transient requests."""
+        if context.request.transient_input:
+            return {}
         merged = dict(metadata)
         merged.update(context.runtime_state.to_metadata())
         return merged
@@ -1021,7 +1049,7 @@ class LLMAgent:
                         step_index=step.step_index,
                         step_type=self._durable_step_type(step),
                         status=AgentRunStepStatus.PLANNED,
-                        metadata=dict(step.metadata),
+                        metadata=self._runtime_step_metadata(context, dict(step.metadata)),
                     )
                 )
                 existing = repository.get(
@@ -1095,10 +1123,15 @@ class LLMAgent:
             step_result = context.orchestration_state.get_step_result(step.step_id)
             metadata = dict(existing.metadata)
 
-            if step_result is not None:
-                metadata.update(step_result.metadata)
+            if context.request.transient_input:
+                # Tool-derived metadata may contain transcript-derived content.
+                persisted_output = {"redacted": True}
             else:
-                metadata.update(step.metadata)
+                if step_result is not None:
+                    metadata.update(step_result.metadata)
+                else:
+                    metadata.update(step.metadata)
+                persisted_output = output
 
             repository.transition(
                 context.run_id,
@@ -1106,7 +1139,7 @@ class LLMAgent:
                 status=AgentRunStepStatus.COMPLETED,
                 updated_at=now,
                 completed_at=now,
-                output=output,
+                output=persisted_output,
                 metadata=self._runtime_step_metadata(context, metadata),
             )
         finally:
@@ -1154,7 +1187,16 @@ class LLMAgent:
                 status=AgentRunStepStatus.AMBIGUOUS,
                 updated_at=now,
                 completed_at=now,
-                error=error,
+                error=(
+                    "Voice agent execution outcome is uncertain."
+                    if context.request.transient_input
+                    and failure_category == ToolExecutionFailureCategory.EXECUTION_AMBIGUOUS.value
+                    else (
+                        "Voice agent execution failed."
+                        if context.request.transient_input
+                        else error
+                    )
+                ),
                 failure_category=failure_category,
             )
         finally:
@@ -1202,7 +1244,9 @@ class LLMAgent:
                 status=AgentRunStepStatus.FAILED,
                 updated_at=now,
                 completed_at=now,
-                error=error,
+                error=(
+                    "Voice agent execution failed." if context.request.transient_input else error
+                ),
                 failure_category=failure_category,
             )
         finally:
@@ -1467,6 +1511,7 @@ class LLMAgent:
             AgentExecutionEvent(
                 event_type=AgentExecutionEventType.RUNTIME_DECISION,
                 agent_name=self.definition.name,
+                transient_input=context.request.transient_input,
                 run_id=context.run_id,
                 session_id=context.session_id,
                 user_id=context.user_id,
@@ -1639,6 +1684,12 @@ class LLMAgent:
         and is idempotent when checkpoint metadata already marks the step
         completed.
         """
+        if context.request.transient_input:
+            raise ValueError(
+                "Transient-input executions cannot restore tool results "
+                "from checkpoint messages."
+            )
+
         if context.orchestration_plan is None:
             return
 
@@ -1844,23 +1895,31 @@ class LLMAgent:
                         status=AgentRunStepStatus.FAILED,
                         updated_at=now,
                         completed_at=now,
-                        error=f"{type(exc).__name__}: {exc}",
+                        error=(
+                            "Voice agent execution failed."
+                            if context.request.transient_input
+                            else f"{type(exc).__name__}: {exc}"
+                        ),
                         failure_category=classification.category,
-                        metadata={
-                            **durable_step.metadata,
-                            "retry": {
-                                "category": classification.category,
-                                "disposition": (classification.disposition.value),
-                                "provider_category": classification.details.get(
-                                    "provider_category"
-                                ),
-                                "attempt": durable_step.attempt,
-                                "max_attempts": decision.max_attempts,
-                                "retry_allowed": decision.allowed,
-                                "retry_reason": decision.reason,
-                                "backoff_seconds": decision.delay_seconds,
-                            },
-                        },
+                        metadata=(
+                            {}
+                            if context.request.transient_input
+                            else {
+                                **durable_step.metadata,
+                                "retry": {
+                                    "category": classification.category,
+                                    "disposition": classification.disposition.value,
+                                    "provider_category": classification.details.get(
+                                        "provider_category"
+                                    ),
+                                    "attempt": durable_step.attempt,
+                                    "max_attempts": decision.max_attempts,
+                                    "retry_allowed": decision.allowed,
+                                    "retry_reason": decision.reason,
+                                    "backoff_seconds": decision.delay_seconds,
+                                },
+                            }
+                        ),
                         commit=not decision.allowed,
                     )
 
@@ -1961,6 +2020,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.CONTEXT_ASSEMBLY_COMPLETED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -1979,6 +2039,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_REQUESTED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -2060,6 +2121,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.LLM_COMPLETED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -2194,6 +2256,7 @@ class LLMAgent:
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.AGENT_FAILED,
                     agent_name=self.definition.name,
+                    transient_input=context.request.transient_input,
                     run_id=context.run_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
@@ -2225,6 +2288,7 @@ class LLMAgent:
             AgentExecutionEvent(
                 event_type=AgentExecutionEventType.AGENT_STARTED,
                 agent_name=self.definition.name,
+                transient_input=context.request.transient_input,
                 run_id=context.run_id,
                 session_id=context.session_id,
                 user_id=context.user_id,
@@ -2247,6 +2311,7 @@ class LLMAgent:
                 AgentExecutionEvent(
                     event_type=AgentExecutionEventType.AGENT_FAILED,
                     agent_name=self.definition.name,
+                    transient_input=context.request.transient_input,
                     run_id=context.run_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
@@ -2299,6 +2364,7 @@ class LLMAgent:
                     AgentExecutionEvent(
                         event_type=AgentExecutionEventType.AGENT_COMPLETED,
                         agent_name=self.definition.name,
+                        transient_input=context.request.transient_input,
                         run_id=context.run_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
@@ -2396,6 +2462,7 @@ class LLMAgent:
                         AgentExecutionEvent(
                             event_type=AgentExecutionEventType.AGENT_COMPLETED,
                             agent_name=self.definition.name,
+                            transient_input=context.request.transient_input,
                             run_id=context.run_id,
                             session_id=context.session_id,
                             user_id=context.user_id,
@@ -2469,6 +2536,9 @@ class LLMAgent:
             AgentExecutionCheckpoint,
         ):
             raise TypeError("LLMAgent checkpoint must be an AgentExecutionCheckpoint.")
+
+        if context.request.transient_input:
+            raise ValueError("Transient-input executions cannot be resumed from checkpoints.")
 
         if checkpoint.agent_name != self.definition.name:
             raise ValueError("Checkpoint agent_name does not match the LLMAgent definition.")

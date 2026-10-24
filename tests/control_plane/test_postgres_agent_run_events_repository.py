@@ -34,6 +34,7 @@ def make_event(
     provider: str | None = None,
     model: str | None = None,
     metadata: dict | None = None,
+    transient_input: bool = False,
 ) -> AgentExecutionEvent:
     return AgentExecutionEvent(
         event_type=event_type,
@@ -52,6 +53,7 @@ def make_event(
         provider=provider,
         model=model,
         metadata={} if metadata is None else metadata,
+        transient_input=transient_input,
     )
 
 
@@ -202,6 +204,41 @@ def test_record_preserves_tool_event_fields() -> None:
         assert restored[0].tool_round == 2
         assert restored[0].tool_name == "vehicle_lookup"
         assert restored[0].call_id == "call-123"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_record_does_not_persist_transient_event_metadata_or_attempt() -> None:
+    engine, session, repository = make_repository()
+
+    try:
+        secret = "TRANSCRIPT_SECRET_7f3a9c"
+        event = make_event(
+            event_type=AgentExecutionEventType.TOOL_CALL_COMPLETED,
+            tool_round=1,
+            tool_name="voice_lookup",
+            attempt=3,
+            metadata={
+                "transcript": secret,
+                "derived_summary": f"summary of {secret}",
+            },
+            transient_input=True,
+        )
+
+        repository.record(event)
+
+        record = session.scalar(
+            select(AgentRunEventRecord).where(AgentRunEventRecord.run_id == "run-1")
+        )
+        assert record is not None
+        assert record.event_metadata == {}
+        assert secret not in str(record.event_metadata)
+
+        restored = repository.list("run-1")
+        assert len(restored) == 1
+        assert restored[0].metadata == {}
+        assert secret not in str(restored[0].metadata)
     finally:
         session.close()
         engine.dispose()

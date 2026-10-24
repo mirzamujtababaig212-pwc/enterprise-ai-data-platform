@@ -146,11 +146,13 @@ class ToolExecutionService:
         if self.governance_sink is None:
             return
 
+        transient = execution_context.transient_input if execution_context is not None else False
+
         record = ToolGovernanceDecisionRecord(
             tool_name=tool_name,
             decision=decision,
             tenant_id=(execution_context.tenant_id if execution_context is not None else None),
-            reason=reason,
+            reason=None if transient else reason,
             policy_id=policy_id,
             policy_version=policy_version,
             run_id=(execution_context.run_id if execution_context is not None else None),
@@ -158,7 +160,8 @@ class ToolExecutionService:
             agent_name=(execution_context.agent_name if execution_context is not None else None),
             session_id=(execution_context.session_id if execution_context is not None else None),
             principal=principal,
-            details=details,
+            details=None if transient else details,
+            transient_input=transient,
         )
 
         try:
@@ -202,7 +205,11 @@ class ToolExecutionService:
             return ToolExecutionResult(
                 tool_name=tool_name,
                 success=False,
-                error=f"Tool not found: {tool_name}",
+                error=(
+                    "Voice tool is unavailable."
+                    if (execution_context is not None and execution_context.transient_input)
+                    else f"Tool not found: {tool_name}"
+                ),
                 failure_category=ToolExecutionFailureCategory.TOOL_NOT_FOUND,
             )
 
@@ -210,7 +217,11 @@ class ToolExecutionService:
             return ToolExecutionResult(
                 tool_name=tool_name,
                 success=False,
-                error=f"Tool is disabled: {tool_name}",
+                error=(
+                    "Voice tool is unavailable."
+                    if (execution_context is not None and execution_context.transient_input)
+                    else f"Tool is disabled: {tool_name}"
+                ),
                 failure_category=ToolExecutionFailureCategory.TOOL_DISABLED,
             )
 
@@ -223,7 +234,11 @@ class ToolExecutionService:
             return ToolExecutionResult(
                 tool_name=tool_name,
                 success=False,
-                error=f"Tool arguments failed schema validation: {exc.message}",
+                error=(
+                    "Voice tool arguments failed validation."
+                    if (execution_context is not None and execution_context.transient_input)
+                    else f"Tool arguments failed schema validation: {exc.message}"
+                ),
                 failure_category=ToolExecutionFailureCategory.SCHEMA_VALIDATION,
             )
         except SchemaError as exc:
@@ -553,11 +568,20 @@ class ToolExecutionService:
                     )
 
                     if idempotency_key is not None:
-                        await self.idempotency_store.complete(
-                            idempotency_key,
-                            result,
-                            claim_token=claim_token,
-                        )
+                        if execution_context is not None and execution_context.transient_input:
+                            # Do not persist or replay transcript-derived tool output.
+                            # Retain the claim to prevent automatic duplicate execution.
+                            ownership_outcome_ambiguous = True
+                            await self.idempotency_store.mark_ambiguous(
+                                idempotency_key,
+                                claim_token=claim_token,
+                            )
+                        else:
+                            await self.idempotency_store.complete(
+                                idempotency_key,
+                                result,
+                                claim_token=claim_token,
+                            )
 
                     return result
 
@@ -600,7 +624,11 @@ class ToolExecutionService:
                         tool_name=tool_name,
                         success=False,
                         error=(
-                            f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"
+                            "Voice tool execution timed out."
+                            if (execution_context is not None and execution_context.transient_input)
+                            else (
+                                f"Tool execution timed out after " f"{timeout} seconds: {tool_name}"
+                            )
                         ),
                         failure_category=timeout_failure_category,
                         metadata=self._build_execution_metadata(
@@ -630,7 +658,11 @@ class ToolExecutionService:
                     result = ToolExecutionResult(
                         tool_name=tool_name,
                         success=False,
-                        error=f"{type(exc).__name__}: {exc}",
+                        error=(
+                            "Voice tool execution failed."
+                            if (execution_context is not None and execution_context.transient_input)
+                            else f"{type(exc).__name__}: {exc}"
+                        ),
                         failure_category=ToolExecutionFailureCategory.EXECUTION_ERROR,
                         metadata=self._build_execution_metadata(
                             tool_definition=tool.definition,
@@ -695,17 +727,20 @@ class ToolExecutionService:
         if self.audit_sink is None:
             return
 
+        transient = execution_context.transient_input if execution_context is not None else False
+
         record = ToolAuthorizationAuditRecord(
             principal=principal,
             tool_name=tool_name,
             allowed=allowed,
-            reason=reason,
+            reason=None if transient else reason,
             policy_id=policy_id,
             policy_version=policy_version,
             run_id=execution_context.run_id if execution_context else None,
             call_id=execution_context.call_id if execution_context else None,
             agent_name=execution_context.agent_name if execution_context else None,
             session_id=execution_context.session_id if execution_context else None,
+            transient_input=transient,
         )
 
         try:
@@ -751,6 +786,7 @@ class ToolExecutionService:
                 tenant_id=execution_context.get("tenant_id"),
                 governance_policy=execution_context.get("governance_policy"),
                 request_metadata=execution_context.get("request_metadata", {}),
+                transient_input=execution_context.get("transient_input", False),
                 execution_ownership_lost=execution_context.get("execution_ownership_lost"),
             )
 

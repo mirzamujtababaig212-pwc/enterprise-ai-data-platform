@@ -40,6 +40,7 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderConnectionError,
 )
 from ai_platform.llm_gateway.routing.fallback_executor import FallbackExecutor
+from ai_platform.llm_gateway.models.capabilities import ContextCapabilityEnvelope
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tools" / "mcp" / "fixtures"
 SEARCH_SERVER = FIXTURES_DIR / "test_server.py"
@@ -59,6 +60,14 @@ class FakeAgentExecutionObserver:
 class FakeToolCallingLLMGateway:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
+
+    def get_context_capabilities(
+        self,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> ContextCapabilityEnvelope:
+        return ContextCapabilityEnvelope()
 
     async def route_chat(
         self,

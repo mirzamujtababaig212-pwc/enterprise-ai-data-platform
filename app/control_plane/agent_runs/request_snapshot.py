@@ -24,6 +24,7 @@ class AgentRunRequestSnapshot(BaseModel):
 
     schema_version: int = Field(default=1, ge=1)
     input: str = Field(min_length=1)
+    transient_input: bool = False
     principal: str | None = None
     tenant_id: str | None = None
     memory_namespace: str | None = None
@@ -38,7 +39,8 @@ class AgentRunRequestSnapshot(BaseModel):
         policy = request.governance_policy
 
         return cls(
-            input=request.input,
+            input=("[TRANSIENT INPUT REDACTED]" if request.transient_input else request.input),
+            transient_input=request.transient_input,
             principal=request.principal,
             tenant_id=request.tenant_id,
             memory_namespace=request.memory_namespace,
@@ -58,7 +60,7 @@ class AgentRunRequestSnapshot(BaseModel):
                 if request.effective_governance is not None
                 else None
             ),
-            metadata=dict(request.metadata),
+            metadata=({} if request.transient_input else dict(request.metadata)),
             execution_budget=(
                 {
                     "max_llm_calls": request.execution_budget.max_llm_calls,
@@ -79,6 +81,12 @@ class AgentRunRequestSnapshot(BaseModel):
         user_id: str | None,
         principal: str | None,
     ) -> AgentRequest:
+        if self.transient_input:
+            raise ValueError(
+                "Transient-input requests cannot be recovered because "
+                "their original input was not retained."
+            )
+
         policy = self.governance_policy
 
         governance_policy = (

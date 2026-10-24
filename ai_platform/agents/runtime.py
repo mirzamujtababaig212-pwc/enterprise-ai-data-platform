@@ -427,7 +427,8 @@ class AgentRuntime:
             raise
 
         if (
-            agent.definition.memory_write_enabled
+            not request.transient_input
+            and agent.definition.memory_write_enabled
             and request.memory_namespace is not None
             and self._memory_service is not None
             and isinstance(response.output, str)

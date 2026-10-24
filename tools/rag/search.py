@@ -241,6 +241,7 @@ class RAGSearchTool:
                     run_id=context.run_id if context is not None else None,
                     session_id=context.session_id if context is not None else None,
                     user_id=context.user_id if context is not None else None,
+                    transient_input=(context.transient_input if context is not None else False),
                     metadata=metadata,
                 )
             )

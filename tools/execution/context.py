@@ -30,6 +30,7 @@ class ToolExecutionContext:
     governance_policy: GovernancePolicy | None = None
     request_metadata: dict[str, Any] = field(default_factory=dict)
     execution_ownership_lost: asyncio.Event | None = None
+    transient_input: bool = False
 
     def __post_init__(self) -> None:
         if self.run_id is not None:

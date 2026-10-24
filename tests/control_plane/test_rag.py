@@ -154,7 +154,7 @@ class FakeChatService:
         user_id: str | None = None,
     ):
         return {
-            "reply": "The enterprise platform supports RAG and model routing.",
+            "reply": "The enterprise platform supports RAG and model routing. [Source 1]",
         }
 
 
@@ -564,7 +564,7 @@ def test_control_plane_rag_query_executes() -> None:
 
     payload = response.json()
 
-    assert payload["answer"] == "The enterprise platform supports RAG and model routing."
+    assert payload["answer"] == "The enterprise platform supports RAG and model routing. [Source 1]"
     assert payload["retrieved_count"] == 1
     assert len(payload["sources"]) == 1
 

@@ -343,6 +343,7 @@ class AgentExecutionContext:
                         principal=self.principal,
                         tenant_id=self.tenant_id,
                         request_metadata=self.metadata,
+                        transient_input=self.request.transient_input,
                         execution_ownership_lost=self.execution_ownership_lost,
                     ),
                 }

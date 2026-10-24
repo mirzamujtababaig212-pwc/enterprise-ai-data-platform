@@ -1955,3 +1955,78 @@ def test_recovery_service_rejects_non_positive_max_recovery_attempts():
             checkpoints_repository=FakeCheckpointRepository(checkpoint()),
             max_recovery_attempts=0,
         )
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_transient_input_before_claiming_run():
+    repository = RecordingRepository()
+    transcript = "private voice transcript"
+
+    snapshot = AgentRunRequestSnapshot.from_request(
+        AgentRequest(
+            input=transcript,
+            transient_input=True,
+            session_id="session-123",
+            user_id="user-123",
+        )
+    )
+    repository.create(failed_run(request_snapshot=snapshot))
+
+    runtime = FakeRuntime()
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    with pytest.raises(ValueError, match="Transient-input agent runs cannot be recovered"):
+        await service.recover("run-123")
+
+    assert repository.recovery_claim is None
+    assert runtime.calls == []
+
+    run = repository.get("run-123")
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.lease_id is None
+    assert transcript not in run.request_snapshot.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_transient_run_fails_without_resuming_runtime():
+    repository = RecordingRepository()
+    transcript = "private voice transcript"
+
+    snapshot = AgentRunRequestSnapshot.from_request(
+        AgentRequest(
+            input=transcript,
+            transient_input=True,
+            session_id="session-123",
+            user_id="user-123",
+        )
+    )
+    repository.create(stale_running_run(request_snapshot=snapshot))
+
+    runtime = FakeRuntime()
+    service = AgentRunRecoveryService(
+        runtime=runtime,
+        repository=repository,
+        checkpoints_repository=FakeCheckpointRepository(checkpoint()),
+    )
+
+    results = await service.recover_stale_runs(
+        stale_before=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert results.recovered == ()
+    assert results.failed_run_ids == ("stale-run-123",)
+    assert repository.stale_recovery_claim is not None
+    assert runtime.calls == []
+
+    run = repository.get("stale-run-123")
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
+    assert run.lease_id is None
+    assert run.lease_expires_at is None
+    assert transcript not in run.request_snapshot.model_dump_json()
+    assert transcript not in (run.error_message or "")

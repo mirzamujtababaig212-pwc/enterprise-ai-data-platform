@@ -216,3 +216,53 @@ def test_snapshot_without_effective_governance_remains_backward_compatible() -> 
     )
 
     assert recovered.effective_governance is None
+
+
+def test_transient_input_is_redacted_from_durable_snapshot() -> None:
+    request = AgentRequest(
+        input="sensitive caller transcript",
+        session_id="voice-session",
+        tenant_id="tenant-voice",
+        transient_input=True,
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+    serialized = snapshot.model_dump_json()
+
+    assert snapshot.transient_input is True
+    assert snapshot.input == "[TRANSIENT INPUT REDACTED]"
+    assert "sensitive caller transcript" not in serialized
+
+
+def test_transient_input_snapshot_cannot_be_recovered() -> None:
+    request = AgentRequest(
+        input="sensitive caller transcript",
+        session_id="voice-session",
+        tenant_id="tenant-voice",
+        transient_input=True,
+    )
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="original input was not retained"):
+        snapshot.to_request(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            principal=request.principal,
+        )
+
+
+def test_transient_input_redacts_request_metadata_from_snapshot():
+    request = AgentRequest(
+        input="customer transcript",
+        transient_input=True,
+        metadata={"transcript": "sensitive spoken content"},
+    )
+
+    snapshot = AgentRunRequestSnapshot.from_request(request)
+
+    assert snapshot.input == "[TRANSIENT INPUT REDACTED]"
+    assert snapshot.transient_input is True
+    assert snapshot.metadata == {}
+    assert "sensitive spoken content" not in snapshot.model_dump_json()

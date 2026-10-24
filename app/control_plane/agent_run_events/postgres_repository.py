@@ -27,9 +27,9 @@ class PostgreSQLAgentRunEventsRepository:
         if event.run_id is None:
             return event
 
-        event_metadata = dict(event.metadata)
+        event_metadata = {} if event.transient_input else dict(event.metadata)
 
-        if event.attempt is not None:
+        if event.attempt is not None and not event.transient_input:
             event_metadata["_event_attempt"] = event.attempt
 
         record = AgentRunEventRecord(
