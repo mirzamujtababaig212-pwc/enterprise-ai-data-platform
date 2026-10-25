@@ -4,9 +4,7 @@ import os
 
 import mlflow
 import mlflow.sklearn
-
 from sklearn.linear_model import LogisticRegression
-
 
 TRACKING_URI = os.getenv(
     "MLFLOW_TRACKING_URI",
