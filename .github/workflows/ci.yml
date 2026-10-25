@@ -104,13 +104,10 @@ jobs:
             printf 'Running Ruff on %s changed Python file(s).\n' \
               "${#existing_files[@]}"
             ruff check "${existing_files[@]}"
+            black --check "${existing_files[@]}"
           else
-            echo "No changed Python files to lint; Ruff check skipped."
+            echo "No changed Python files to lint; Ruff and Black checks skipped."
           fi
-
-      - name: Run Black
-        run: |
-          black --check .
 
       - name: Run tests
         run: |
