@@ -109,9 +109,9 @@ jobs:
             echo "No changed Python files to lint; Ruff and Black checks skipped."
           fi
 
-      - name: Run tests
+      - name: Run unit and service-independent tests
         run: |
-          pytest -q
+          pytest -q --ignore=tests/integration
 
   coverage:
     name: Test Coverage
@@ -141,11 +141,12 @@ jobs:
       - name: Install project and development dependencies
         run: |
           python -m pip install -r requirements.txt
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,ragas]"
 
-      - name: Run tests with coverage
+      - name: Run unit and service-independent tests with coverage
         run: |
           pytest \
+            --ignore=tests/integration \
             --cov=ai_platform \
             --cov=common \
             --cov-report=term-missing \
@@ -163,7 +164,7 @@ jobs:
   mlflow-integration:
     name: MLflow and S3 Artifact Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -179,7 +180,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,ragas]"
 
       - name: Create isolated Docker network
         run: docker network create ci-mlflow-net
@@ -287,7 +288,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: minio123
           AWS_DEFAULT_REGION: us-east-1
         run: |
-          python -m pytest -q tests/integration/test_mlflow.py
+          python -m pytest -q tests/integration
 
       - name: Collect service logs on failure
         if: failure()

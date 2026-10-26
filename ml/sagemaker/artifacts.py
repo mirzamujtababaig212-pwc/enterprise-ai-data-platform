@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import mlflow
-import skops.io as sio
 from mlflow import MlflowClient
 
 from common.storage.s3_storage import S3Storage
+from ml.sagemaker.skops_security import get_approved_untrusted_types
 
 MODEL_FILENAME = "model.skops"
 REQUIRED_ARTIFACTS = (
@@ -94,12 +94,10 @@ def validate_model_artifact(artifact_dir: str | Path) -> None:
         raise FileNotFoundError("Model artifact is missing required files: " + ", ".join(missing))
 
     model_path = artifact_dir / MODEL_FILENAME
-    untrusted_types = sio.get_untrusted_types(file=str(model_path))
-
-    if untrusted_types:
-        raise ValueError(
-            "Model artifact contains untrusted SKOPS types: " + ", ".join(untrusted_types)
-        )
+    get_approved_untrusted_types(
+        model_path,
+        context="Model artifact contains untrusted SKOPS types",
+    )
 
 
 def package_model_artifact(

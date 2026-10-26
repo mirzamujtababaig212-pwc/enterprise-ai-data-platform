@@ -92,6 +92,6 @@ jobs:
         run: |
           flake8
 
-      - name: Run Tests
+      - name: Run service-independent tests
         run: |
-          pytest --cov
+          pytest --cov --ignore=tests/integration

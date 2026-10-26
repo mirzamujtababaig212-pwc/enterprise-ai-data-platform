@@ -13,6 +13,7 @@ from ml.contracts.vehicle_risk import (
     VEHICLE_RISK_FEATURE_CONTRACT,
     VEHICLE_RISK_MODEL_NAME,
 )
+from ml.sagemaker.skops_security import get_approved_untrusted_types
 
 MODEL_FILENAME = "model.skops"
 DEFAULT_MODEL_ALIAS = "champion"
@@ -26,16 +27,14 @@ def model_fn(model_dir: str | Path) -> Any:
     if not model_path.is_file():
         raise FileNotFoundError(f"Vehicle Risk model artifact not found: {model_path}")
 
-    untrusted_types = sio.get_untrusted_types(file=str(model_path))
-
-    if untrusted_types:
-        raise ValueError(
-            "Vehicle Risk model artifact contains untrusted types: " + ", ".join(untrusted_types)
-        )
+    approved_types = get_approved_untrusted_types(
+        model_path,
+        context="Vehicle Risk model artifact contains untrusted types",
+    )
 
     return sio.load(
         str(model_path),
-        trusted=[],
+        trusted=approved_types,
     )
 
 
