@@ -45,7 +45,8 @@ jobs:
 
       - name: Install project and development dependencies
         run: |
-          python -m pip install -e ".[dev]"
+          python -m pip install -r requirements.txt
+          python -m pip install -e ".[dev,ragas]"
 
       - name: Verify tool versions
         run: |
@@ -103,17 +104,14 @@ jobs:
             printf 'Running Ruff on %s changed Python file(s).\n' \
               "${#existing_files[@]}"
             ruff check "${existing_files[@]}"
+            black --check "${existing_files[@]}"
           else
-            echo "No changed Python files to lint; Ruff check skipped."
+            echo "No changed Python files to lint; Ruff and Black checks skipped."
           fi
 
-      - name: Run Black
+      - name: Run unit and service-independent tests
         run: |
-          black --check .
-
-      - name: Run tests
-        run: |
-          pytest -q
+          pytest -q --ignore=tests/integration
 
   coverage:
     name: Test Coverage
@@ -142,11 +140,13 @@ jobs:
 
       - name: Install project and development dependencies
         run: |
-          python -m pip install -e ".[dev]"
+          python -m pip install -r requirements.txt
+          python -m pip install -e ".[dev,ragas]"
 
-      - name: Run tests with coverage
+      - name: Run unit and service-independent tests with coverage
         run: |
           pytest \
+            --ignore=tests/integration \
             --cov=ai_platform \
             --cov=common \
             --cov-report=term-missing \
@@ -161,6 +161,160 @@ jobs:
             coverage.xml
             htmlcov/
 
+  mlflow-integration:
+    name: MLflow and S3 Artifact Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install project and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -e ".[dev,ragas]"
+
+      - name: Create isolated Docker network
+        run: docker network create ci-mlflow-net
+
+      - name: Start MinIO
+        run: |
+          docker run -d \
+            --name ci-minio \
+            --network ci-mlflow-net \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio \
+            -e MINIO_ROOT_PASSWORD=minio123 \
+            docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z \
+            server /data
+
+      - name: Wait for MinIO and create artifact bucket
+        run: |
+          set -euo pipefail
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent \
+              http://localhost:9000/minio/health/live >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            docker logs ci-minio
+            echo "MinIO did not become healthy."
+            exit 1
+          fi
+
+          python - <<'PYBUCKET'
+          import boto3
+
+          client = boto3.client(
+              "s3",
+              endpoint_url="http://localhost:9000",
+              aws_access_key_id="minio",
+              aws_secret_access_key="minio123",
+              region_name="us-east-1",
+          )
+          client.create_bucket(Bucket="mlflow-artifacts")
+          client.head_bucket(Bucket="mlflow-artifacts")
+          print("MLflow artifact bucket is ready.")
+          PYBUCKET
+
+      - name: Build MLflow image
+        run: |
+          docker build \
+            -f docker/Dockerfile.mlflow \
+            -t enterprise-ai-platform-mlflow:ci \
+            .
+
+      - name: Start MLflow
+        run: |
+          docker volume create ci-mlflow-data
+
+          docker run -d \
+            --name ci-mlflow \
+            --network ci-mlflow-net \
+            -p 5051:5000 \
+            -v ci-mlflow-data:/mlflow \
+            -e MLFLOW_S3_ENDPOINT_URL=http://ci-minio:9000 \
+            -e AWS_ACCESS_KEY_ID=minio \
+            -e AWS_SECRET_ACCESS_KEY=minio123 \
+            -e AWS_DEFAULT_REGION=us-east-1 \
+            enterprise-ai-platform-mlflow:ci \
+            mlflow server \
+              --host 0.0.0.0 \
+              --port 5000 \
+              --backend-store-uri sqlite:///mlflow/mlflow.db \
+              --default-artifact-root s3://mlflow-artifacts/ \
+              --allowed-hosts "*"
+
+      - name: Wait for MLflow
+        run: |
+          set -euo pipefail
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent \
+              http://localhost:5051/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            docker logs ci-mlflow
+            echo "MLflow did not become healthy."
+            exit 1
+          fi
+
+      - name: Bootstrap validated MLflow registry models
+        env:
+          MLFLOW_TRACKING_URI: http://localhost:5051
+          MLFLOW_REGISTRY_URI: http://localhost:5051
+          MLFLOW_S3_ENDPOINT_URL: http://localhost:9000
+          AWS_ACCESS_KEY_ID: minio
+          AWS_SECRET_ACCESS_KEY: minio123
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python -m ml.scripts.bootstrap_ci_model_registry
+
+      - name: Run MLflow, S3, and integration tests
+        env:
+          RUN_MLFLOW_INTEGRATION: "1"
+          MLFLOW_TRACKING_URI: http://localhost:5051
+          MLFLOW_REGISTRY_URI: http://localhost:5051
+          MLFLOW_S3_ENDPOINT_URL: http://localhost:9000
+          AWS_ACCESS_KEY_ID: minio
+          AWS_SECRET_ACCESS_KEY: minio123
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python -m pytest -q tests/integration
+
+      - name: Collect service logs on failure
+        if: failure()
+        run: |
+          docker logs ci-minio || true
+          docker logs ci-mlflow || true
+
+      - name: Clean up integration services
+        if: always()
+        run: |
+          docker rm -f ci-mlflow ci-minio || true
+          docker volume rm ci-mlflow-data || true
+          docker network rm ci-mlflow-net || true
+
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-latest
@@ -169,6 +323,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -184,9 +340,32 @@ jobs:
         run: |
           python -m pip install -e ".[dev]"
 
-      - name: Run MyPy
+      - name: Check MyPy regressions against base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          mypy ai_platform
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            BASE_SHA="$PR_BASE_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+          fi
+
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            if git rev-parse "${HEAD_SHA}^" >/dev/null 2>&1; then
+              BASE_SHA="$(git rev-parse "${HEAD_SHA}^")"
+            else
+              echo "No parent commit found; running the full MyPy check."
+              mypy --no-incremental ai_platform
+              exit 0
+            fi
+          fi
+
+          python scripts/check_mypy_regressions.py "$BASE_SHA"
 
   docker:
     name: Docker Build
@@ -232,6 +411,7 @@ jobs:
       - name: Install project and development dependencies
         run: |
           python -m pip install -e ".[dev]"
+          python -m pip install "anthropic==1.4.0"
 
       - name: Run RAG release evaluation
         run: |

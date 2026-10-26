@@ -39,6 +39,8 @@ dependencies = [
     "httpx>=0.28",
     "redis>=6.4",
     "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9.12,<3",
+    "pgvector>=0.3.6,<1.0",
     "alembic>=1.16",
     "mcp>=1.27,<2",
     "prometheus-client>=0.23,<0.24",
@@ -50,6 +52,7 @@ dependencies = [
     "qdrant-client==1.16.2",
     "faiss-cpu==1.15.0",
     "openai>=2.53,<3",
+    "google-genai>=2.22.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -58,8 +61,11 @@ dev = [
     "pytest>=8.4",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=7.0",
+    "pytest-mock>=3.14,<4",
+    "twilio>=9,<10",
+    "moto[s3]>=5,<6",
     "ruff>=0.12",
-    "black>=25.1",
+    "black==26.5.1",
     "isort>=6.0",
     "mypy>=1.17",
     "bandit>=1.8",
@@ -73,7 +79,7 @@ ragas = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["ai_platform*", "common*", "rag*", "app*", "spark*"]
+include = ["ai_platform*", "common*", "rag*", "app*", "spark*", "tools*"]
 
 [tool.ruff]
 line-length = 100

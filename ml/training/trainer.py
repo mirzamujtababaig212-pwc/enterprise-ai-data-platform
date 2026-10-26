@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import mlflow
 import mlflow.sklearn
@@ -9,7 +10,6 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
 from ai_platform.mlflow.client import MLflowManager
-
 from ml.platform import TrainingService
 
 from .schemas import TrainingConfig, TrainingResult
@@ -121,6 +121,7 @@ class ModelTrainer(
             mlflow.sklearn.log_model(
                 model,
                 name="model",
+                skops_trusted_types=["sklearn.tree._tree.Tree"],
             )
 
             run_id = run.info.run_id

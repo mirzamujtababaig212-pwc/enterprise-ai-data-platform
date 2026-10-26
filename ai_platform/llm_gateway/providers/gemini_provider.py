@@ -19,8 +19,8 @@ from ai_platform.llm_gateway.exceptions.provider_exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
-from ai_platform.llm_gateway.providers.base_provider import BaseProvider
 from ai_platform.llm_gateway.models.capabilities import ModelCapabilities
+from ai_platform.llm_gateway.providers.base_provider import BaseProvider
 
 logger = logging.getLogger(__name__)
 
