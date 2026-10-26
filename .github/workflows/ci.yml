@@ -279,10 +279,22 @@ jobs:
             exit 1
           fi
 
-      - name: Run live MLflow and S3 lifecycle test
+      - name: Bootstrap validated MLflow registry models
+        env:
+          MLFLOW_TRACKING_URI: http://localhost:5051
+          MLFLOW_REGISTRY_URI: http://localhost:5051
+          MLFLOW_S3_ENDPOINT_URL: http://localhost:9000
+          AWS_ACCESS_KEY_ID: minio
+          AWS_SECRET_ACCESS_KEY: minio123
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python -m ml.scripts.bootstrap_ci_model_registry
+
+      - name: Run MLflow, S3, and integration tests
         env:
           RUN_MLFLOW_INTEGRATION: "1"
           MLFLOW_TRACKING_URI: http://localhost:5051
+          MLFLOW_REGISTRY_URI: http://localhost:5051
           MLFLOW_S3_ENDPOINT_URL: http://localhost:9000
           AWS_ACCESS_KEY_ID: minio
           AWS_SECRET_ACCESS_KEY: minio123
@@ -374,6 +386,7 @@ jobs:
       - name: Install project and development dependencies
         run: |
           python -m pip install -e ".[dev]"
+          python -m pip install "anthropic==1.4.0"
 
       - name: Run RAG release evaluation
         run: |

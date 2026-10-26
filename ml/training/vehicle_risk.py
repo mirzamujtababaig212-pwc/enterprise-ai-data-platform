@@ -10,10 +10,10 @@ from sklearn.model_selection import train_test_split
 
 from ai_platform.mlflow.client import MLflowManager
 from ml.evaluation import (
-    EvaluationQualityGate,
-    ModelEvaluator,
     VEHICLE_RISK_POLICY,
     EvaluationLineage,
+    EvaluationQualityGate,
+    ModelEvaluator,
     persist_evaluation_lineage,
     persist_quality_gate,
 )
@@ -27,6 +27,7 @@ from ml.models.vehicle_risk import (
 from ml.models.vehicle_risk_features import (
     VEHICLE_RISK_FEATURE_CONTRACT,
 )
+from ml.platform import ModelMetadata, TrainingService
 
 from .reference_distribution import (
     REFERENCE_DISTRIBUTION_ARTIFACT_PATH,
@@ -36,7 +37,6 @@ from .schemas import (
     TrainingConfig,
     TrainingResult,
 )
-from ml.platform import ModelMetadata, TrainingService
 
 
 class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
@@ -218,6 +218,7 @@ class VehicleRiskTrainer(TrainingService[pd.DataFrame, TrainingResult]):
             mlflow.sklearn.log_model(
                 model,
                 name="model",
+                skops_trusted_types=["sklearn.tree._tree.Tree"],
             )
 
             run_id = run.info.run_id
