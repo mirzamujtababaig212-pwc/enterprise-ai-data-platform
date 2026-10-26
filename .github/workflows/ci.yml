@@ -323,6 +323,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -338,9 +340,32 @@ jobs:
         run: |
           python -m pip install -e ".[dev]"
 
-      - name: Run MyPy
+      - name: Check MyPy regressions against base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          mypy ai_platform
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            BASE_SHA="$PR_BASE_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+          fi
+
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            if git rev-parse "${HEAD_SHA}^" >/dev/null 2>&1; then
+              BASE_SHA="$(git rev-parse "${HEAD_SHA}^")"
+            else
+              echo "No parent commit found; running the full MyPy check."
+              mypy --no-incremental ai_platform
+              exit 0
+            fi
+          fi
+
+          python scripts/check_mypy_regressions.py "$BASE_SHA"
 
   docker:
     name: Docker Build
